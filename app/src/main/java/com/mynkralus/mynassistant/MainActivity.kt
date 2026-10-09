@@ -133,7 +133,7 @@ private fun AssistantScreen(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, contentDescription = "Menüyü aç", modifier = Modifier.size(30.dp)) }
                     Spacer(Modifier.weight(1f))
-                    Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "TV kumandası", modifier = Modifier.size(32.dp)) }
+                    Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "PC kumandası", modifier = Modifier.size(32.dp)) }
                     Spacer(Modifier.width(10.dp))
                     Button(onClick = toggleTheme, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(18.dp)); Text(if (dark) "Açık" else "Koyu", fontSize = 14.sp) }
@@ -167,7 +167,7 @@ private fun AssistantScreen(
                         Page.REGISTER -> "Kayıt ol"
                         Page.DEVICES -> "Cihazlarım"
                         Page.SETTINGS -> "Ayarlar"
-                        Page.REMOTE -> "TV kumandası"
+                        Page.REMOTE -> "PC Kumandası"
                         else -> "Ana sayfa"
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
@@ -329,58 +329,33 @@ private fun TvRemotePanel(onHome: () -> Unit, modifier: Modifier = Modifier) {
     val buttons = listOf(
         Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
-        Triple("...", Icons.Default.MoreHoriz, "more"),
         Triple("Sesi artır", Icons.Default.VolumeUp, "up"),
         Triple("Sesi kıs", Icons.Default.VolumeDown, "down"),
-        Triple("...", Icons.Default.MoreHoriz, "more2")
+        Triple("Ana ekran", Icons.Default.Home, "home"),
+        Triple("Diğer", Icons.Default.MoreHoriz, "more")
     )
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("TV KUMANDASI", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        // Dikey telefon ekranında kumanda tuşları iki satırda kalır; touchpad alt bölümde ayrıdır.
-        Column(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(26.dp)).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            buttons.chunked(3).forEach { row ->
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("PC KUMANDASI", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(26.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            buttons.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { item ->
-                        Column(
-                            Modifier.weight(1f).height(82.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(18.dp))
-                                .clickable { }.padding(5.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
+                        Column(Modifier.weight(1f).height(82.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(18.dp)).clickable { if (item.third == "home") onHome() }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             Icon(item.second, contentDescription = item.first, modifier = Modifier.size(27.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.height(5.dp))
-                            Text(item.first, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1)
+                            Text(item.first, fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 1)
                         }
                     }
                 }
             }
         }
-        // TV'nin ana ekran düğmesi, touchpad alanının hemen üstünde sol altta.
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-            FilledTonalIconButton(onClick = onHome, modifier = Modifier.size(54.dp), shape = RoundedCornerShape(15.dp)) {
-                Icon(Icons.Default.Home, contentDescription = "TV ana ekranı", modifier = Modifier.size(27.dp))
-            }
-        }
-        // Büyük dokunmatik alan: sonraki aşamada mouse/TV pointer hareketine bağlanacak.
-        Column(
-            Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 230.dp)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
-                .clickable { }.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
+        Column(Modifier.fillMaxWidth().height(250.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).clickable { }.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            Text("Bilgisayar touchpad'i gibi kullanmak için alan", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center)
+            Text("Bilgisayar faresini kontrol etmek için", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center)
             Spacer(Modifier.height(6.dp))
-            Text("Kaydırma ve tıklama desteği sonraki aşamada eklenecek.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center)
+            Text("Fare hareketleri, tıklama ve kaydırma bağlantı aşamasında etkinleştirilecek.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center)
         }
     }
 }
