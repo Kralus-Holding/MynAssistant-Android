@@ -84,6 +84,8 @@ class MainActivity : ComponentActivity() {
             var name by remember { mutableStateOf(prefs.getString("name", "") ?: "") }
             var passwordSaved by remember { mutableStateOf(prefs.getString("demo_password", "") ?: "") }
             var signedIn by remember { mutableStateOf(prefs.getBoolean("signed_in", false)) }
+            var googleStatus by remember { mutableStateOf<String?>(null) }
+            var accountMenuExpanded by remember { mutableStateOf(false) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) { activityResult ->
@@ -98,13 +100,16 @@ class MainActivity : ComponentActivity() {
                             email = accountEmail
                             phone = ""
                             signedIn = true
+                            googleStatus = "Google hesabıyla giriş yapıldı."
                             prefs.edit().putString("name", name).putString("email", email)
                                 .putString("phone", "").putBoolean("signed_in", true)
                                 .putString("auth_provider", "google").apply()
                         }
-                    } catch (_: ApiException) {
-                        prefs.edit().putString("google_sign_in_error", "Google giriş başarısız. Tekrar deneyin.").apply()
+                    } catch (error: ApiException) {
+                        googleStatus = "Google giriş başarısız (kod ${error.statusCode}). OAuth paket adı ve SHA-1 değerini kontrol et."
                     }
+                } else {
+                    googleStatus = "Google girişi tamamlanmadı (sonuç ${activityResult.resultCode}). Tekrar dene."
                 }
             }
             val startGoogleSignIn = { googleLauncher.launch(googleSignInClient.signInIntent) }
@@ -146,7 +151,10 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     logout = { signedIn = false; prefs.edit().putBoolean("signed_in", false).remove("auth_provider").apply(); googleSignInClient.signOut() },
-                    googleLogin = startGoogleSignIn
+                    googleLogin = startGoogleSignIn,
+                    googleStatus = googleStatus,
+                    accountMenuExpanded = accountMenuExpanded,
+                    toggleAccountMenu = { accountMenuExpanded = !accountMenuExpanded }
                 )
             }
         }
@@ -158,7 +166,8 @@ private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
     email: String, phone: String, login: (String, String) -> String,
     register: (String, String, String) -> String, logout: () -> Unit,
-    googleLogin: () -> Unit
+    googleLogin: () -> Unit,
+    googleStatus: String?, accountMenuExpanded: Boolean, toggleAccountMenu: () -> Unit
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
     var drawer by remember { mutableStateOf(false) }
@@ -167,7 +176,7 @@ private fun AssistantScreen(
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
-                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(start = 22.dp, top = 48.dp, end = 22.dp, bottom = 24.dp),
+                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(start = 22.dp, top = 12.dp, end = 22.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -297,11 +306,42 @@ private fun AssistantScreen(
                             .verticalScroll(rememberScrollState()).padding(18.dp),
                         verticalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            MynLogo()
-                            Column(Modifier.weight(1f)) {
-                                Text(if (signedIn) name.ifBlank { "MynAssistant hesabı" } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                Text(if (signedIn) email.ifBlank { phone } else "Kişisel asistanın", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                        Column {
+                            Row(
+                                Modifier.fillMaxWidth().clickable(onClick = toggleAccountMenu).padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                MynLogo()
+                                Column(Modifier.weight(1f)) {
+                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Text(if (signedIn) email.ifBlank { phone } else "Google hesabını bağla", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
+                                }
+                                Text(if (accountMenuExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
+                            }
+                            androidx.compose.animation.AnimatedVisibility(visible = accountMenuExpanded) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 8.dp)
+                                        .background(MaterialTheme.colorScheme.background, RoundedCornerShape(14.dp)).padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    if (signedIn) {
+                                        Text("Google hesabı", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+                                        Text(email.ifBlank { phone.ifBlank { name } }, fontSize = 14.sp)
+                                        Text("Başka bir hesap kullanmak için aşağıdan hesap seç.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                        OutlinedButton(
+                                            onClick = { toggleAccountMenu(); googleLogin() },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Hesabı değiştir") }
+                                    } else {
+                                        Text("Google hesabınla giriş yaparak cihazlarını bu hesaba bağlayabilirsin.", fontSize = 12.sp)
+                                        Button(
+                                            onClick = { toggleAccountMenu(); googleLogin() },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Google ile devam et") }
+                                    }
+                                    googleStatus?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary) }
+                                }
                             }
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -310,7 +350,7 @@ private fun AssistantScreen(
                         if (!signedIn) DrawerItem("Kayıt ol") { page = Page.REGISTER; drawer = false }
                         DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
                         DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
-                        DrawerItem("TV kumandası") { page = Page.REMOTE; drawer = false }
+                        DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
                         Text("MynAssistant • Android 0.2.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
@@ -330,6 +370,7 @@ private fun DrawerItem(label: String, action: () -> Unit) {
         "Kayıt ol" -> Icons.Default.PersonAdd
         "Cihazlarım" -> Icons.Default.Devices
         "Ayarlar" -> Icons.Default.Settings
+        "PC Kumandası" -> Icons.Default.Computer
         else -> Icons.Default.Tv
     }
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
