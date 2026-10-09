@@ -6,14 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthException
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.UserProfileChangeRequest
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
+import java.security.MessageDigest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -59,53 +52,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 
+private fun hashPassword(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
 private const val PREFS = "mynassistant_prefs"
-
-private fun firebaseAuthErrorMessage(error: Exception?): String {
-    val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
-    return when {
-        code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı dene."
-        code.contains("INVALID_EMAIL") -> "E-posta adresi geçerli değil."
-        code.contains("WEAK_PASSWORD") -> "Şifre çok zayıf. Daha güçlü bir şifre kullan."
-        code.contains("USER_NOT_FOUND") || code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
-            "E-posta veya şifre hatalı."
-        code.contains("OPERATION_NOT_ALLOWED") -> "Bu giriş yöntemi Firebase Console'da etkin değil."
-        code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
-        code.contains("NETWORK_REQUEST_FAILED") -> "Bağlantı hatası. İnternetini kontrol edip tekrar dene."
-        code.contains("ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL") ->
-            "Bu e-posta başka bir giriş yöntemiyle kayıtlı. Önce o yöntemle giriş yap."
-        else -> "Firebase işlemi başarısız${if (code.isNotBlank()) " ($code)" else ""}: ${error?.localizedMessage ?: "bilinmeyen hata"}"
-    }
-}
-
-private fun saveFirebaseProfile(
-    user: FirebaseUser,
-    provider: String,
-    isNewUser: Boolean,
-    displayNameOverride: String? = null,
-    onComplete: (String?) -> Unit
-) {
-    val profile = hashMapOf<String, Any>(
-        "uid" to user.uid,
-        "displayName" to (displayNameOverride?.takeIf { it.isNotBlank() } ?: user.displayName.orEmpty()),
-        "email" to user.email.orEmpty(),
-        "phoneNumber" to user.phoneNumber.orEmpty(),
-        "provider" to provider,
-        "lastSignInAt" to FieldValue.serverTimestamp()
-    )
-    if (isNewUser) profile["createdAt"] = FieldValue.serverTimestamp()
-
-    FirebaseFirestore.getInstance()
-        .collection("users")
-        .document(user.uid)
-        .set(profile, SetOptions.merge())
-        .addOnSuccessListener { onComplete(null) }
-        .addOnFailureListener { error ->
-            onComplete(error.localizedMessage ?: "Firestore'a yazılamadı.")
-        }
-}
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE }
 
@@ -122,65 +73,43 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        // Remove old local-only demo credential flags; Firebase owns the real session.
-        prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider").apply()
-        val auth = FirebaseAuth.getInstance()
         setContent {
-            val currentUser = auth.currentUser
             var dark by remember { mutableStateOf(prefs.getBoolean("dark", true)) }
-            var email by remember { mutableStateOf(currentUser?.email.orEmpty()) }
-            var phone by remember { mutableStateOf(currentUser?.phoneNumber.orEmpty()) }
-            var name by remember {
-                mutableStateOf(currentUser?.displayName?.takeIf { it.isNotBlank() }
-                    ?: currentUser?.email?.substringBefore("@").orEmpty())
-            }
-            var signedIn by remember { mutableStateOf(currentUser != null) }
+            var email by remember { mutableStateOf(prefs.getString("email", "") ?: "") }
+            var phone by remember { mutableStateOf(prefs.getString("phone", "") ?: "") }
+            var name by remember { mutableStateOf(prefs.getString("name", "") ?: "") }
+            var passwordSaved by remember { mutableStateOf(prefs.getString("demo_password", "") ?: "") }
+            var signedIn by remember { mutableStateOf(prefs.getBoolean("signed_in", false)) }
             var googleStatus by remember { mutableStateOf<String?>(null) }
             var accountMenuExpanded by remember { mutableStateOf(false) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) { activityResult ->
+                // Read the Google task result even when Android reports RESULT_CANCELED.
+                // This exposes the actual Google status code instead of hiding it behind a generic message.
                 try {
                     val account = GoogleSignIn.getSignedInAccountFromIntent(activityResult.data)
                         .getResult(ApiException::class.java)
-                    val idToken = account.idToken
-                    if (idToken.isNullOrBlank()) {
-                        googleStatus = "Google kimlik anahtarı alınamadı. OAuth yapılandırmasını ve SHA-1 değerini kontrol et."
+                    val accountEmail = account.email.orEmpty()
+                    if (accountEmail.isBlank()) {
+                        googleStatus = "Google hesabından e-posta alınamadı. Google hesabı izinlerini kontrol et."
                     } else {
-                        val credential = GoogleAuthProvider.getCredential(idToken, null)
-                        auth.signInWithCredential(credential).addOnCompleteListener { task ->
-                            if (!task.isSuccessful) {
-                                googleStatus = firebaseAuthErrorMessage(task.exception)
-                            } else {
-                                val user = task.result?.user ?: auth.currentUser
-                                if (user == null) {
-                                    googleStatus = "Google girişi tamamlandı ancak Firebase kullanıcı bilgisi alınamadı."
-                                } else {
-                                    name = user.displayName?.takeIf { it.isNotBlank() }
-                                        ?: user.email?.substringBefore("@").orEmpty()
-                                    email = user.email.orEmpty()
-                                    phone = user.phoneNumber.orEmpty()
-                                    signedIn = true
-                                    saveFirebaseProfile(
-                                        user = user,
-                                        provider = "google.com",
-                                        isNewUser = task.result?.additionalUserInfo?.isNewUser == true
-                                    ) { firestoreError ->
-                                        googleStatus = if (firestoreError == null) {
-                                            "Google ile Firebase girişi başarılı."
-                                        } else {
-                                            "Giriş başarılı; profil Firestore'a kaydedilemedi. Firestore veritabanını ve güvenlik kurallarını kontrol et. ($firestoreError)"
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        val accountName = account.displayName?.takeIf { it.isNotBlank() }
+                            ?: accountEmail.substringBefore("@")
+                        name = accountName
+                        email = accountEmail
+                        phone = ""
+                        signedIn = true
+                        googleStatus = "Google hesabıyla giriş yapıldı."
+                        prefs.edit().putString("name", name).putString("email", email)
+                            .putString("phone", "").putBoolean("signed_in", true)
+                            .putString("auth_provider", "google").apply()
                     }
                 } catch (error: ApiException) {
                     googleStatus = when (error.statusCode) {
-                        10 -> "Google OAuth yapılandırma hatası (10). Android OAuth istemcisindeki paket adı ve SHA-1 eşleşmesini kontrol et."
-                        12501 -> "Google hesabı seçilmedi veya giriş iptal edildi (12501)."
-                        else -> "Google giriş başarısız (kod ${error.statusCode}). OAuth ve test kullanıcısı ayarlarını kontrol et."
+                        10 -> "Google OAuth yapılandırma hatası (10). Android istemcisinin paket adı ve imza SHA-1 değeri eşleşmiyor olabilir."
+                        12501 -> "Google hesabı seçilmedi veya giriş iptal edildi (12501). Hesap seçtikten sonra da oluyorsa OAuth paket adı ve SHA-1 değerini kontrol et."
+                        else -> "Google giriş başarısız (kod ${error.statusCode}). Android OAuth paket adı/SHA-1 ve Google test kullanıcısı ayarını kontrol et."
                     }
                 } catch (error: Exception) {
                     googleStatus = "Google giriş sonucu okunamadı (${error.javaClass.simpleName}). Tekrar dene."
@@ -201,112 +130,30 @@ class MainActivity : ComponentActivity() {
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone,
-                    login = { identity, password, report ->
-                        val cleanEmail = identity.trim()
-                        if (!cleanEmail.contains("@")) {
-                            val message = "Firebase hesabıyla giriş için e-posta adresini gir."
-                            googleStatus = message
-                            report(message)
+                    login = { identity, password ->
+                        if ((identity.equals(email, true) && email.isNotBlank() || identity == phone && phone.isNotBlank()) &&
+                            hashPassword(password) == passwordSaved && name.isNotBlank()) {
+                            signedIn = true
+                            prefs.edit().putBoolean("signed_in", true).apply()
+                            "Giriş yapıldı."
+                        } else "Demo hesap bulunamadı veya bilgiler yanlış. Önce bu cihazda kayıt ol."
+                    },
+                    register = { newName, identity, password ->
+                        if (newName.isBlank() || identity.isBlank() || password.length < 6) {
+                            "Ad ve e-posta/telefon gerekli; şifre en az 6 karakter olmalı."
                         } else {
-                            auth.signInWithEmailAndPassword(cleanEmail, password)
-                                .addOnCompleteListener { task ->
-                                    if (!task.isSuccessful) {
-                                        val message = firebaseAuthErrorMessage(task.exception)
-                                        googleStatus = message
-                                        report(message)
-                                    } else {
-                                        val user = task.result?.user ?: auth.currentUser
-                                        if (user == null) {
-                                            val message = "Giriş tamamlandı ancak kullanıcı bilgisi alınamadı."
-                                            googleStatus = message
-                                            report(message)
-                                        } else {
-                                            name = user.displayName?.takeIf { it.isNotBlank() }
-                                                ?: user.email?.substringBefore("@").orEmpty()
-                                            email = user.email.orEmpty()
-                                            phone = user.phoneNumber.orEmpty()
-                                            signedIn = true
-                                            saveFirebaseProfile(user, "password", false) { firestoreError ->
-                                                val message = if (firestoreError == null) {
-                                                    "Firebase hesabıyla giriş başarılı."
-                                                } else {
-                                                    "Giriş başarılı; profil Firestore'a kaydedilemedi. Firestore veritabanı ve güvenlik kurallarını kontrol et. ($firestoreError)"
-                                                }
-                                                googleStatus = message
-                                                report(message)
-                                            }
-                                        }
-                                    }
-                                }
+                            name = newName.trim()
+                            email = if (identity.contains("@")) identity.trim() else ""
+                            phone = if (identity.contains("@")) "" else identity.trim()
+                            passwordSaved = hashPassword(password)
+                            signedIn = true
+                            prefs.edit().putString("name", name).putString("email", email)
+                                .putString("phone", phone).putString("demo_password", passwordSaved)
+                                .putBoolean("signed_in", true).apply()
+                            "Demo hesap oluşturuldu. Oturum bu cihazda hatırlanacak."
                         }
                     },
-                    register = { newName, identity, password, report ->
-                        val cleanName = newName.trim()
-                        val cleanEmail = identity.trim()
-                        if (cleanName.isBlank() || !cleanEmail.contains("@") || password.length < 6) {
-                            val message = "Ad soyad, geçerli e-posta adresi ve en az 6 karakterli şifre gerekli."
-                            googleStatus = message
-                            report(message)
-                        } else {
-                            auth.createUserWithEmailAndPassword(cleanEmail, password)
-                                .addOnCompleteListener { task ->
-                                    if (!task.isSuccessful) {
-                                        val message = firebaseAuthErrorMessage(task.exception)
-                                        googleStatus = message
-                                        report(message)
-                                    } else {
-                                        val user = task.result?.user
-                                        if (user == null) {
-                                            val message = "Hesap oluşturuldu ancak Firebase kullanıcı bilgisi alınamadı."
-                                            googleStatus = message
-                                            report(message)
-                                        } else {
-                                            val profileRequest = UserProfileChangeRequest.Builder()
-                                                .setDisplayName(cleanName)
-                                                .build()
-                                            user.updateProfile(profileRequest).addOnCompleteListener {
-                                                val activeUser = auth.currentUser ?: user
-                                                name = cleanName
-                                                email = activeUser.email.orEmpty()
-                                                phone = activeUser.phoneNumber.orEmpty()
-                                                signedIn = true
-                                                activeUser.sendEmailVerification().addOnCompleteListener { verifyTask ->
-                                                    saveFirebaseProfile(
-                                                        user = activeUser,
-                                                        provider = "password",
-                                                        isNewUser = true,
-                                                        displayNameOverride = cleanName
-                                                    ) { firestoreError ->
-                                                        val verificationMessage = if (verifyTask.isSuccessful) {
-                                                            " E-posta doğrulama bağlantısı gönderildi."
-                                                        } else {
-                                                            " Hesap oluşturuldu ancak doğrulama e-postası gönderilemedi."
-                                                        }
-                                                        val profileMessage = if (firestoreError == null) {
-                                                            ""
-                                                        } else {
-                                                            " Profil Firestore'a kaydedilemedi; veritabanını ve güvenlik kurallarını kontrol et. ($firestoreError)"
-                                                        }
-                                                        val message = "Firebase hesabın oluşturuldu." + verificationMessage + profileMessage
-                                                        googleStatus = message
-                                                        report(message)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                        }
-                    },
-                    logout = {
-                        auth.signOut()
-                        googleSignInClient.signOut()
-                        signedIn = false
-                        name = ""
-                        email = ""
-                        phone = ""
-                        googleStatus = "Oturum kapatıldı."
-                    },
+                    logout = { signedIn = false; prefs.edit().putBoolean("signed_in", false).remove("auth_provider").apply(); googleSignInClient.signOut() },
                     googleLogin = startGoogleSignIn,
                     googleStatus = googleStatus,
                     accountMenuExpanded = accountMenuExpanded,
@@ -320,8 +167,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, login: (String, String, (String) -> Unit) -> Unit,
-    register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
+    email: String, phone: String, login: (String, String) -> String,
+    register: (String, String, String) -> String, logout: () -> Unit,
     googleLogin: () -> Unit,
     googleStatus: String?, accountMenuExpanded: Boolean, toggleAccountMenu: () -> Unit
 ) {
@@ -381,15 +228,9 @@ private fun AssistantScreen(
                             Text("Ad: " + name)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
                         } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.REGISTER })
-                        Page.REGISTER -> if (signedIn) {
-                            Text("Firebase hesabın açık.", color = MaterialTheme.colorScheme.secondary)
-                            Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
-                            OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.LOGIN })
+                        Page.REGISTER -> AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.LOGIN })
                         Page.DEVICES -> {
                             Text(
                                 if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
@@ -552,8 +393,8 @@ private fun DrawerItem(label: String, action: () -> Unit) {
 @Composable
 private fun AuthForm(
     registerMode: Boolean,
-    login: (String, String, (String) -> Unit) -> Unit = { _, _, done -> done("Giriş işlemi yapılandırılmadı.") },
-    register: (String, String, String, (String) -> Unit) -> Unit = { _, _, _, done -> done("Kayıt işlemi yapılandırılmadı.") },
+    login: (String, String) -> String = { _, _ -> "" },
+    register: (String, String, String) -> String = { _, _, _ -> "" },
     googleLogin: () -> Unit = {},
     googleStatus: String? = null,
     goRegister: () -> Unit
@@ -565,19 +406,9 @@ private fun AuthForm(
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (registerMode) OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Ad soyad") }, singleLine = true)
-            OutlinedTextField(identity, { identity = it }, Modifier.fillMaxWidth(), label = { Text("E-posta adresi") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
+            OutlinedTextField(identity, { identity = it }, Modifier.fillMaxWidth(), label = { Text("E-posta veya telefon numarası") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Şifre (en az 6 karakter)") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-            Button(
-                onClick = {
-                    message = "İşlem yapılıyor..."
-                    if (registerMode) {
-                        register(name, identity, password) { message = it }
-                    } else {
-                        login(identity, password) { message = it }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = { message = if (registerMode) register(name, identity, password) else login(identity, password) }, Modifier.fillMaxWidth()) {
                 Text(if (registerMode) "Kayıt ol" else "Giriş yap")
             }
             OutlinedButton(onClick = googleLogin, modifier = Modifier.fillMaxWidth()) {
@@ -589,7 +420,7 @@ private fun AuthForm(
             googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
-            Text("Hesap Firebase Authentication ile yönetilir. E-posta doğrulaması için gelen kutunu kontrol et.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+            Text("Geliştirme sürümü: demo hesap yalnızca bu telefonda saklanır; gerçek sunucu doğrulaması değildir.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
         }
     }
 }
