@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
                         googleStatus = "Google giriş başarısız (kod ${error.statusCode}). OAuth paket adı ve SHA-1 değerini kontrol et."
                     }
                 } else {
-                    googleStatus = "Google girişi tamamlanmadı (sonuç ${activityResult.resultCode}). Tekrar dene."
+                    googleStatus = if (activityResult.resultCode == RESULT_CANCELED) "Google hesabı seçilmedi veya giriş iptal edildi. Sorun devam ederse Android OAuth istemcisindeki paket adı ve SHA-1 değerini kontrol edeceğiz." else "Google giriş ekranı beklenmeyen bir sonuç döndürdü (${activityResult.resultCode})."
                 }
             }
             val startGoogleSignIn = { googleLauncher.launch(googleSignInClient.signInIntent) }
@@ -226,8 +226,8 @@ private fun AssistantScreen(
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(false, login = login, googleLogin = googleLogin, goRegister = { page = Page.REGISTER })
-                        Page.REGISTER -> AuthForm(true, register = register, googleLogin = googleLogin, goRegister = { page = Page.LOGIN })
+                        } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.REGISTER })
+                        Page.REGISTER -> AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.LOGIN })
                         Page.DEVICES -> {
                             Text(
                                 if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
@@ -385,6 +385,7 @@ private fun AuthForm(
     login: (String, String) -> String = { _, _ -> "" },
     register: (String, String, String) -> String = { _, _, _ -> "" },
     googleLogin: () -> Unit = {},
+    googleStatus: String? = null,
     goRegister: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
@@ -399,11 +400,36 @@ private fun AuthForm(
             Button(onClick = { message = if (registerMode) register(name, identity, password) else login(identity, password) }, Modifier.fillMaxWidth()) {
                 Text(if (registerMode) "Kayıt ol" else "Giriş yap")
             }
-            OutlinedButton(onClick = googleLogin, modifier = Modifier.fillMaxWidth()) { Text("G  Google ile devam et") }
+            OutlinedButton(onClick = googleLogin, modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GoogleGLogo(Modifier.size(20.dp))
+                    Text("Google ile devam et")
+                }
+            }
+            googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
             Text("Geliştirme sürümü: demo hesap yalnızca bu telefonda saklanır; gerçek sunucu doğrulaması değildir.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
         }
+    }
+}
+
+
+@Composable
+private fun GoogleGLogo(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val stroke = size.minDimension * 0.20f
+        val pad = stroke / 2f
+        val arcSize = Size(size.width - stroke, size.height - stroke)
+        val colors = listOf(
+            Color(0xFF4285F4), Color(0xFF34A853),
+            Color(0xFFFBBC05), Color(0xFFEA4335)
+        )
+        drawArc(colors[3], 225f, 45f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+        drawArc(colors[0], 270f, 135f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+        drawArc(colors[1], 45f, 90f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+        drawArc(colors[2], 135f, 90f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+        drawLine(colors[0], Offset(size.width * 0.52f, size.height * 0.5f), Offset(size.width * 0.95f, size.height * 0.5f), strokeWidth = stroke, cap = StrokeCap.Round)
     }
 }
 
