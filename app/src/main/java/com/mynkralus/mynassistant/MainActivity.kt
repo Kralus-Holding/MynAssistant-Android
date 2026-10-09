@@ -178,15 +178,42 @@ private fun AssistantScreen(
                         } else AuthForm(false, login = login, goRegister = { page = Page.REGISTER })
                         Page.REGISTER -> AuthForm(true, register = register, goRegister = { page = Page.LOGIN })
                         Page.DEVICES -> {
-                            Text(if (signedIn) "Cihaz eşleştirme altyapısı sonraki aşamada bağlanacak." else "Cihazlarını hesabına bağlamak için önce giriş yap.")
-                            if (!signedIn) Button(onClick = { page = Page.LOGIN }) { Text("Giriş yap") }
-                            Card(Modifier.fillMaxWidth()) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text("▣", fontSize = 28.sp, color = MaterialTheme.colorScheme.primary)
-                                    Column {
-                                        Text("Bu telefon", fontWeight = FontWeight.SemiBold)
-                                        Text("Yerel uygulama • eşleştirme henüz etkin değil", fontSize = 12.sp)
+                            Text(
+                                if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
+                                else "Cihazlarını görmek için önce hesabına giriş yap.",
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = .72f),
+                                fontSize = 14.sp
+                            )
+                            if (!signedIn) {
+                                Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                OutlinedButton(onClick = { page = Page.REGISTER }, modifier = Modifier.fillMaxWidth()) { Text("Kayıt ol") }
+                            } else {
+                                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
+                                            Column(Modifier.weight(1f)) {
+                                                Text("Windows bilgisayarım", fontWeight = FontWeight.SemiBold)
+                                                Text("Hesap: " + email.ifBlank { phone }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                            }
+                                            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.background) {
+                                                Text("Bağlantı bekleniyor", modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp), fontSize = 10.sp)
+                                            }
+                                        }
+                                        Text(
+                                            "Windows Agent bu hesapla sunucuya kaydolduğunda bilgisayar otomatik burada görünecek. Başka hesaplardaki kullanıcılar bu cihazı göremeyecek.",
+                                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                        )
+                                        Text(
+                                            "Not: Bu ekran şu an arayüz taslağıdır. Gerçek cihaz listesini göstermek için Google hesabı doğrulaması ve ortak sunucu bağlantısı gerekiyor.",
+                                            fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary
+                                        )
                                     }
+                                }
+                                OutlinedButton(onClick = { page = Page.SETTINGS }, modifier = Modifier.fillMaxWidth()) {
+                                    Icon(Icons.Default.Settings, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Hesap ve bağlantı ayarları")
                                 }
                             }
                         }
