@@ -28,6 +28,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.SettingsRemote
+import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -106,13 +115,13 @@ private fun AssistantScreen(
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 16.dp),
+                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 22.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("☰", fontSize = 29.sp, modifier = Modifier.clickable { drawer = true }.padding(4.dp))
                     Spacer(Modifier.weight(1f))
-                    Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { TvRemoteIcon() }
+                    Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "TV kumandası", modifier = Modifier.size(32.dp)) }
                     Spacer(Modifier.width(10.dp))
                     Button(onClick = toggleTheme, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
                         Text(if (dark) "☀ Açık" else "☾ Koyu", fontSize = 14.sp)
@@ -247,7 +256,7 @@ private fun AuthForm(
             Button(onClick = { message = if (registerMode) register(name, identity, password) else login(identity, password) }, Modifier.fillMaxWidth()) {
                 Text(if (registerMode) "Kayıt ol" else "Giriş yap")
             }
-            OutlinedButton(onClick = { message = "Google girişi OAuth yapılandırması gerektirir; henüz etkin değil." }, Modifier.fillMaxWidth()) { Text("G  Google ile devam et") }
+            OutlinedButton(onClick = { message = "Google girişi OAuth yapılandırması gerektirir; henüz etkin değil." }, Modifier.fillMaxWidth()) { Text("Google ile devam et") }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
             Text("Geliştirme sürümü: demo hesap yalnızca bu telefonda saklanır; gerçek sunucu doğrulaması değildir.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
@@ -264,29 +273,38 @@ private fun MynLogo() {
 }
 
 @Composable
-private fun TvRemoteIcon() {
-    val iconColor = MaterialTheme.colorScheme.onBackground
-    Canvas(Modifier.fillMaxSize().padding(5.dp)) {
-        val w = size.width; val h = size.height
-        drawRoundRect(iconColor, Offset(w * .28f, h * .04f), Size(w * .44f, h * .92f), CornerRadius(w * .15f), style = Stroke(width = 2.dp.toPx()))
-        drawCircle(iconColor, w * .045f, Offset(w * .5f, h * .22f))
-        drawCircle(iconColor, w * .045f, Offset(w * .42f, h * .38f))
-        drawCircle(iconColor, w * .045f, Offset(w * .58f, h * .38f))
-        listOf(.56f, .66f, .76f).forEach { y -> drawLine(iconColor, Offset(w * .4f, h * y), Offset(w * .6f, h * y), 2.dp.toPx(), cap = StrokeCap.Round) }
-    }
-}
-
-@Composable
 private fun TvRemotePanel() {
-    val buttons = listOf("INPUT", "▲", "◀", "OK", "▶", "▼", "VOL +", "VOL −", "CH +", "CH −", "⌂", "MENU")
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(28.dp)).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(58.dp).background(MaterialTheme.colorScheme.background, CircleShape), contentAlignment = Alignment.Center) { Text("⏻", fontSize = 26.sp, color = MaterialTheme.colorScheme.primary) }
+    val buttons = listOf(
+        Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
+        Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
+        Triple("...", Icons.Default.MoreHoriz, "more"),
+        Triple("Sesi artır", Icons.Default.VolumeUp, "up"),
+        Triple("Sesi kıs", Icons.Default.VolumeDown, "down"),
+        Triple("...", Icons.Default.MoreHoriz, "more2")
+    )
+    Column(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(28.dp)).padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("TV KUMANDASI", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        // İstenen altı kontrol: üst sıra güç/sessiz/yer tutucu, alt sıra ses+/ses−/diğer.
         buttons.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { label -> OutlinedButton(onClick = {}, Modifier.weight(1f), contentPadding = PaddingValues(3.dp)) { Text(label, fontSize = 12.sp) } }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { item ->
+                    Column(
+                        Modifier.weight(1f).height(106.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(20.dp))
+                            .clickable { }.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(item.second, contentDescription = item.first, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(8.dp))
+                        Text(item.first, fontSize = 11.sp, textAlign = TextAlign.Center)
+                    }
+                }
             }
         }
-        Text("Düğmeler henüz gerçek TV kontrolü yapmaz.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+        Text("Kontrollerin gerçek TV'ye bağlanması sonraki aşamada yapılacak.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f), textAlign = TextAlign.Center)
     }
 }
