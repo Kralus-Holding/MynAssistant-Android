@@ -228,9 +228,21 @@ private fun AssistantScreen(
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                         }
                         Page.REMOTE -> {
+                            Row(
+                                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Column(Modifier.weight(1f)) {
+                                    Text("Windows bilgisayar", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text("Bağlı değil • Windows Agent bekleniyor", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                }
+                                Surface(shape = CircleShape, color = Color(0xFFB85C5C)) { Box(Modifier.size(10.dp)) }
+                            }
                             TvRemotePanel(
-                                onHome = { page = Page.HOME },
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 620.dp)
+                                onHome = { feedback = "Ana ekran komutu Windows Agent bağlantısı kurulduğunda çalışacak." },
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                         else -> Unit
