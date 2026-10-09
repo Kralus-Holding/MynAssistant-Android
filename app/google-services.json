@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "994290744643",
+    "project_id": "myncloud-24",
+    "storage_bucket": "myncloud-24.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:994290744643:android:dc076feac12cf54a8a03f6",
+        "android_client_info": {
+          "package_name": "com.mynkralus.mynassistant"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB0z1b5OOMh8Pqn2GPd1ZuWoHEhRoKSrRM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
