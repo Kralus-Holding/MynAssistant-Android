@@ -78,6 +78,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         setContent {
+            var dark by remember { mutableStateOf(prefs.getBoolean("dark", true)) }
+            var email by remember { mutableStateOf(prefs.getString("email", "") ?: "") }
+            var phone by remember { mutableStateOf(prefs.getString("phone", "") ?: "") }
+            var name by remember { mutableStateOf(prefs.getString("name", "") ?: "") }
+            var passwordSaved by remember { mutableStateOf(prefs.getString("demo_password", "") ?: "") }
+            var signedIn by remember { mutableStateOf(prefs.getBoolean("signed_in", false)) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) { activityResult ->
@@ -102,12 +108,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val startGoogleSignIn = { googleLauncher.launch(googleSignInClient.signInIntent) }
-            var dark by remember { mutableStateOf(prefs.getBoolean("dark", true)) }
-            var email by remember { mutableStateOf(prefs.getString("email", "") ?: "") }
-            var phone by remember { mutableStateOf(prefs.getString("phone", "") ?: "") }
-            var name by remember { mutableStateOf(prefs.getString("name", "") ?: "") }
-            var passwordSaved by remember { mutableStateOf(prefs.getString("demo_password", "") ?: "") }
-            var signedIn by remember { mutableStateOf(prefs.getBoolean("signed_in", false)) }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
                 background = Color(0xFF0B0D14), surface = Color(0xFF171C2A),
