@@ -45,6 +45,11 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeDown
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
@@ -125,7 +130,7 @@ private fun AssistantScreen(
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
-                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(start = 22.dp, top = 34.dp, end = 22.dp, bottom = 24.dp),
+                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(start = 22.dp, top = 48.dp, end = 22.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -274,7 +279,7 @@ private fun AuthForm(
             Button(onClick = { message = if (registerMode) register(name, identity, password) else login(identity, password) }, Modifier.fillMaxWidth()) {
                 Text(if (registerMode) "Kayıt ol" else "Giriş yap")
             }
-            OutlinedButton(onClick = { message = "Google girişi OAuth yapılandırması gerektirir; henüz etkin değil." }, Modifier.fillMaxWidth()) { Text("Google ile devam et") }
+            OutlinedButton(onClick = { message = "Google ile gerçek giriş için Google Cloud Console üzerinden Android uygulamasına ait OAuth yapılandırması ve Web Client ID gerekiyor. Bu bilgi eklenmeden güvenli giriş başlatılamaz." }, Modifier.fillMaxWidth()) { Text("G  Google ile devam et") }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
             Text("Geliştirme sürümü: demo hesap yalnızca bu telefonda saklanır; gerçek sunucu doğrulaması değildir.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
@@ -286,7 +291,7 @@ private fun AuthForm(
 private fun MynLogo() {
     Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
         AsyncImage(
-            model = "https://mynkralus.gt.tc/Fotolar/KrMyn.jpg",
+            model = "https://raw.githubusercontent.com/kralus24/MynConverter/master/app/src/main/res/drawable/splash_logo.png",
             contentDescription = "MynKralus logosu",
             modifier = Modifier.fillMaxSize()
         )
