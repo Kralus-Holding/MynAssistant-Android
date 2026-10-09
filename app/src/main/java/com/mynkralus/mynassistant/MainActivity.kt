@@ -9,7 +9,7 @@ import com.google.android.gms.common.api.ApiException
 import java.security.MessageDigest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,12 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -55,6 +50,7 @@ import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 
 private fun hashPassword(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 
@@ -89,27 +85,34 @@ class MainActivity : ComponentActivity() {
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) { activityResult ->
-                if (activityResult.resultCode == RESULT_OK) {
-                    try {
-                        val account = GoogleSignIn.getSignedInAccountFromIntent(activityResult.data)
-                            .getResult(ApiException::class.java)
-                        val accountEmail = account.email.orEmpty()
-                        val accountName = account.displayName?.takeIf { it.isNotBlank() } ?: accountEmail.substringBefore("@")
-                        if (accountEmail.isNotBlank()) {
-                            name = accountName
-                            email = accountEmail
-                            phone = ""
-                            signedIn = true
-                            googleStatus = "Google hesabıyla giriş yapıldı."
-                            prefs.edit().putString("name", name).putString("email", email)
-                                .putString("phone", "").putBoolean("signed_in", true)
-                                .putString("auth_provider", "google").apply()
-                        }
-                    } catch (error: ApiException) {
-                        googleStatus = "Google giriş başarısız (kod ${error.statusCode}). OAuth paket adı ve SHA-1 değerini kontrol et."
+                // Read the Google task result even when Android reports RESULT_CANCELED.
+                // This exposes the actual Google status code instead of hiding it behind a generic message.
+                try {
+                    val account = GoogleSignIn.getSignedInAccountFromIntent(activityResult.data)
+                        .getResult(ApiException::class.java)
+                    val accountEmail = account.email.orEmpty()
+                    if (accountEmail.isBlank()) {
+                        googleStatus = "Google hesabından e-posta alınamadı. Google hesabı izinlerini kontrol et."
+                    } else {
+                        val accountName = account.displayName?.takeIf { it.isNotBlank() }
+                            ?: accountEmail.substringBefore("@")
+                        name = accountName
+                        email = accountEmail
+                        phone = ""
+                        signedIn = true
+                        googleStatus = "Google hesabıyla giriş yapıldı."
+                        prefs.edit().putString("name", name).putString("email", email)
+                            .putString("phone", "").putBoolean("signed_in", true)
+                            .putString("auth_provider", "google").apply()
                     }
-                } else {
-                    googleStatus = if (activityResult.resultCode == RESULT_CANCELED) "Google hesabı seçilmedi veya giriş iptal edildi. Sorun devam ederse Android OAuth istemcisindeki paket adı ve SHA-1 değerini kontrol edeceğiz." else "Google giriş ekranı beklenmeyen bir sonuç döndürdü (${activityResult.resultCode})."
+                } catch (error: ApiException) {
+                    googleStatus = when (error.statusCode) {
+                        10 -> "Google OAuth yapılandırma hatası (10). Android istemcisinin paket adı ve imza SHA-1 değeri eşleşmiyor olabilir."
+                        12501 -> "Google hesabı seçilmedi veya giriş iptal edildi (12501). Hesap seçtikten sonra da oluyorsa OAuth paket adı ve SHA-1 değerini kontrol et."
+                        else -> "Google giriş başarısız (kod ${error.statusCode}). Android OAuth paket adı/SHA-1 ve Google test kullanıcısı ayarını kontrol et."
+                    }
+                } catch (error: Exception) {
+                    googleStatus = "Google giriş sonucu okunamadı (${error.javaClass.simpleName}). Tekrar dene."
                 }
             }
             val startGoogleSignIn = { googleLauncher.launch(googleSignInClient.signInIntent) }
@@ -338,7 +341,15 @@ private fun AssistantScreen(
                                         Button(
                                             onClick = { toggleAccountMenu(); googleLogin() },
                                             modifier = Modifier.fillMaxWidth()
-                                        ) { Text("Google ile devam et") }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                GoogleGLogo(Modifier.size(20.dp))
+                                                Text("Google ile devam et")
+                                            }
+                                        }
                                     }
                                     googleStatus?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary) }
                                 }
@@ -417,20 +428,11 @@ private fun AuthForm(
 
 @Composable
 private fun GoogleGLogo(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val stroke = size.minDimension * 0.20f
-        val pad = stroke / 2f
-        val arcSize = Size(size.width - stroke, size.height - stroke)
-        val colors = listOf(
-            Color(0xFF4285F4), Color(0xFF34A853),
-            Color(0xFFFBBC05), Color(0xFFEA4335)
-        )
-        drawArc(colors[3], 225f, 45f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawArc(colors[0], 270f, 135f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawArc(colors[1], 45f, 90f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawArc(colors[2], 135f, 90f, false, Offset(pad, pad), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawLine(colors[0], Offset(size.width * 0.52f, size.height * 0.5f), Offset(size.width * 0.95f, size.height * 0.5f), strokeWidth = stroke, cap = StrokeCap.Round)
-    }
+    Image(
+        painter = painterResource(id = R.drawable.google_logo),
+        contentDescription = "Google",
+        modifier = modifier
+    )
 }
 
 @Composable
