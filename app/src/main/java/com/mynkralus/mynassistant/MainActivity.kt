@@ -36,6 +36,16 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.SettingsRemote
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.AccountCircle
+import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -115,16 +125,16 @@ private fun AssistantScreen(
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
-                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 22.dp),
+                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(start = 22.dp, top = 34.dp, end = 22.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("☰", fontSize = 29.sp, modifier = Modifier.clickable { drawer = true }.padding(4.dp))
+                    IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, contentDescription = "Menüyü aç", modifier = Modifier.size(30.dp)) }
                     Spacer(Modifier.weight(1f))
                     Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "TV kumandası", modifier = Modifier.size(32.dp)) }
                     Spacer(Modifier.width(10.dp))
                     Button(onClick = toggleTheme, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
-                        Text(if (dark) "☀ Açık" else "☾ Koyu", fontSize = 14.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(18.dp)); Text(if (dark) "Açık" else "Koyu", fontSize = 14.sp) }
                     }
                 }
                 if (page == Page.HOME) {
@@ -212,12 +222,12 @@ private fun AssistantScreen(
                             }
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                        DrawerItem("⌂", "Ana sayfa") { page = Page.HOME; drawer = false }
-                        DrawerItem("⇥", if (signedIn) "Hesabım" else "Giriş yap") { page = Page.LOGIN; drawer = false }
-                        if (!signedIn) DrawerItem("＋", "Kayıt ol") { page = Page.REGISTER; drawer = false }
-                        DrawerItem("▣", "Cihazlarım") { page = Page.DEVICES; drawer = false }
-                        DrawerItem("⚙", "Ayarlar") { page = Page.SETTINGS; drawer = false }
-                        DrawerItem("▤", "TV kumandası") { page = Page.REMOTE; drawer = false }
+                        DrawerItem("Ana sayfa") { page = Page.HOME; drawer = false }
+                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap") { page = Page.LOGIN; drawer = false }
+                        if (!signedIn) DrawerItem("Kayıt ol") { page = Page.REGISTER; drawer = false }
+                        DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
+                        DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
+                        DrawerItem("TV kumandası") { page = Page.REMOTE; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
                         Text("MynAssistant • Android 0.2.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
@@ -230,9 +240,17 @@ private fun AssistantScreen(
 }
 
 @Composable
-private fun DrawerItem(symbol: String, label: String, action: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 8.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(symbol, fontSize = 23.sp, color = MaterialTheme.colorScheme.primary)
+private fun DrawerItem(label: String, action: () -> Unit) {
+    val icon = when (label) {
+        "Ana sayfa" -> Icons.Default.Home
+        "Giriş yap", "Hesabım" -> Icons.Default.Login
+        "Kayıt ol" -> Icons.Default.PersonAdd
+        "Cihazlarım" -> Icons.Default.Devices
+        "Ayarlar" -> Icons.Default.Settings
+        else -> Icons.Default.Tv
+    }
+    Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(25.dp), tint = MaterialTheme.colorScheme.primary)
         Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium)
     }
 }
@@ -267,8 +285,11 @@ private fun AuthForm(
 @Composable
 private fun MynLogo() {
     Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) { drawRect(Color(0xFF8BD3F0), style = Stroke(width = 2.dp.toPx())) }
-        Text("M\nKR", fontSize = 16.sp, lineHeight = 15.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+        AsyncImage(
+            model = "https://mynkralus.gt.tc/Fotolar/KrMyn.jpg",
+            contentDescription = "MynKralus logosu",
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
