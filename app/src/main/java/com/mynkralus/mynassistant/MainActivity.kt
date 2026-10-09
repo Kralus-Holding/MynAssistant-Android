@@ -2,6 +2,10 @@ package com.mynkralus.mynassistant
 
 import android.content.Context
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import java.security.MessageDigest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -57,13 +61,47 @@ private fun hashPassword(value: String): String = MessageDigest.getInstance("SHA
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
 private const val PREFS = "mynassistant_prefs"
+private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE }
 
 class MainActivity : ComponentActivity() {
+    private val googleSignInClient by lazy {
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestProfile()
+            .requestIdToken(WEB_CLIENT_ID)
+            .build()
+        GoogleSignIn.getClient(this, options)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         setContent {
+            val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.StartActivityForResult()
+            ) { activityResult ->
+                if (activityResult.resultCode == RESULT_OK) {
+                    try {
+                        val account = GoogleSignIn.getSignedInAccountFromIntent(activityResult.data)
+                            .getResult(ApiException::class.java)
+                        val accountEmail = account.email.orEmpty()
+                        val accountName = account.displayName?.takeIf { it.isNotBlank() } ?: accountEmail.substringBefore("@")
+                        if (accountEmail.isNotBlank()) {
+                            name = accountName
+                            email = accountEmail
+                            phone = ""
+                            signedIn = true
+                            prefs.edit().putString("name", name).putString("email", email)
+                                .putString("phone", "").putBoolean("signed_in", true)
+                                .putString("auth_provider", "google").apply()
+                        }
+                    } catch (_: ApiException) {
+                        prefs.edit().putString("google_sign_in_error", "Google giriş başarısız. Tekrar deneyin.").apply()
+                    }
+                }
+            }
+            val startGoogleSignIn = { googleLauncher.launch(googleSignInClient.signInIntent) }
             var dark by remember { mutableStateOf(prefs.getBoolean("dark", true)) }
             var email by remember { mutableStateOf(prefs.getString("email", "") ?: "") }
             var phone by remember { mutableStateOf(prefs.getString("phone", "") ?: "") }
@@ -107,7 +145,8 @@ class MainActivity : ComponentActivity() {
                             "Demo hesap oluşturuldu. Oturum bu cihazda hatırlanacak."
                         }
                     },
-                    logout = { signedIn = false; prefs.edit().putBoolean("signed_in", false).apply() }
+                    logout = { signedIn = false; prefs.edit().putBoolean("signed_in", false).remove("auth_provider").apply(); googleSignInClient.signOut() },
+                    googleLogin = startGoogleSignIn
                 )
             }
         }
@@ -118,7 +157,8 @@ class MainActivity : ComponentActivity() {
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
     email: String, phone: String, login: (String, String) -> String,
-    register: (String, String, String) -> String, logout: () -> Unit
+    register: (String, String, String) -> String, logout: () -> Unit,
+    googleLogin: () -> Unit
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
     var drawer by remember { mutableStateOf(false) }
@@ -177,8 +217,8 @@ private fun AssistantScreen(
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(false, login = login, goRegister = { page = Page.REGISTER })
-                        Page.REGISTER -> AuthForm(true, register = register, goRegister = { page = Page.LOGIN })
+                        } else AuthForm(false, login = login, googleLogin = googleLogin, goRegister = { page = Page.REGISTER })
+                        Page.REGISTER -> AuthForm(true, register = register, googleLogin = googleLogin, goRegister = { page = Page.LOGIN })
                         Page.DEVICES -> {
                             Text(
                                 if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
@@ -303,6 +343,7 @@ private fun AuthForm(
     registerMode: Boolean,
     login: (String, String) -> String = { _, _ -> "" },
     register: (String, String, String) -> String = { _, _, _ -> "" },
+    googleLogin: () -> Unit = {},
     goRegister: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
@@ -317,7 +358,7 @@ private fun AuthForm(
             Button(onClick = { message = if (registerMode) register(name, identity, password) else login(identity, password) }, Modifier.fillMaxWidth()) {
                 Text(if (registerMode) "Kayıt ol" else "Giriş yap")
             }
-            OutlinedButton(onClick = { message = "Google ile gerçek giriş için Google Cloud Console üzerinden Android uygulamasına ait OAuth yapılandırması ve Web Client ID gerekiyor. Bu bilgi eklenmeden güvenli giriş başlatılamaz." }, Modifier.fillMaxWidth()) { Text("G  Google ile devam et") }
+            OutlinedButton(onClick = googleLogin, modifier = Modifier.fillMaxWidth()) { Text("G  Google ile devam et") }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
             Text("Geliştirme sürümü: demo hesap yalnızca bu telefonda saklanır; gerçek sunucu doğrulaması değildir.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
