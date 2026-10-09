@@ -2,6 +2,7 @@ package com.mynkralus.mynassistant
 
 import android.content.Context
 import android.os.Bundle
+import java.security.MessageDigest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -29,6 +30,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+private fun hashPassword(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
@@ -62,7 +65,7 @@ class MainActivity : ComponentActivity() {
                     signedIn = signedIn, name = name, email = email, phone = phone,
                     login = { identity, password ->
                         if ((identity.equals(email, true) && email.isNotBlank() || identity == phone && phone.isNotBlank()) &&
-                            password == passwordSaved && name.isNotBlank()) {
+                            hashPassword(password) == passwordSaved && name.isNotBlank()) {
                             signedIn = true
                             prefs.edit().putBoolean("signed_in", true).apply()
                             "Giriş yapıldı."
@@ -75,7 +78,7 @@ class MainActivity : ComponentActivity() {
                             name = newName.trim()
                             email = if (identity.contains("@")) identity.trim() else ""
                             phone = if (identity.contains("@")) "" else identity.trim()
-                            passwordSaved = password
+                            passwordSaved = hashPassword(password)
                             signedIn = true
                             prefs.edit().putString("name", name).putString("email", email)
                                 .putString("phone", phone).putString("demo_password", passwordSaved)
@@ -262,13 +265,14 @@ private fun MynLogo() {
 
 @Composable
 private fun TvRemoteIcon() {
+    val iconColor = MaterialTheme.colorScheme.onBackground
     Canvas(Modifier.fillMaxSize().padding(5.dp)) {
         val w = size.width; val h = size.height
-        drawRoundRect(MaterialTheme.colorScheme.onBackground, Offset(w * .28f, h * .04f), Size(w * .44f, h * .92f), CornerRadius(w * .15f), style = Stroke(width = 2.dp.toPx()))
-        drawCircle(MaterialTheme.colorScheme.onBackground, w * .045f, Offset(w * .5f, h * .22f))
+        drawRoundRect(iconColor, Offset(w * .28f, h * .04f), Size(w * .44f, h * .92f), CornerRadius(w * .15f), style = Stroke(width = 2.dp.toPx()))
+        drawCircle(iconColor, w * .045f, Offset(w * .5f, h * .22f))
         drawCircle(MaterialTheme.colorScheme.onBackground, w * .045f, Offset(w * .42f, h * .38f))
         drawCircle(MaterialTheme.colorScheme.onBackground, w * .045f, Offset(w * .58f, h * .38f))
-        listOf(.56f, .66f, .76f).forEach { y -> drawLine(MaterialTheme.colorScheme.onBackground, Offset(w * .4f, h * y), Offset(w * .6f, h * y), 2.dp.toPx(), cap = StrokeCap.Round) }
+        listOf(.56f, .66f, .76f).forEach { y -> drawLine(iconColor, Offset(w * .4f, h * y), Offset(w * .6f, h * y), 2.dp.toPx(), cap = StrokeCap.Round) }
     }
 }
 
