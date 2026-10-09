@@ -199,8 +199,10 @@ private fun AssistantScreen(
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                         }
                         Page.REMOTE -> {
-                            Text("Kumanda görünümü hazır; kızılötesi veya ağ üzerinden kontrol henüz bağlı değil.", fontSize = 14.sp)
-                            TvRemotePanel()
+                            TvRemotePanel(
+                                onHome = { page = Page.HOME },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 620.dp)
+                            )
                         }
                         else -> Unit
                     }
@@ -294,7 +296,7 @@ private fun MynLogo() {
 }
 
 @Composable
-private fun TvRemotePanel() {
+private fun TvRemotePanel(onHome: () -> Unit, modifier: Modifier = Modifier) {
     val buttons = listOf(
         Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
@@ -304,28 +306,52 @@ private fun TvRemotePanel() {
         Triple("...", Icons.Default.MoreHoriz, "more2")
     )
     Column(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(28.dp)).padding(18.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("TV KUMANDASI", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        // İstenen altı kontrol: üst sıra güç/sessiz/yer tutucu, alt sıra ses+/ses−/diğer.
-        buttons.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { item ->
-                    Column(
-                        Modifier.weight(1f).height(106.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(20.dp))
-                            .clickable { }.padding(8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(item.second, contentDescription = item.first, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(8.dp))
-                        Text(item.first, fontSize = 11.sp, textAlign = TextAlign.Center)
+        // Dikey telefon ekranında kumanda tuşları iki satırda kalır; touchpad alt bölümde ayrıdır.
+        Column(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(26.dp)).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            buttons.chunked(3).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { item ->
+                        Column(
+                            Modifier.weight(1f).height(82.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(18.dp))
+                                .clickable { }.padding(5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(item.second, contentDescription = item.first, modifier = Modifier.size(27.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(5.dp))
+                            Text(item.first, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1)
+                        }
                     }
                 }
             }
         }
-        Text("Kontrollerin gerçek TV'ye bağlanması sonraki aşamada yapılacak.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f), textAlign = TextAlign.Center)
+        // TV'nin ana ekran düğmesi, touchpad alanının hemen üstünde sol altta.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+            FilledTonalIconButton(onClick = onHome, modifier = Modifier.size(54.dp), shape = RoundedCornerShape(15.dp)) {
+                Icon(Icons.Default.Home, contentDescription = "TV ana ekranı", modifier = Modifier.size(27.dp))
+            }
+        }
+        // Büyük dokunmatik alan: sonraki aşamada mouse/TV pointer hareketine bağlanacak.
+        Column(
+            Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 230.dp)
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
+                .clickable { }.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Text("Bilgisayar touchpad'i gibi kullanmak için alan", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text("Kaydırma ve tıklama desteği sonraki aşamada eklenecek.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center)
+        }
     }
 }
