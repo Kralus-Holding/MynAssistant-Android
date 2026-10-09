@@ -47,8 +47,17 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
-      - name: Print APK signing SHA-1
-        run: $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -i "certificate SHA-1 digest"
+      - name: Verify APK signing SHA-1
+        shell: bash
+        run: |
+          KEYSTORE_SHA1=$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | awk '/SHA1:/ { gsub(":", "", $2); print tolower($2) }')
+          APK_SHA1=$($ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')
+          echo "Debug keystore SHA-1: $KEYSTORE_SHA1"
+          echo "APK signing SHA-1:      $APK_SHA1"
+          if [ -z "$KEYSTORE_SHA1" ] || [ -z "$APK_SHA1" ] || [ "$KEYSTORE_SHA1" != "$APK_SHA1" ]; then
+            echo "::error::APK signing certificate does not match the stable debug keystore."
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

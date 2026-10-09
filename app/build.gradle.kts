@@ -17,6 +17,16 @@ android {
         versionName = "0.1.0"
     }
 
+    // Keep the debug APK signed with the same certificate used for Google OAuth setup.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildFeatures {
         compose = true
     }
