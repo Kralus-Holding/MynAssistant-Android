@@ -270,8 +270,8 @@ private fun TvRemoteIcon() {
         val w = size.width; val h = size.height
         drawRoundRect(iconColor, Offset(w * .28f, h * .04f), Size(w * .44f, h * .92f), CornerRadius(w * .15f), style = Stroke(width = 2.dp.toPx()))
         drawCircle(iconColor, w * .045f, Offset(w * .5f, h * .22f))
-        drawCircle(MaterialTheme.colorScheme.onBackground, w * .045f, Offset(w * .42f, h * .38f))
-        drawCircle(MaterialTheme.colorScheme.onBackground, w * .045f, Offset(w * .58f, h * .38f))
+        drawCircle(iconColor, w * .045f, Offset(w * .42f, h * .38f))
+        drawCircle(iconColor, w * .045f, Offset(w * .58f, h * .38f))
         listOf(.56f, .66f, .76f).forEach { y -> drawLine(iconColor, Offset(w * .4f, h * y), Offset(w * .6f, h * y), 2.dp.toPx(), cap = StrokeCap.Round) }
     }
 }
