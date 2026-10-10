@@ -211,7 +211,7 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
         if (command == null) {
             val ok = response.optBoolean("ok", true)
             val message = response.optString("message").takeIf { it.isNotBlank() }
-                ?: if (ok) "Windows köprüsü yanıt verdi." else "Windows köprüsü hazır değil."
+                ?: if (ok) "Bilgisayar bağlantısı hazır." else "Bilgisayar bağlantısı hazır değil."
             PcBridgeResult(ok, ok, message)
         } else {
             val result = response.optJSONObject("result")
@@ -219,7 +219,7 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
             val message = result?.optString("message").orEmpty()
             val actionText = result?.optJSONObject("data")?.optString("action_text").orEmpty()
             val displayText = when {
-                message.isBlank() -> actionText.ifBlank { "PC komutu yanıtlandı." }
+                message.isBlank() -> actionText.ifBlank { "Komut yanıtlandı." }
                 actionText.isBlank() || actionText == message -> message
                 else -> message + "\n" + actionText
             }
@@ -781,13 +781,13 @@ private fun AssistantScreen(
                                 Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
                             } else {
                                 Text(
-                                    "Windows Agent bu hesaba bağlandığında bilgisayarın burada otomatik görünecek. IP adresi veya token girmen gerekmiyor.",
+                                    "Windows uygulaması aynı hesapla giriş yaptığında bilgisayarın burada otomatik görünür. Ek bağlantı bilgisi girmen gerekmez.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
                                 )
                                 if (devicesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                                 devicesError?.let { error ->
-                                    Text("Cihazlar okunamadı: " + error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                                 }
                                 if (!devicesLoading && devices.isEmpty() && devicesError == null) {
                                     Card(
@@ -798,7 +798,7 @@ private fun AssistantScreen(
                                             Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
                                             Text("Henüz bilgisayar bağlanmamış", fontWeight = FontWeight.SemiBold)
                                             Text(
-                                                "Windows bilgisayarına MynAssistant Agent kurup aynı Google hesabıyla bir kez giriş yaptıktan sonra cihaz burada otomatik listelenir. Telefon ve bilgisayarın aynı Wi-Fi ağında olması gerekmeyecek.",
+                                                "Bilgisayarında MynAssistant Windows uygulamasını kurup bu hesapla giriş yaptığında cihazın burada otomatik görünür.",
                                                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
                                             )
                                         }
@@ -855,13 +855,13 @@ private fun AssistantScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                         Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
                                         Column(Modifier.weight(1f)) {
-                                            Text("Windows Agent", fontWeight = FontWeight.SemiBold)
+                                            Text("Windows uygulaması", fontWeight = FontWeight.SemiBold)
                                             Text(
                                                 when {
-                                                    !signedIn -> "Önce Google hesabınla giriş yap."
+                                                    !signedIn -> "Önce hesabına giriş yap."
                                                     devicesLoading -> "Hesabına bağlı cihazlar aranıyor..."
                                                     devices.any { it.isOnline } -> "En az bir cihaz çevrimiçi."
-                                                    else -> "Henüz çevrimiçi Windows Agent yok."
+                                                    else -> "Henüz çevrimiçi bilgisayar yok."
                                                 },
                                                 fontSize = 12.sp,
                                                 color = if (devices.any { it.isOnline }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
@@ -874,7 +874,7 @@ private fun AssistantScreen(
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .76f)
                                     )
                                     Text(
-                                        "Not: Bilgisayarın otomatik görünmesi için Windows Agent'ın ayrıca kurulup çalışıyor olması gerekir.",
+                                        "Bilgisayarının görünmesi için Windows yardımcı uygulamasının kurulu ve açık olması gerekir.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.secondary
                                     )
@@ -915,11 +915,11 @@ private fun AssistantScreen(
                                     Text(
                                         when {
                                             !signedIn -> "Giriş yapılmamış"
-                                            localBridgeSelected -> "Bağlı • Yerel MynAi köprüsü"
+                                            localBridgeSelected -> "Bağlı • Yerel bağlantı"
                                             device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
                                             device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
                                             remoteOnline -> "Bağlı • " + device.platform
-                                            else -> "Çevrimdışı • Windows Agent bekleniyor"
+                                            else -> "Çevrimdışı • Bilgisayar bekleniyor"
                                         },
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
@@ -958,7 +958,7 @@ private fun AssistantScreen(
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                             Text(
-                                                "Önizleme yalnızca bu sayfa açıkken istenir; Windows Agent çalışıyor olmalı.",
+                                                "Önizleme yalnızca bu sayfa açıkken alınır. Bilgisayarında MynAssistant Windows uygulaması çalışıyor olmalı.",
                                                 fontSize = 12.sp,
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
                                             )
@@ -987,15 +987,15 @@ private fun AssistantScreen(
                                             "volume_up" -> sendLocalPcText("ses 10 arttir")
                                             "volume_down" -> sendLocalPcText("ses 10 azalt")
                                             "home" -> sendLocalPcText("masaustunu goster")
-                                            "power" -> feedback = "Güç düğmesi bu yerel köprü sürümünde desteklenmiyor. Bilgisayar kapalıyken açmak için ayrıca Wake-on-LAN gerekir."
+                                            "power" -> feedback = "Bilgisayarı uzaktan açma özelliği henüz desteklenmiyor."
                                             "mouse_move", "mouse_click", "mouse_right_click" ->
                                                 feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
                                             else -> feedback = "Bu kumanda işlemi bu bağlantı türünde desteklenmiyor."
                                         }
                                     } else if (device == null) {
-                                        feedback = "Bu bilgisayar henüz çevrimiçi değil. Windows Agent aynı hesapla bağlandığında otomatik kullanılabilir olacak."
+                                        feedback = "Bilgisayar henüz çevrimiçi değil. Windows uygulaması açıldığında otomatik bağlanacak."
                                     } else if (!remoteOnline) {
-                                        feedback = "Bilgisayar çevrimdışı. Windows Agent çevrimiçi olduğunda komut gönderebilirsin."
+                                        feedback = "Bilgisayar çevrimdışı. Bağlantı kurulduğunda komut gönderebilirsin."
                                     } else {
                                         sendRemoteCommand(device.id, commandName, payload) { message -> feedback = message }
                                     }
@@ -1298,7 +1298,7 @@ private fun TvRemotePanel(
             Text(
                 if (mouseEnabled) "Sürükle: fareyi hareket ettir • Dokun: sol tık • Basılı tut: sağ tık"
                 else if (enabled) "Ses ve masaüstü komutları bağlı; fare kontrolü bu bağlantı türünde kullanılamıyor."
-                else "Fare kontrolü Windows Agent çevrimiçi olduğunda açılır.",
+                else "Fare kontrolü bilgisayar bağlandıktan sonra açılır.",
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(6.dp))
