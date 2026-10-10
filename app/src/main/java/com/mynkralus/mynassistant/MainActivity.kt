@@ -196,6 +196,122 @@ private fun extractPhoneNumber(rawText: String): String? {
     return digits.takeIf { it.length >= 7 }
 }
 
+
+private data class ContactPhoneMatch(val displayName: String, val phoneNumber: String, val score: Int)
+
+private fun normalizeContactText(value: String): String =
+    value.lowercase(Locale.forLanguageTag("tr-TR"))
+        .replace('ı', 'i')
+        .replace('ş', 's')
+        .replace('ğ', 'g')
+        .replace('ü', 'u')
+        .replace('ö', 'o')
+        .replace('ç', 'c')
+        .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+        .trim()
+        .replace(Regex("""\s+"""), " ")
+
+private fun relationshipAliasesForCommand(rawCommand: String): Set<String>? {
+    val tokens = normalizeContactText(rawCommand).split(" ").toSet()
+    val fatherWords = setOf("babam", "babami", "babamin", "babamla", "babamdan", "babaya", "baba", "babacigim", "peder", "dad", "daddy", "father")
+    val motherWords = setOf("annem", "annemi", "annemin", "anneme", "annemle", "anne", "annecigim", "anam", "mom", "mommy", "mum", "mother")
+    val brotherWords = setOf("abim", "abimi", "abime", "abi", "agabey", "kardesim", "kardesimi", "kardese")
+    val sisterWords = setOf("ablam", "ablami", "ablama", "abla", "kizkardesim", "kizkardesimi")
+    val spouseWords = setOf("esim", "esimi", "esime", "karim", "karimi", "kocam", "kocami", "partnerim")
+    return when {
+        tokens.any { it in fatherWords } -> setOf("baba", "babam", "babacigim", "peder", "dad", "daddy", "father")
+        tokens.any { it in motherWords } -> setOf("anne", "annem", "annecigim", "anam", "mom", "mommy", "mum", "mother")
+        tokens.any { it in brotherWords } -> setOf("abi", "abim", "agabey", "kardesim")
+        tokens.any { it in sisterWords } -> setOf("abla", "ablam", "kizkardesim")
+        tokens.any { it in spouseWords } -> setOf("esim", "karim", "kocam", "partnerim")
+        else -> null
+    }
+}
+
+private fun findContactPhoneForCommand(context: Context, rawCommand: String): ContactPhoneMatch? {
+    if (androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.READ_CONTACTS
+        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) return null
+
+    val withoutQuotedMessage = rawCommand.replace(Regex("""["“].*?["”]"""), " ")
+    val normalizedCommand = normalizeContactText(withoutQuotedMessage)
+    val relationAliases = relationshipAliasesForCommand(withoutQuotedMessage)
+    val stopWords = setOf(
+        "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "call",
+        "whatsapp", "tan", "ten", "dan", "den", "ile", "yoluyla", "mesaj", "mesaji", "mesajini", "mesajina",
+        "yaz", "gonder", "gönder", "gondermeyi", "lutfen", "a", "ac"
+    )
+    val queryTokens = normalizedCommand.split(" ")
+        .filter { it.isNotBlank() && it !in stopWords && it !in setOf("i", "yi", "yı", "yu", "yü", "ı", "u", "ü") }
+    val queryText = queryTokens.joinToString(" ")
+    if (relationAliases == null && queryText.isBlank()) return null
+
+    val contacts = mutableListOf<ContactPhoneMatch>()
+    val projection = arrayOf(
+        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+        ContactsContract.CommonDataKinds.Phone.NUMBER
+    )
+    context.contentResolver.query(
+        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+        projection,
+        null,
+        null,
+        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE LOCALIZED ASC"
+    )?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+        val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+        if (nameIndex >= 0 && numberIndex >= 0) {
+            while (cursor.moveToNext()) {
+                val displayName = cursor.getString(nameIndex)?.trim().orEmpty()
+                val number = cursor.getString(numberIndex)?.trim().orEmpty()
+                if (displayName.isBlank() || number.isBlank()) continue
+                val normalizedName = normalizeContactText(displayName)
+                val nameWords = normalizedName.split(" ").toSet()
+                val score = if (relationAliases != null) {
+                    when {
+                        normalizedName in relationAliases -> 120
+                        nameWords.any { it in relationAliases } -> 100
+                        relationAliases.any { normalizedName.startsWith("$it ") } -> 90
+                        relationAliases.any { normalizedName.contains(it) } -> 70
+                        else -> 0
+                    }
+                } else {
+                    when {
+                        normalizedName == queryText -> 120
+                        queryTokens.isNotEmpty() && queryTokens.all { it in nameWords } -> 100
+                        queryText.isNotBlank() && normalizedName.contains(queryText) -> 90
+                        queryTokens.size == 1 && queryTokens.first() in nameWords -> 80
+                        else -> 0
+                    }
+                }
+                if (score > 0) contacts += ContactPhoneMatch(displayName, number, score)
+            }
+        }
+    }
+    return contacts.maxWithOrNull(
+        compareBy<ContactPhoneMatch> { it.score }.thenByDescending { it.displayName.length }
+    )
+}
+
+private fun requiredRuntimePermissionList(): List<String> = buildList {
+    add(android.Manifest.permission.READ_CONTACTS)
+    add(android.Manifest.permission.CALL_PHONE)
+    add(android.Manifest.permission.CAMERA)
+    add(android.Manifest.permission.RECORD_AUDIO)
+    if (Build.VERSION.SDK_INT >= 33) {
+        add(android.Manifest.permission.POST_NOTIFICATIONS)
+        add(android.Manifest.permission.READ_MEDIA_IMAGES)
+        add(android.Manifest.permission.READ_MEDIA_VIDEO)
+        add(android.Manifest.permission.READ_MEDIA_AUDIO)
+    } else {
+        add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        if (Build.VERSION.SDK_INT <= 28) add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    }
+    if (Build.VERSION.SDK_INT >= 34) add(android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+}
+
 private fun contactActionKind(rawText: String): String? {
     val normalized = rawText.trim().lowercase(Locale.forLanguageTag("tr-TR"))
         .replace(Regex("\\s+"), " ")
@@ -238,17 +354,28 @@ private fun openWhatsAppChat(
 ): String {
     val number = normalizeWhatsAppNumber(rawNumber)
     if (number.length < 7) return "WhatsApp için geçerli bir telefon numarası bulunamadı."
-    if (autoAction != null && !isMynAssistantAccessibilityEnabled(context)) {
-        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        return "Otomatik WhatsApp işlemi için Android Erişilebilirlik ayarlarında MynAssistant hizmetini aç; sonra komutu yeniden ver."
-    }
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (autoAction != null && !isMynAssistantAccessibilityEnabled(context)) {
+        prefs.edit()
+            .putString("pending_whatsapp_action", autoAction)
+            .putLong("pending_whatsapp_action_at", System.currentTimeMillis())
+            .putString("pending_whatsapp_phone", number)
+            .putString("pending_whatsapp_message", message.orEmpty())
+            .putBoolean("pending_whatsapp_message_ready", false)
+            .putBoolean("pending_whatsapp_waiting_accessibility", true)
+            .putString("whatsapp_auto_call_status", "waiting")
+            .apply()
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return "WhatsApp işlemi beklemede. MynAssistant hizmetini Erişilebilirlik ayarlarında açınca WhatsApp otomatik açılacak."
+    }
     if (autoAction != null) {
         prefs.edit()
             .putString("pending_whatsapp_action", autoAction)
             .putLong("pending_whatsapp_action_at", System.currentTimeMillis())
+            .putString("pending_whatsapp_phone", number)
             .putString("pending_whatsapp_message", message.orEmpty())
             .putBoolean("pending_whatsapp_message_ready", false)
+            .putBoolean("pending_whatsapp_waiting_accessibility", false)
             .putString("whatsapp_auto_call_status", "waiting")
             .apply()
     } else {
@@ -257,6 +384,8 @@ private fun openWhatsAppChat(
             .remove("pending_whatsapp_action_at")
             .remove("pending_whatsapp_message")
             .remove("pending_whatsapp_message_ready")
+            .remove("pending_whatsapp_phone")
+            .remove("pending_whatsapp_waiting_accessibility")
             .apply()
     }
     val url = Uri.parse("https://wa.me/$number")
