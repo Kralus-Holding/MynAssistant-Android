@@ -958,7 +958,7 @@ private fun AssistantScreen(
                         Column {
                             Row(
                                 Modifier.fillMaxWidth().clickable { accountListExpanded = !accountListExpanded }.padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.Top,
+                                verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 if (signedIn) {
@@ -967,13 +967,13 @@ private fun AssistantScreen(
                                             model = photoUrl,
                                             imageLoader = photoImageLoader,
                                             contentDescription = "Google profil fotoğrafı",
-                                            modifier = Modifier.padding(top = 4.dp).size(48.dp).clip(CircleShape)
+                                            modifier = Modifier.size(48.dp).clip(CircleShape)
                                         )
                                     } else {
                                         Icon(
                                             Icons.Default.AccountCircle,
                                             contentDescription = "Hesap fotoğrafı",
-                                            modifier = Modifier.padding(top = 4.dp).size(48.dp),
+                                            modifier = Modifier.size(48.dp),
                                             tint = MaterialTheme.colorScheme.primary
                                         )
                                     }
@@ -981,7 +981,7 @@ private fun AssistantScreen(
                                     MynLogo(48.dp)
                                 }
                                 Column(Modifier.weight(1f)) {
-                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2)
                                     Text(if (signedIn) email.ifBlank { phone } else "Giriş yap", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
                                 }
                                 Text(if (accountListExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
@@ -990,8 +990,8 @@ private fun AssistantScreen(
                                 Column(
                                     Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 8.dp)
                                         .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = .98f))
-                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .10f), RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.background)
+                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .12f), RoundedCornerShape(16.dp))
                                         .padding(vertical = 6.dp),
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
