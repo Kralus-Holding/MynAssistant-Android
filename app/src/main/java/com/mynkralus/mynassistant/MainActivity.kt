@@ -151,6 +151,114 @@ private fun saveFirebaseProfile(
             onComplete(error.localizedMessage ?: "Firestore'a yazılamadı.")
         }
 }
+private data class PcBridgeResult(
+    val connected: Boolean,
+    val success: Boolean,
+    val message: String
+)
+
+private fun callMynAiBridge(baseUrl: String, token: String, command: String? = null): PcBridgeResult {
+    var base = baseUrl.trim().trimEnd('/')
+    if (base.endsWith("/health")) base = base.removeSuffix("/health")
+    if (base.endsWith("/command")) base = base.removeSuffix("/command")
+    base = base.trimEnd('/')
+    if (base.isBlank() || !(base.startsWith("http://") || base.startsWith("https://"))) {
+        return PcBridgeResult(false, false, "Windows köprü adresini http://192.168.x.x:8765 biçiminde gir.")
+    }
+
+    var connection: java.net.HttpURLConnection? = null
+    return try {
+        val endpoint = if (command == null) "$base/health" else "$base/command"
+        connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 5000
+            readTimeout = 15000
+            setRequestProperty("Accept", "application/json")
+            if (command != null) {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                doOutput = true
+            } else {
+                requestMethod = "GET"
+            }
+        }
+        if (command != null) {
+            val body = JSONObject().put("text", command).put("token", token.trim()).toString()
+                .toByteArray(Charsets.UTF_8)
+            connection.outputStream.use { it.write(body) }
+        }
+
+        val statusCode = connection.responseCode
+        val responseStream = try {
+            if (statusCode in 200..299) connection.inputStream else connection.errorStream
+        } catch (_: Exception) {
+            connection.errorStream
+        }
+        val bodyText = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+        if (statusCode !in 200..299) {
+            val serverError = try { JSONObject(bodyText).optString("error") } catch (_: Exception) { "" }
+            return PcBridgeResult(
+                false, false,
+                "PC köprüsü HTTP " + statusCode + " yanıtı verdi" +
+                    (if (serverError.isNotBlank()) ": " + serverError else ".")
+            )
+        }
+
+        val response = try { JSONObject(bodyText) } catch (_: Exception) {
+            return PcBridgeResult(true, false, "PC köprüsüne ulaşıldı ancak yanıt JSON biçiminde değil.")
+        }
+        if (command == null) {
+            val ok = response.optBoolean("ok", true)
+            val message = response.optString("message").takeIf { it.isNotBlank() }
+                ?: if (ok) "Windows köprüsü yanıt verdi." else "Windows köprüsü hazır değil."
+            PcBridgeResult(ok, ok, message)
+        } else {
+            val result = response.optJSONObject("result")
+            val ok = response.optBoolean("ok", result?.optBoolean("ok", false) ?: false)
+            val message = result?.optString("message").orEmpty()
+            val actionText = result?.optJSONObject("data")?.optString("action_text").orEmpty()
+            val displayText = when {
+                message.isBlank() -> actionText.ifBlank { "PC komutu yanıtlandı." }
+                actionText.isBlank() || actionText == message -> message
+                else -> message + "\n" + actionText
+            }
+            PcBridgeResult(true, ok, displayText)
+        }
+    } catch (error: Exception) {
+        PcBridgeResult(
+            false, false,
+            "PC köprüsüne ulaşılamadı: " + (error.message ?: error.javaClass.simpleName) +
+                ". Telefon ve bilgisayarın aynı Wi-Fi ağında olduğundan emin ol."
+        )
+    } finally {
+        connection?.disconnect()
+    }
+}
+
+private fun saveWindowsBridgeDevice(
+    user: FirebaseUser,
+    bridgeUrl: String,
+    connected: Boolean,
+    onComplete: (String?) -> Unit
+) {
+    val data = hashMapOf<String, Any>(
+        "ownerId" to user.uid,
+        "name" to "Windows bilgisayarım",
+        "platform" to "Windows",
+        "type" to "Windows",
+        "status" to if (connected) "online" else "offline",
+        "connectionMode" to "mynai-local-bridge",
+        "bridgeUrl" to bridgeUrl.trim(),
+        "lastCheckedAt" to FieldValue.serverTimestamp()
+    )
+    if (connected) data["lastSeenAt"] = FieldValue.serverTimestamp()
+    FirebaseFirestore.getInstance()
+        .collection("devices")
+        .document("windows-" + user.uid)
+        .set(data, SetOptions.merge())
+        .addOnSuccessListener { onComplete(null) }
+        .addOnFailureListener { error -> onComplete(error.localizedMessage ?: "Firestore cihaz kaydı başarısız.") }
+}
+
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE }
 
