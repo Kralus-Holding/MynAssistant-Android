@@ -300,17 +300,45 @@ private fun normalizeContactSearchToken(rawToken: String): String {
     return token
 }
 
-private fun contactLookupAlias(rawCommand: String): String? {
-    var query = rawCommand.replace(Regex("""["“].*?["”]"""), " ")
-    val messageTail = Regex(
-        """(?iu)\s+.+?\s+diye\s+(?:whatsapp(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
-    ).find(query)
-    if (messageTail != null) query = query.substring(0, messageTail.range.first)
-    val normalized = normalizeContactText(query)
+private fun contactLookupAlias(rawCommand: String, selectedContactName: String? = null): String? {
+    val withoutQuoted = rawCommand.replace(Regex("""["“].*?["”]"""), " ")
+    val messageIntent = Regex(
+        """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(withoutQuoted)
+    val phraseBeforeMessage = if (messageIntent != null) {
+        withoutQuoted.substring(0, messageIntent.range.first)
+    } else {
+        withoutQuoted
+    }
+
+    if (messageIntent != null && !selectedContactName.isNullOrBlank()) {
+        val phraseTokens = phraseBeforeMessage.trim().split(Regex("""\s+""")).filter { it.isNotBlank() }.toMutableList()
+        while (phraseTokens.isNotEmpty()) {
+            val first = normalizeContactText(phraseTokens.first())
+            if (first == "whatsapp" || first == "whatsapptan" || first in setOf("tan", "ten", "dan", "den")) {
+                phraseTokens.removeAt(0)
+            } else break
+        }
+        val queryTokens = phraseTokens.map(::normalizeContactSearchToken)
+        val nameTokens = normalizeContactText(selectedContactName).split(" ").map(::normalizeContactSearchToken)
+        val matchedCount = minOf(queryTokens.size, nameTokens.size).downTo(1).firstOrNull { count ->
+            (0 until count).all { index ->
+                queryTokens[index] == nameTokens[index] || queryTokens[index].startsWith(nameTokens[index])
+            }
+        }
+        if (matchedCount != null) {
+            return queryTokens.take(matchedCount).joinToString(" ").takeIf { it.isNotBlank() }
+        }
+    }
+
+    var normalized = normalizeContactText(phraseBeforeMessage)
+    val leadingAppMarker = Regex("""^(?:whatsapp(?:tan|ten|dan|den)?\s+)+""")
+    normalized = normalized.replace(leadingAppMarker, "")
     val stopWords = setOf(
-        "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "call",
-        "whatsapp", "tan", "ten", "dan", "den", "ile", "yoluyla", "mesaj", "mesaji", "mesajini", "mesajina",
-        "at", "yaz", "gonder", "gönder", "gondermeyi", "lutfen", "ac", "diye", "yolla", "ilet", "whatsapptan", "sms"
+        "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "arayalim",
+        "whatsapp", "whatsapptan", "tan", "ten", "dan", "den", "ile", "yoluyla",
+        "mesaj", "mesaji", "mesajini", "mesajina", "at", "yaz", "gonder", "gondermeyi",
+        "lutfen", "ac", "diye", "yolla", "ilet", "sms"
     )
     val tokens = normalized.split(" ")
         .filter { it.isNotBlank() && it !in stopWords }
@@ -319,7 +347,10 @@ private fun contactLookupAlias(rawCommand: String): String? {
     return tokens.joinToString(" ").trim().takeIf { it.isNotBlank() }
 }
 
-private fun contactAliasSpec(rawCommand: String): Pair<String, String>? {
+private fun contactAliasSpec(
+    rawCommand: String,
+    selectedContactName: String? = null
+): Pair<String, String>? {
     val relationKey = relationshipPreferenceKey(rawCommand)
     if (relationKey != null) {
         val label = when (relationKey) {
@@ -331,8 +362,13 @@ private fun contactAliasSpec(rawCommand: String): Pair<String, String>? {
         }
         return "contact_alias_$relationKey" to label
     }
-    val alias = contactLookupAlias(rawCommand) ?: return null
-    val safeAlias = normalizeContactText(alias).replace(" ", "_")
+    val alias = contactLookupAlias(rawCommand, selectedContactName) ?: return null
+    val safeAlias = normalizeContactText(alias)
+        .split(" ")
+        .map(::normalizeContactSearchToken)
+        .filter { it.isNotBlank() }
+        .joinToString("_")
+    if (safeAlias.isBlank()) return null
     return "contact_alias_name_$safeAlias" to alias
 }
 
@@ -361,11 +397,15 @@ private fun findContactPhonesForCommand(
     val savedRelationshipName = relationKey?.let {
         prefs.getString("contact_alias_$it", null)
     }?.let { normalizeContactText(it) }.orEmpty()
+    val naturalMessageBeforeDiye = Regex(
+        """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).containsMatchIn(rawCommand)
 
     val stopWords = setOf(
         "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "call",
-        "whatsapp", "tan", "ten", "dan", "den", "ile", "yoluyla", "mesaj", "mesaji", "mesajini", "mesajina",
-        "yaz", "gonder", "gönder", "gondermeyi", "lutfen", "a", "ac", "diye", "at", "yolla", "ilet", "sms"
+        "whatsapp", "whatsapptan", "tan", "ten", "dan", "den", "ile", "yoluyla",
+        "mesaj", "mesaji", "mesajini", "mesajina", "yaz", "gonder", "gönder", "gondermeyi",
+        "lutfen", "a", "ac", "diye", "at", "yolla", "ilet", "sms"
     )
     val alias = contactLookupAlias(rawCommand)
     val queryTokens = (alias?.split(" ") ?: normalizedCommand.split(" "))
@@ -394,7 +434,7 @@ private fun findContactPhonesForCommand(
                 val number = cursor.getString(numberIndex)?.trim().orEmpty()
                 if (displayName.isBlank() || number.isBlank()) continue
                 val normalizedName = normalizeContactText(displayName)
-                val nameWords = normalizedName.split(" ").toSet()
+                val nameWords = normalizedName.split(" ").map(::normalizeContactSearchToken)
                 val score = if (relationAliases != null) {
                     when {
                         savedRelationshipName.isNotBlank() && normalizedName == savedRelationshipName -> 150
@@ -407,7 +447,11 @@ private fun findContactPhonesForCommand(
                     }
                 } else {
                     when {
-                        normalizedName == queryText -> 120
+                        normalizedName == queryText -> 130
+                        naturalMessageBeforeDiye && queryTokens.size >= nameWords.size &&
+                            nameWords.isNotEmpty() && nameWords.indices.all { index ->
+                                queryTokens[index] == nameWords[index] || queryTokens[index].startsWith(nameWords[index])
+                            } -> 115
                         queryTokens.isNotEmpty() && queryTokens.all { query ->
                             nameWords.any { it == query || (query.length >= 3 && it.startsWith(query)) }
                         } -> 100
@@ -468,19 +512,49 @@ private fun contactActionKind(rawText: String): String? {
     return null
 }
 
-private fun extractWhatsAppMessage(rawText: String): String? {
+private fun extractWhatsAppMessage(rawText: String, recipientName: String? = null): String? {
     val quoted = Regex("""["“](.+?)["”]""").find(rawText)?.groupValues?.getOrNull(1)?.trim()
     if (!quoted.isNullOrBlank()) return quoted
 
-    val relationLead = Regex(
-        """(?iu)\b(?:babam|baba|annem|anne|abim|abi|ablam|abla|eşim|esim)[\p{L}]*\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?(.+?)\s+diye\s+mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
-    ).find(rawText)?.groupValues?.getOrNull(1)?.trim()
-    if (!relationLead.isNullOrBlank()) return relationLead.trim().trim('"', '\'', '“', '”', ' ')
+    val messageSuffix = Regex(
+        """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(rawText)
+    val endMessageSuffix = Regex(
+        """(?iu)\s+(?:whatsapp(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj(?:ı|i|ini|ini|ını)?\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(rawText)
+    val marker = messageSuffix ?: endMessageSuffix ?: return null
+    val phrase = rawText.substring(0, marker.range.first).trim()
+    val trailingText = if (messageSuffix == null) {
+        rawText.substring(marker.range.last + 1).trim().trim(':', '-', ' ')
+    } else ""
+    if (trailingText.isNotBlank()) return trailingText
 
-    val appLead = Regex(
-        """(?iu)\bwhatsapp(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+(.+?)\s+diye\s+mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
-    ).find(rawText)?.groupValues?.getOrNull(1)?.trim()
-    return appLead?.takeIf { it.isNotBlank() }?.trim('"', '\'', '“', '”', ' ')
+    val recipient = recipientName?.takeIf { it.isNotBlank() } ?: run {
+        val relationTokens = normalizeContactText(phrase).split(" ")
+        val relationshipKnown = relationshipPreferenceKey(phrase) != null
+        if (!relationshipKnown || relationTokens.size < 2) return null
+        relationTokens.first()
+    }
+
+    val phraseTokens = phrase.split(Regex("""\s+""")).filter { it.isNotBlank() }.toMutableList()
+    while (phraseTokens.isNotEmpty()) {
+        val first = normalizeContactText(phraseTokens.first())
+        if (first == "whatsapp" || first == "whatsapptan" || first in setOf("tan", "ten", "dan", "den")) {
+            phraseTokens.removeAt(0)
+        } else break
+    }
+    val queryTokens = phraseTokens.map(::normalizeContactSearchToken)
+    val recipientTokens = normalizeContactText(recipient).split(" ").map(::normalizeContactSearchToken)
+    if (queryTokens.isEmpty() || recipientTokens.isEmpty()) return null
+    val matchedCount = minOf(queryTokens.size, recipientTokens.size).downTo(1).firstOrNull { count ->
+        (0 until count).all { index ->
+            queryTokens[index] == recipientTokens[index] || queryTokens[index].startsWith(recipientTokens[index])
+        }
+    } ?: return null
+    val message = phraseTokens.drop(matchedCount).joinToString(" ")
+        .trim()
+        .trim(',', ':', '-', ' ', '\'', '"', '“', '”')
+    return message.takeIf { it.isNotBlank() }
 }
 
 private fun isMynAssistantAccessibilityEnabled(context: Context): Boolean {
