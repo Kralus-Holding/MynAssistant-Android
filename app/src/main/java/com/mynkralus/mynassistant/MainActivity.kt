@@ -30,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -136,6 +137,7 @@ class MainActivity : ComponentActivity() {
                     ?: currentUser?.email?.substringBefore("@").orEmpty())
             }
             var signedIn by remember { mutableStateOf(currentUser != null) }
+            var photoUrl by remember { mutableStateOf(currentUser?.photoUrl?.toString().orEmpty()) }
             var googleStatus by remember { mutableStateOf<String?>(null) }
             var accountMenuExpanded by remember { mutableStateOf(false) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -161,6 +163,8 @@ class MainActivity : ComponentActivity() {
                                         ?: user.email?.substringBefore("@").orEmpty()
                                     email = user.email.orEmpty()
                                     phone = user.phoneNumber.orEmpty()
+                                    photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
+                                        ?: account.photoUrl?.toString().orEmpty()
                                     signedIn = true
                                     saveFirebaseProfile(
                                         user = user,
@@ -168,7 +172,7 @@ class MainActivity : ComponentActivity() {
                                         isNewUser = task.result?.additionalUserInfo?.isNewUser == true
                                     ) { firestoreError ->
                                         googleStatus = if (firestoreError == null) {
-                                            "Google ile Firebase girişi başarılı."
+                                            "Google ile giriş yapıldı."
                                         } else {
                                             "Giriş başarılı; profil Firestore'a kaydedilemedi. Firestore veritabanını ve güvenlik kurallarını kontrol et. ($firestoreError)"
                                         }
@@ -201,7 +205,7 @@ class MainActivity : ComponentActivity() {
                 AssistantScreen(
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
-                    signedIn = signedIn, name = name, email = email, phone = phone,
+                    signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
                     login = { identity, password, report ->
                         val cleanEmail = identity.trim()
                         if (!cleanEmail.contains("@")) {
@@ -226,6 +230,7 @@ class MainActivity : ComponentActivity() {
                                                 ?: user.email?.substringBefore("@").orEmpty()
                                             email = user.email.orEmpty()
                                             phone = user.phoneNumber.orEmpty()
+                                            photoUrl = user.photoUrl?.toString().orEmpty()
                                             signedIn = true
                                             saveFirebaseProfile(user, "password", false) { firestoreError ->
                                                 val message = if (firestoreError == null) {
@@ -270,6 +275,7 @@ class MainActivity : ComponentActivity() {
                                                 name = cleanName
                                                 email = activeUser.email.orEmpty()
                                                 phone = activeUser.phoneNumber.orEmpty()
+                                                photoUrl = activeUser.photoUrl?.toString().orEmpty()
                                                 signedIn = true
                                                 activeUser.sendEmailVerification().addOnCompleteListener { verifyTask ->
                                                     saveFirebaseProfile(
@@ -306,6 +312,7 @@ class MainActivity : ComponentActivity() {
                         name = ""
                         email = ""
                         phone = ""
+                        photoUrl = ""
                         googleStatus = "Oturum kapatıldı."
                     },
                     googleLogin = startGoogleSignIn,
@@ -321,7 +328,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, login: (String, String, (String) -> Unit) -> Unit,
+    email: String, phone: String, photoUrl: String, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
     googleLogin: () -> Unit,
     googleStatus: String?, accountMenuExpanded: Boolean, toggleAccountMenu: () -> Unit
@@ -382,13 +389,13 @@ private fun AssistantScreen(
                             Text("Ad: " + name)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+                            googleStatus?.let { status -> Text(status, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
                         } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.REGISTER })
                         Page.REGISTER -> if (signedIn) {
                             Text("Firebase hesabın açık.", color = MaterialTheme.colorScheme.secondary)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+                            googleStatus?.let { status -> Text(status, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
                         } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.LOGIN })
                         Page.DEVICES -> {
@@ -476,7 +483,24 @@ private fun AssistantScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                MynLogo()
+                                if (signedIn) {
+                                    if (photoUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model = photoUrl,
+                                            contentDescription = "Google profil fotoğrafı",
+                                            modifier = Modifier.size(58.dp).clip(CircleShape)
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.AccountCircle,
+                                            contentDescription = "Hesap fotoğrafı",
+                                            modifier = Modifier.size(58.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else {
+                                    MynLogo()
+                                }
                                 Column(Modifier.weight(1f)) {
                                     Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                     Text(if (signedIn) email.ifBlank { phone } else "Google hesabını bağla", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
@@ -512,7 +536,7 @@ private fun AssistantScreen(
                                             }
                                         }
                                     }
-                                    googleStatus?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary) }
+                                    googleStatus?.let { status -> Text(status, fontSize = 11.sp, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary) }
                                 }
                             }
                         }
@@ -588,7 +612,7 @@ private fun AuthForm(
                     Text("Google ile devam et")
                 }
             }
-            googleStatus?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+            googleStatus?.let { status -> Text(status, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
             Text("Hesap Firebase Authentication ile yönetilir. E-posta doğrulaması için gelen kutunu kontrol et.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
