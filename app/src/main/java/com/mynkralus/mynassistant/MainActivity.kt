@@ -674,7 +674,7 @@ private fun AssistantScreen(
         if (!signedIn) {
             feedback = "Devam etmek için önce giriş yap."
         } else if (pcBridgeUrl.isBlank()) {
-            feedback = "Önce Ayarlar bölümüne Windows köprü adresini gir."
+            feedback = "Önce bilgisayar bağlantı ayarlarını tamamla."
             page = Page.SETTINGS
         } else {
             savePcBridgeSettings(pcBridgeUrl, pcBridgeToken)
@@ -692,7 +692,7 @@ private fun AssistantScreen(
         if (!signedIn) {
             feedback = "Devam etmek için önce giriş yap."
         } else if (!localPcConnected) {
-            feedback = "Önce Ayarlar bölümünden Windows köprüsünü bağla ve bağlantıyı test et."
+            feedback = "Önce bilgisayar bağlantı ayarlarını tamamla."
         } else {
             sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, commandText) { result ->
                 localPcConnected = result.connected
