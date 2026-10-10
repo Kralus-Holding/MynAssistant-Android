@@ -588,9 +588,9 @@ private fun AssistantScreen(
                                             Row(
                                                 Modifier.fillMaxWidth().clickable {
                                                     accountListExpanded = false
-                                                    if (saved.email.equals(email, ignoreCase = true) && signedIn) {
-                                                        googleStatus = "Bu Google hesabı zaten açık."
-                                                    } else selectSavedGoogleAccount(saved.email)
+                                                    if (!(saved.email.equals(email, ignoreCase = true) && signedIn)) {
+                                                        selectSavedGoogleAccount(saved.email)
+                                                    }
                                                 }.padding(horizontal = 10.dp, vertical = 9.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
