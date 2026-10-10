@@ -64,10 +64,34 @@ import androidx.compose.ui.platform.LocalContext
 import coil.ImageLoader
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
 private const val PREFS = "mynassistant_prefs"
+private const val GOOGLE_ACCOUNTS_KEY = "saved_google_accounts"
+
+private data class SavedGoogleAccount(val email: String, val name: String, val photoUrl: String)
+
+private fun loadSavedGoogleAccounts(prefs: android.content.SharedPreferences): List<SavedGoogleAccount> {
+    val array = try { JSONArray(prefs.getString(GOOGLE_ACCOUNTS_KEY, "[]") ?: "[]") } catch (_: Exception) { JSONArray() }
+    return buildList {
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val email = item.optString("email").trim()
+            if (email.isNotBlank()) add(SavedGoogleAccount(email, item.optString("name"), item.optString("photoUrl")))
+        }
+    }.distinctBy { it.email.lowercase() }
+}
+
+private fun saveGoogleAccount(prefs: android.content.SharedPreferences, account: SavedGoogleAccount): List<SavedGoogleAccount> {
+    val updated = (listOf(account) + loadSavedGoogleAccounts(prefs)).distinctBy { it.email.lowercase() }
+    val array = JSONArray()
+    updated.forEach { array.put(JSONObject().put("email", it.email).put("name", it.name).put("photoUrl", it.photoUrl)) }
+    prefs.edit().putString(GOOGLE_ACCOUNTS_KEY, array.toString()).apply()
+    return updated
+}
 
 private fun firebaseAuthErrorMessage(error: Exception?): String {
     val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
@@ -146,6 +170,15 @@ class MainActivity : ComponentActivity() {
                     .build()
             }
             val currentUser = auth.currentUser
+            var savedGoogleAccounts by remember { mutableStateOf(loadSavedGoogleAccounts(prefs)) }
+            if (currentUser != null && currentUser.providerData.any { it.providerId == "google.com" } &&
+                !currentUser.email.isNullOrBlank() &&
+                savedGoogleAccounts.none { it.email.equals(currentUser.email, ignoreCase = true) }) {
+                savedGoogleAccounts = saveGoogleAccount(
+                    prefs,
+                    SavedGoogleAccount(currentUser.email.orEmpty(), currentUser.displayName.orEmpty(), currentUser.photoUrl?.toString().orEmpty())
+                )
+            }
             var dark by remember { mutableStateOf(prefs.getBoolean("dark", true)) }
             var email by remember { mutableStateOf(currentUser?.email.orEmpty()) }
             var phone by remember { mutableStateOf(currentUser?.phoneNumber.orEmpty()) }
@@ -181,6 +214,7 @@ class MainActivity : ComponentActivity() {
                                     phone = user.phoneNumber.orEmpty()
                                     photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
                                         ?: account.photoUrl?.toString().orEmpty()
+                                    savedGoogleAccounts = saveGoogleAccount(prefs, SavedGoogleAccount(email, name, photoUrl))
                                     signedIn = true
                                     saveFirebaseProfile(
                                         user = user,
@@ -211,6 +245,13 @@ class MainActivity : ComponentActivity() {
                 googleSignInClient.signOut().addOnCompleteListener {
                     googleLauncher.launch(googleSignInClient.signInIntent)
                 }
+            }
+            val selectSavedGoogleAccount: (String) -> Unit = { selectedEmail ->
+                val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestEmail().requestProfile().requestIdToken(WEB_CLIENT_ID)
+                    .setAccountName(selectedEmail).build()
+                val client = GoogleSignIn.getClient(this@MainActivity, options)
+                client.signOut().addOnCompleteListener { googleLauncher.launch(client.signInIntent) }
             }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
@@ -337,6 +378,8 @@ class MainActivity : ComponentActivity() {
                         googleStatus = "Oturum kapatıldı."
                     },
                     googleLogin = startGoogleSignIn,
+                    selectSavedGoogleAccount = selectSavedGoogleAccount,
+                    savedGoogleAccounts = savedGoogleAccounts,
                     googleStatus = googleStatus,
                 )
             }
@@ -350,10 +393,13 @@ private fun AssistantScreen(
     email: String, phone: String, photoUrl: String, photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
     googleLogin: () -> Unit,
+    selectSavedGoogleAccount: (String) -> Unit,
+    savedGoogleAccounts: List<SavedGoogleAccount>,
     googleStatus: String?
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
     var drawer by remember { mutableStateOf(false) }
+    var accountListExpanded by remember { mutableStateOf(false) }
     var command by remember { mutableStateOf("") }
     var feedback by remember { mutableStateOf<String?>(null) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -498,8 +544,8 @@ private fun AssistantScreen(
                     ) {
                         Column {
                             Row(
-                                Modifier.fillMaxWidth().clickable(onClick = googleLogin).padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                Modifier.fillMaxWidth().clickable { accountListExpanded = !accountListExpanded }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.Top,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 if (signedIn) {
@@ -508,13 +554,13 @@ private fun AssistantScreen(
                                             model = photoUrl,
                                             imageLoader = photoImageLoader,
                                             contentDescription = "Google profil fotoğrafı",
-                                            modifier = Modifier.size(48.dp).clip(CircleShape)
+                                            modifier = Modifier.padding(top = 4.dp).size(48.dp).clip(CircleShape)
                                         )
                                     } else {
                                         Icon(
                                             Icons.Default.AccountCircle,
                                             contentDescription = "Hesap fotoğrafı",
-                                            modifier = Modifier.size(48.dp),
+                                            modifier = Modifier.padding(top = 4.dp).size(48.dp),
                                             tint = MaterialTheme.colorScheme.primary
                                         )
                                     }
@@ -525,7 +571,58 @@ private fun AssistantScreen(
                                     Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                     Text(if (signedIn) email.ifBlank { phone } else "Google hesabını bağla", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
                                 }
-                                Text("▼", color = MaterialTheme.colorScheme.primary)
+                                Text(if (accountListExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
+                            }
+                            androidx.compose.animation.AnimatedVisibility(visible = accountListExpanded) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 8.dp)
+                                        .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.background)
+                                        .padding(vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    if (savedGoogleAccounts.isEmpty()) {
+                                        Text("Henüz kaydedilmiş Google hesabı yok.", Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                                    } else {
+                                        savedGoogleAccounts.forEach { saved ->
+                                            Row(
+                                                Modifier.fillMaxWidth().clickable {
+                                                    accountListExpanded = false
+                                                    if (saved.email.equals(email, ignoreCase = true) && signedIn) {
+                                                        googleStatus = "Bu Google hesabı zaten açık."
+                                                    } else selectSavedGoogleAccount(saved.email)
+                                                }.padding(horizontal = 10.dp, vertical = 9.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                if (saved.photoUrl.isNotBlank()) {
+                                                    AsyncImage(model = saved.photoUrl, imageLoader = photoImageLoader,
+                                                        contentDescription = "Kaydedilmiş Google hesabı",
+                                                        modifier = Modifier.size(36.dp).clip(CircleShape))
+                                                } else {
+                                                    Icon(Icons.Default.AccountCircle, contentDescription = null,
+                                                        modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+                                                }
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(saved.name.ifBlank { saved.email.substringBefore("@") }, fontSize = 14.sp,
+                                                        fontWeight = FontWeight.Medium, maxLines = 1)
+                                                    Text(saved.email, fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
+                                                }
+                                                if (saved.email.equals(email, ignoreCase = true) && signedIn) {
+                                                    Text("Etkin", fontSize = 11.sp, color = Color(0xFF4CAF50))
+                                                }
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                                    TextButton(onClick = { accountListExpanded = false; googleLogin() },
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                                        Icon(Icons.Default.PersonAdd, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Hesap ekle")
+                                    }
+                                }
                             }
                             googleStatus?.let { status ->
                                 Text(
