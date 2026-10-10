@@ -1,5 +1,6 @@
 package com.mynkralus.mynassistant
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -199,11 +200,25 @@ private fun contactActionKind(rawText: String): String? {
     val normalized = rawText.trim().lowercase(Locale.forLanguageTag("tr-TR"))
         .replace(Regex("\\s+"), " ")
     val words = normalized.split(" ")
-    val actionWords = setOf("ara", "aramak", "arayın", "arayalim", "arayalım", "mesaj", "yaz", "gönder", "gonder")
-    if (normalized.contains("whatsapp") && words.any { it in actionWords }) return "WHATSAPP"
+    val whatsappCallWords = setOf("ara", "aramak", "arayın", "arayalim", "arayalım", "call")
+    val whatsappMessageWords = setOf("mesaj", "mesajı", "mesajini", "mesajını", "yaz", "gönder", "gonder")
+    if (normalized.contains("whatsapp") && words.any { it in whatsappCallWords }) return "WHATSAPP_CALL"
+    if (normalized.contains("whatsapp") && words.any { it in whatsappMessageWords }) return "WHATSAPP_MESSAGE"
     val searchAppMentioned = listOf("youtube", "google", "chrome", "tarayıcı", "tarayici", "internet").any { normalized.contains(it) }
     if (!searchAppMentioned && words.any { it in setOf("ara", "aramak", "arayın", "arayalım", "arayalim") }) return "DIAL"
     return null
+}
+
+private fun extractWhatsAppMessage(rawText: String): String? =
+    Regex("""["“](.+?)["”]""").find(rawText)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+
+private fun isMynAssistantAccessibilityEnabled(context: Context): Boolean {
+    val enabledServices = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    ).orEmpty()
+    val expected = ComponentName(context, MynAssistantAccessibilityService::class.java).flattenToString()
+    return enabledServices.split(':').any { it.equals(expected, ignoreCase = true) }
 }
 
 private fun normalizeWhatsAppNumber(rawNumber: String): String {
@@ -215,18 +230,45 @@ private fun normalizeWhatsAppNumber(rawNumber: String): String {
     }
 }
 
-private fun openWhatsAppChat(context: Context, rawNumber: String): String {
+private fun openWhatsAppChat(
+    context: Context,
+    rawNumber: String,
+    autoAction: String? = null,
+    message: String? = null
+): String {
     val number = normalizeWhatsAppNumber(rawNumber)
     if (number.length < 7) return "WhatsApp için geçerli bir telefon numarası bulunamadı."
+    if (autoAction != null && !isMynAssistantAccessibilityEnabled(context)) {
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return "Otomatik WhatsApp işlemi için Android Erişilebilirlik ayarlarında MynAssistant hizmetini aç; sonra komutu yeniden ver."
+    }
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (autoAction != null) {
+        prefs.edit()
+            .putString("pending_whatsapp_action", autoAction)
+            .putLong("pending_whatsapp_action_at", System.currentTimeMillis())
+            .putString("pending_whatsapp_message", message.orEmpty())
+            .putBoolean("pending_whatsapp_message_ready", false)
+            .putString("whatsapp_auto_call_status", "waiting")
+            .apply()
+    } else {
+        prefs.edit()
+            .remove("pending_whatsapp_action")
+            .remove("pending_whatsapp_action_at")
+            .remove("pending_whatsapp_message")
+            .remove("pending_whatsapp_message_ready")
+            .apply()
+    }
     val url = Uri.parse("https://wa.me/$number")
     val appIntent = Intent(Intent.ACTION_VIEW, url).setPackage("com.whatsapp")
-    val intent = if (appIntent.resolveActivity(context.packageManager) != null) {
-        appIntent
-    } else {
-        Intent(Intent.ACTION_VIEW, url)
-    }
+    val intent = if (appIntent.resolveActivity(context.packageManager) != null) appIntent else Intent(Intent.ACTION_VIEW, url)
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     context.startActivity(intent)
-    return "WhatsApp sohbeti açıldı. Sesli aramayı veya mesajı WhatsApp içinden başlatabilirsin."
+    return when (autoAction) {
+        "CALL" -> "WhatsApp sohbeti açıldı; MynAssistant sesli arama düğmesine otomatik basmayı deneyecek."
+        "MESSAGE" -> "WhatsApp sohbeti açıldı; mesaj otomatik gönderilmeye hazırlanıyor."
+        else -> "WhatsApp sohbeti açıldı."
+    }
 }
 
 /**
@@ -242,8 +284,13 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
     return try {
         val contactAction = contactActionKind(rawText)
         val number = extractPhoneNumber(rawText)
-        if (contactAction == "WHATSAPP" && number != null) {
-            return openWhatsAppChat(context, number)
+        if (contactAction == "WHATSAPP_CALL" && number != null) {
+            return openWhatsAppChat(context, number, autoAction = "CALL")
+        }
+        if (contactAction == "WHATSAPP_MESSAGE" && number != null) {
+            val message = extractWhatsAppMessage(rawText)
+                ?: return "Gönderilecek mesajı tırnak içinde komuta ekle. Örn. WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
+            return openWhatsAppChat(context, number, autoAction = "MESSAGE", message = message)
         }
         if (contactAction == "DIAL" && number != null) {
             context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}")))
@@ -830,6 +877,7 @@ private fun AssistantScreen(
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
     var pendingContactAction by remember { mutableStateOf<String?>(null) }
+    var pendingWhatsappMessage by remember { mutableStateOf<String?>(null) }
     val commandContext = LocalContext.current
     var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
     var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
@@ -887,6 +935,26 @@ private fun AssistantScreen(
                 activeCommandListener = registration
             }
         }
+    }
+
+    DisposableEffect(commandContext) {
+        val prefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
+            if (key == "whatsapp_auto_call_status") {
+                val status = shared?.getString(key, "").orEmpty()
+                val message = when (status) {
+                    "started" -> "WhatsApp sesli araması başlatıldı."
+                    "sent" -> "WhatsApp mesajı gönderildi."
+                    "expired" -> "WhatsApp otomatik işlemi başlatılamadı. WhatsApp sohbetindeki arama/mesaj düğmesini kontrol et."
+                    else -> null
+                }
+                if (message != null) {
+                    (commandContext as? ComponentActivity)?.runOnUiThread { feedback = message }
+                }
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     DisposableEffect(firebaseUserId) {
@@ -1013,11 +1081,23 @@ private fun AssistantScreen(
             }
             if (phoneNumber.isNullOrBlank()) {
                 feedback = "Seçilen kişide telefon numarası bulunamadı."
-            } else if (action == "WHATSAPP") {
+            } else if (action == "WHATSAPP_CALL") {
                 feedback = try {
-                    openWhatsAppChat(commandContext, phoneNumber)
+                    openWhatsAppChat(commandContext, phoneNumber, autoAction = "CALL")
                 } catch (_: Exception) {
-                    "WhatsApp sohbeti açılamadı. WhatsApp'ın kurulu olduğunu kontrol et."
+                    "WhatsApp araması başlatılamadı. WhatsApp'ın kurulu olduğunu kontrol et."
+                }
+            } else if (action == "WHATSAPP_MESSAGE") {
+                val message = pendingWhatsappMessage
+                pendingWhatsappMessage = null
+                if (message.isNullOrBlank()) {
+                    feedback = "Göndermek istediğin mesajı tırnak içinde komuta ekle. Örn. Anneme WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
+                } else {
+                    feedback = try {
+                        openWhatsAppChat(commandContext, phoneNumber, autoAction = "MESSAGE", message = message)
+                    } catch (_: Exception) {
+                        "WhatsApp mesajı gönderilemedi. WhatsApp'ın kurulu olduğunu kontrol et."
+                    }
                 }
             } else {
                 feedback = try {
@@ -1048,12 +1128,16 @@ private fun AssistantScreen(
 
         when {
             textCommand.isBlank() -> feedback = "Önce bir komut yaz."
+            target == "PHONE" && contactAction == "WHATSAPP_MESSAGE" && extractWhatsAppMessage(textCommand) == null -> {
+                feedback = "Göndermek istediğin mesajı tırnak içinde komuta ekle. Örn. Anneme WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
+            }
             target == "PHONE" && contactAction != null && phoneNumber == null -> {
                 pendingContactAction = contactAction
-                feedback = if (contactAction == "WHATSAPP") {
-                    "WhatsApp işlemi için aramak veya mesaj göndermek istediğin kişiyi seç."
-                } else {
-                    "Aramak istediğin kişiyi rehberden seç."
+                pendingWhatsappMessage = extractWhatsAppMessage(textCommand)
+                feedback = when (contactAction) {
+                    "WHATSAPP_CALL" -> "WhatsApp'tan aranacak kişiyi rehberden seç."
+                    "WHATSAPP_MESSAGE" -> "WhatsApp mesajı gönderilecek kişiyi rehberden seç."
+                    else -> "Aramak istediğin kişiyi rehberden seç."
                 }
                 contactPickerLauncher.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
             }
@@ -1412,6 +1496,27 @@ private fun AssistantScreen(
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             HorizontalDivider()
+                            Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        "Bu izin açıkken, yalnızca sen WhatsApp arama veya mesaj komutu verdiğinde MynAssistant ilgili sohbeti açıp sesli arama ya da gönder düğmesine basmayı dener. Hizmet yalnızca WhatsApp ekranında çalışır; içeriği kaydetmez veya sunucuya göndermez.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .76f)
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Settings, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Erişilebilirlik ayarlarını aç")
+                                    }
+                                }
+                            }
+                            HorizontalDivider()
                             Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(
                                 Modifier.fillMaxWidth(),
@@ -1691,7 +1796,7 @@ private fun AssistantScreen(
                         if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.2", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.2.3", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
