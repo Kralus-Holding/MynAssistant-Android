@@ -1153,6 +1153,7 @@ private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
 private fun TvRemotePanel(
     onCommand: (String, Map<String, Any>) -> Unit,
     enabled: Boolean,
+    mouseEnabled: Boolean = enabled,
     modifier: Modifier = Modifier
 ) {
     val buttons = listOf(
@@ -1191,13 +1192,13 @@ private fun TvRemotePanel(
         Column(
             Modifier.fillMaxWidth().height(250.dp)
                 .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
-                .pointerInput(enabled) {
+                .pointerInput(mouseEnabled) {
                     var deltaX = 0f
                     var deltaY = 0f
                     detectDragGestures(
                         onDragStart = { deltaX = 0f; deltaY = 0f },
                         onDragEnd = {
-                            if (enabled && (deltaX != 0f || deltaY != 0f)) {
+                            if (mouseEnabled && (deltaX != 0f || deltaY != 0f)) {
                                 onCommand("mouse_move", mapOf("dx" to deltaX.roundToInt(), "dy" to deltaY.roundToInt()))
                             }
                         },
@@ -1208,10 +1209,10 @@ private fun TvRemotePanel(
                         }
                     )
                 }
-                .pointerInput(enabled) {
+                 .pointerInput(mouseEnabled) {
                     detectTapGestures(
-                        onTap = { if (enabled) onCommand("mouse_click", emptyMap()) },
-                        onLongPress = { if (enabled) onCommand("mouse_right_click", emptyMap()) }
+                        onTap = { if (mouseEnabled) onCommand("mouse_click", emptyMap()) },
+                        onLongPress = { if (mouseEnabled) onCommand("mouse_right_click", emptyMap()) }
                     )
                 }
                 .padding(16.dp),
@@ -1219,17 +1220,21 @@ private fun TvRemotePanel(
             verticalArrangement = Arrangement.Center
         ) {
             Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp),
-                tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f))
+                tint = if (mouseEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f))
             Spacer(Modifier.height(8.dp))
             Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
             Text(
-                if (enabled) "Sürükle: fare • Dokun: sol tık • Basılı tut: sağ tık"
+                if (mouseEnabled) "Sürükle: fare • Dokun: sol tık • Basılı tut: sağ tık"
+                else if (enabled) "Ses ve masaüstü komutları bağlı. Yerel köprü fare hareketini desteklemiyor."
                 else "Bilgisayar bağlandığında fare kontrolü etkinleşecek.",
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(6.dp))
-            Text("Komutlar Firebase kuyruğuna gönderilir; Windows Agent'ın bunları alıp uygulaması gerekir.",
-                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center)
+            Text(
+                if (mouseEnabled) "Komutlar Firebase kuyruğuna gönderilir; Windows Agent'ın bunları alıp uygulaması gerekir."
+                else "Ses ve masaüstü komutları yerel Windows köprüsüne gönderilir.",
+                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center
+            )
         }
     }
 }
