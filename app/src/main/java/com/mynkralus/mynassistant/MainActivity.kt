@@ -87,7 +87,7 @@ private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
 private const val PREFS = "mynassistant_prefs"
 private const val GOOGLE_ACCOUNTS_KEY = "saved_google_accounts"
-private val COMPUTER_COMMAND_PREFIX = Regex("^(bilgisayar(?:ım|a|da|dan)?|pc|windows)\\s*[:,;-]?\\s+", RegexOption.IGNORE_CASE)
+private val COMPUTER_COMMAND_PREFIX = Regex("^(bilgisayar(?:ım|a|da|dan)?|pc|windows)(?:\\s*[:,;-]\\s*|\\s+|$)", RegexOption.IGNORE_CASE)
 
 private data class SavedGoogleAccount(val email: String, val name: String, val photoUrl: String)
 
@@ -939,7 +939,7 @@ private fun AssistantScreen(
                             command.isBlank() && commandTarget == "AUTO" ->
                                 "Otomatik modda “bilgisayar …”, “PC …” veya “Windows …” yazarsan komut bilgisayara gider."
                             previewTarget == "PC" ->
-                                "Hedef: Windows bilgisayar. Komut, gönderilmeden önce hedef etiketi temizlenerek iletilir."
+                                "Hedef: Windows bilgisayar. Varsa bilgisayar/PC etiketi gönderilmeden önce kaldırılır."
                             else ->
                                 "Hedef: Bu Android telefonu."
                         },
