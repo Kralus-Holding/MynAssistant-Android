@@ -309,6 +309,8 @@ private fun contactLookupAlias(rawCommand: String, selectedContactName: String? 
         """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
     ).find(withoutQuoted) ?: Regex(
         """(?iu)\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj(?:ı|i|ini|ını)?\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(withoutQuoted) ?: Regex(
+        """(?iu)\s+(?:at|yaz|gönder|gonder|yolla|ilet)\s*[.!?]*$"""
     ).find(withoutQuoted)
     val phraseBeforeMessage = if (messageIntent != null) {
         withoutQuoted.substring(0, messageIntent.range.first)
@@ -333,7 +335,7 @@ private fun contactLookupAlias(rawCommand: String, selectedContactName: String? 
             }
         }
         if (matchedCount != null) {
-            return queryTokens.take(matchedCount).joinToString(" ").takeIf { it.isNotBlank() }
+            return queryTokens.take(matchedCount).joinToString(" ").trim().takeIf { it.isNotBlank() }
         }
     }
 
@@ -391,10 +393,8 @@ private fun findContactPhonesForCommand(
     val normalizedCommand = normalizeContactText(withoutQuotedMessage)
     val relationAliases = relationshipAliasesForCommand(withoutQuotedMessage)
     val relationKey = relationshipPreferenceKey(withoutQuotedMessage)
-    val naturalMessageCommand = Regex(
+    val naturalMessageCommand = contactActionKind(rawCommand) == "WHATSAPP_MESSAGE" || Regex(
         """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
-    ).containsMatchIn(rawCommand) || Regex(
-        """(?iu)\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj(?:ı|i|ini|ını)?\s+(?:at|gönder|gonder|yolla|yaz)\b"""
     ).containsMatchIn(rawCommand)
     val aliasSpec = if (resolveSavedAlias && !naturalMessageCommand) contactAliasSpec(rawCommand) else null
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -418,7 +418,6 @@ private fun findContactPhonesForCommand(
         .filter { it.isNotBlank() && it !in stopWords && it !in setOf("i", "yi", "yı", "yu", "yü", "ı", "u", "ü") }
     val queryText = queryTokens.joinToString(" ")
 
-    // If a nickname was saved earlier, reuse it when a new message command starts with that name.
     if (resolveSavedAlias && naturalMessageCommand && queryTokens.isNotEmpty()) {
         val savedAliases = prefs.all.keys
             .filter { it.startsWith("contact_alias_name_") && !it.endsWith("_number") }
@@ -560,9 +559,10 @@ private fun extractWhatsAppMessage(rawText: String, recipientName: String? = nul
     val messageEnding = Regex(
         """(?iu)\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj(?:ı|i|ini|ını)?\s+(?:at|gönder|gonder|yolla|yaz)\b"""
     ).find(rawText)
-    val marker = withDiye ?: messageEnding ?: return null
+    val actionEnding = Regex("""(?iu)\s+(?:at|yaz|gönder|gonder|yolla|ilet)\s*[.!?]*$""").find(rawText)
+    val marker = withDiye ?: messageEnding ?: actionEnding ?: return null
     val phrase = rawText.substring(0, marker.range.first).trim()
-    val trailingText = if (withDiye == null) {
+    val trailingText = if (withDiye == null && messageEnding != null) {
         rawText.substring(marker.range.last + 1).trim().trim(':', '-', ' ')
     } else ""
     if (trailingText.isNotBlank()) return trailingText
@@ -1653,7 +1653,7 @@ private fun AssistantScreen(
                     if (message.isNullOrBlank()) {
                         recordIssue(
                             "MYN-WA-3001", "WhatsApp", 
-                            "Mesajın içeriğini ayıramadım. Örneğin: “Fatih'e naber diye WhatsApp'tan mesaj at” ya da “Fatih'e \\"Merhaba\\" mesajı gönder.”",
+                            "Mesajın içeriğini ayıramadım. Örneğin: Fatih'e naber diye WhatsApp'tan mesaj at.",
                             commandText,
                             "MESSAGE_PARSE_EMPTY; resolvedContact=" + contact.displayName
                         )
