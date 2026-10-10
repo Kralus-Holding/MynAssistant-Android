@@ -2731,11 +2731,18 @@ private fun AssistantScreen(
                                         .padding(vertical = 6.dp),
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    if (savedGoogleAccounts.isEmpty()) {
-                                        Text("Henüz kaydedilmiş Google hesabı yok.", Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                                    val otherGoogleAccounts = savedGoogleAccounts.filterNot { saved ->
+                                        signedIn && saved.email.equals(email, ignoreCase = true)
+                                    }
+                                    if (otherGoogleAccounts.isEmpty()) {
+                                        Text(
+                                            if (signedIn) "Başka kayıtlı hesap yok." else "Henüz kaydedilmiş Google hesabı yok.",
+                                            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                        )
                                     } else {
-                                        savedGoogleAccounts.forEach { saved ->
+                                        otherGoogleAccounts.forEach { saved ->
                                             Row(
                                                 Modifier.fillMaxWidth().clickable {
                                                     accountListExpanded = false
@@ -2759,9 +2766,6 @@ private fun AssistantScreen(
                                                         fontWeight = FontWeight.Medium, maxLines = 1)
                                                     Text(saved.email, fontSize = 12.sp,
                                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
-                                                }
-                                                if (saved.email.equals(email, ignoreCase = true) && signedIn) {
-                                                    Text("Etkin", fontSize = 11.sp, color = Color(0xFF4CAF50))
                                                 }
                                             }
                                         }
