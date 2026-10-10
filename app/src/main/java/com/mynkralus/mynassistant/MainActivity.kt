@@ -188,7 +188,7 @@ private fun launchInstalledApp(context: Context, packageNames: List<String>): Bo
 }
 
 private fun extractPhoneNumber(rawText: String): String? {
-    val candidate = Regex("""\\+?\\d[\\d\\s().-]{5,}\\d""").find(rawText)?.value ?: return null
+    val candidate = Regex("""\+?\d[\d\s().-]{5,}\d""").find(rawText)?.value ?: return null
     val digits = candidate.filter { it.isDigit() }
     return digits.takeIf { it.length >= 7 }
 }
