@@ -391,6 +391,39 @@ class MainActivity : ComponentActivity() {
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
                     firebaseUserId = auth.currentUser?.uid,
+                    initialPcBridgeUrl = prefs.getString("pc_bridge_url_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
+                    initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "meyene") ?: "meyene",
+                    savePcBridgeSettings = { url, token ->
+                        val scope = auth.currentUser?.uid ?: "guest"
+                        prefs.edit()
+                            .putString("pc_bridge_url_$scope", url.trim())
+                            .putString("pc_bridge_token_$scope", token.trim())
+                            .apply()
+                    },
+                    checkPcBridge = { url, token, report ->
+                        Thread {
+                            val result = callMynAiBridge(url, token)
+                            runOnUiThread {
+                                val user = auth.currentUser
+                                if (user != null && url.isNotBlank()) {
+                                    saveWindowsBridgeDevice(user, url, result.connected) { firestoreError ->
+                                        val finalResult = if (firestoreError == null) result else result.copy(
+                                            message = result.message + "\nCihaz bağlantısı Firebase'e kaydedilemedi: " + firestoreError
+                                        )
+                                        report(finalResult)
+                                    }
+                                } else {
+                                    report(result)
+                                }
+                            }
+                        }.start()
+                    },
+                    sendPcBridgeCommand = { url, token, commandText, report ->
+                        Thread {
+                            val result = callMynAiBridge(url, token, commandText)
+                            runOnUiThread { report(result) }
+                        }.start()
+                    },
                     sendRemoteCommand = { deviceId, commandName, payload, report ->
                         val user = auth.currentUser
                         if (user == null) {
@@ -538,6 +571,11 @@ class MainActivity : ComponentActivity() {
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
     email: String, phone: String, photoUrl: String, firebaseUserId: String?,
+    initialPcBridgeUrl: String,
+    initialPcBridgeToken: String,
+    savePcBridgeSettings: (String, String) -> Unit,
+    checkPcBridge: (String, String, (PcBridgeResult) -> Unit) -> Unit,
+    sendPcBridgeCommand: (String, String, String, (PcBridgeResult) -> Unit) -> Unit,
     sendRemoteCommand: (String, String, Map<String, Any>, (String) -> Unit) -> Unit,
     photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
@@ -555,6 +593,11 @@ private fun AssistantScreen(
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var command by remember { mutableStateOf("") }
     var feedback by remember { mutableStateOf<String?>(null) }
+    var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
+    var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
+    var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
+    var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
+    var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
 
     DisposableEffect(firebaseUserId) {
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
@@ -598,6 +641,38 @@ private fun AssistantScreen(
         onDispose { registration?.remove() }
     }
     val selectedDevice = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
+    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
+    val testPcBridgeNow: () -> Unit = {
+        if (!signedIn) {
+            feedback = "Önce Firebase hesabına giriş yap."
+        } else if (pcBridgeUrl.isBlank()) {
+            feedback = "Önce Ayarlar bölümüne Windows köprü adresini gir."
+            page = Page.SETTINGS
+        } else {
+            savePcBridgeSettings(pcBridgeUrl, pcBridgeToken)
+            pcBridgeBusy = true
+            checkPcBridge(pcBridgeUrl, pcBridgeToken) { result ->
+                pcBridgeBusy = false
+                localPcConnected = result.connected
+                pcBridgeStatus = result.message
+                if (localPcDeviceId != null) selectedDeviceId = localPcDeviceId
+                feedback = result.message
+            }
+        }
+    }
+    val sendLocalPcText: (String) -> Unit = { commandText ->
+        if (!signedIn) {
+            feedback = "Önce Firebase hesabına giriş yap."
+        } else if (!localPcConnected) {
+            feedback = "Önce Ayarlar bölümünden Windows köprüsünü bağla ve bağlantıyı test et."
+        } else {
+            sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, commandText) { result ->
+                localPcConnected = result.connected
+                pcBridgeStatus = result.message
+                feedback = result.message
+            }
+        }
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
