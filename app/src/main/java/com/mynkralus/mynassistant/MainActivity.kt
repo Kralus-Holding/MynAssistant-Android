@@ -505,7 +505,7 @@ private fun findContactPhonesForCommand(
         val mapped = unique.filter { normalizeContactText(it.displayName) == savedRelationshipName }
         if (mapped.isNotEmpty()) return mapped
     }
-    return unique.take(12)
+    return unique.take(50)
 }
 
 private fun requiredRuntimePermissionList(): List<String> = buildList {
@@ -1358,8 +1358,13 @@ private fun AssistantScreen(
                     putExtra("android.speech.extra.MAX_RESULTS", 1)
                 }
             )
-        } catch (_: Exception) {
-            feedback = "Bu telefonda sesli giriş hizmeti bulunamadı."
+        } catch (error: Exception) {
+            feedback = recordIssue(
+                "MYN-VOICE-7001", "Sesli komut",
+                "Sesli giriş açılamadı. Konuşma tanıma hizmetini ve mikrofon iznini kontrol et.",
+                command,
+                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+            )
         }
     }
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1441,32 +1446,64 @@ private fun AssistantScreen(
                     .document(commandId)
                     .addSnapshotListener { snapshot, error ->
                         if (error != null) {
-                            feedback = "Komut gönderildi ancak işlem durumu okunamadı."
+                            feedback = recordIssue(
+                                "MYN-PC-6001", "Bilgisayar komutu",
+                                "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
+                                targetPayload["text"]?.toString().orEmpty(),
+                                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                            )
                             activeCommandListener = null
                         } else if (snapshot == null || !snapshot.exists()) {
-                            feedback = "Komut kaydı bulunamadı; bilgisayarın bağlantısını kontrol et."
+                            feedback = recordIssue(
+                                "MYN-PC-6002", "Bilgisayar komutu",
+                                "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
+                                targetPayload["text"]?.toString().orEmpty(),
+                                "COMMAND_DOCUMENT_MISSING; id=" + commandId
+                            )
                             activeCommandListener = null
                         } else {
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
                             when (status) {
-                                "pending" -> feedback = "Komut kuyruğa alındı; Windows Agent'ın işlemesi bekleniyor."
-                                "running" -> feedback = "Windows Agent komutu uyguluyor..."
+                                "pending" -> feedback = "Komut bilgisayara ulaştı; işlemesi bekleniyor."
+                                "running" -> feedback = "Bilgisayar komutu uyguluyor..."
                                 "completed" -> {
                                     feedback = result.ifBlank { "Komut tamamlandı." }
                                     activeCommandListener = null
                                 }
                                 "failed" -> {
-                                    feedback = result.ifBlank { "Komut uygulanamadı." }
+                                    feedback = recordIssue(
+                                        "MYN-PC-6003", "Bilgisayar komutu",
+                                        result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
+                                        targetPayload["text"]?.toString().orEmpty(),
+                                        "REMOTE_COMMAND_FAILED; result=" + result
+                                    )
                                     activeCommandListener = null
                                 }
-                                else -> feedback = result.ifBlank {
-                                    "Komut durumu: " + status.ifBlank { "bilinmiyor" }
+                                else -> {
+                                    feedback = recordIssue(
+                                        "MYN-PC-6005", "Bilgisayar komutu",
+                                        "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
+                                        targetPayload["text"]?.toString().orEmpty(),
+                                        "UNKNOWN_COMMAND_STATUS=" + status
+                                    )
+                                    activeCommandListener = null
                                 }
                             }
                         }
                     }
                 activeCommandListener = registration
+            } else if (
+                message.contains("hata", ignoreCase = true) ||
+                message.contains("gönderilemedi", ignoreCase = true) ||
+                message.contains("başarısız", ignoreCase = true)
+            ) {
+                feedback = recordIssue(
+                    "MYN-PC-6006", "Bilgisayar bağlantısı",
+                    message,
+                    targetPayload["text"]?.toString().orEmpty(),
+                    "REMOTE_COMMAND_REJECTED; message=" + message
+                )
             }
         }
     }
@@ -1476,14 +1513,19 @@ private fun AssistantScreen(
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
             if (key == "whatsapp_auto_call_status") {
                 val status = shared?.getString(key, "").orEmpty()
-                val message = when (status) {
-                    "started" -> "WhatsApp sesli araması başlatıldı."
-                    "sent" -> "WhatsApp mesajı gönderildi."
-                    "expired" -> "WhatsApp otomatik işlemi başlatılamadı. WhatsApp sohbetindeki arama/mesaj düğmesini kontrol et."
-                    else -> null
-                }
-                if (message != null) {
-                    (commandContext as? ComponentActivity)?.runOnUiThread { feedback = message }
+                if (status == "started" || status == "sent" || status == "expired") {
+                    (commandContext as? ComponentActivity)?.runOnUiThread {
+                        feedback = when (status) {
+                            "started" -> "WhatsApp sesli araması başlatıldı."
+                            "sent" -> "WhatsApp mesajı gönderildi."
+                            else -> recordIssue(
+                                "MYN-WA-3002", "WhatsApp",
+                                "WhatsApp işlemi tamamlanamadı. WhatsApp'ın açık ve gerekli iznin etkin olduğundan emin ol.",
+                                command,
+                                "ACCESSIBILITY_ACTION_TIMEOUT"
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1810,7 +1852,16 @@ private fun AssistantScreen(
                 sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, routedText) { result ->
                     localPcConnected = result.connected
                     pcBridgeStatus = result.message
-                    feedback = result.message
+                    feedback = if (result.connected) {
+                        result.message
+                    } else {
+                        recordIssue(
+                            "MYN-PC-6004", "Bilgisayar bağlantısı",
+                            "Bilgisayara komut gönderemedim. Windows yardımcı uygulamasının açık ve bağlantı ayarlarının doğru olduğunu kontrol et.",
+                            routedText,
+                            "LOCAL_BRIDGE_COMMAND_FAILED; message=" + result.message
+                        )
+                    }
                 }
             }
             else -> feedback = "Şu anda bağlı bilgisayar yok. Windows uygulaması çalıştığında burada görünür."
