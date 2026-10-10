@@ -19,7 +19,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -32,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -66,6 +70,7 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
@@ -73,6 +78,16 @@ private const val PREFS = "mynassistant_prefs"
 private const val GOOGLE_ACCOUNTS_KEY = "saved_google_accounts"
 
 private data class SavedGoogleAccount(val email: String, val name: String, val photoUrl: String)
+
+private data class PcDevice(
+    val id: String,
+    val name: String,
+    val platform: String,
+    val status: String
+) {
+    val isOnline: Boolean
+        get() = status.trim().lowercase() in setOf("online", "connected", "ready", "active")
+}
 
 private fun loadSavedGoogleAccounts(prefs: android.content.SharedPreferences): List<SavedGoogleAccount> {
     val array = try { JSONArray(prefs.getString(GOOGLE_ACCOUNTS_KEY, "[]") ?: "[]") } catch (_: Exception) { JSONArray() }
@@ -267,6 +282,30 @@ class MainActivity : ComponentActivity() {
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
+                    firebaseUserId = auth.currentUser?.uid,
+                    sendRemoteCommand = { deviceId, commandName, payload, report ->
+                        val user = auth.currentUser
+                        if (user == null) {
+                            report("Önce Firebase hesabına giriş yap.")
+                        } else {
+                            val commandData = hashMapOf<String, Any>(
+                                "ownerId" to user.uid,
+                                "deviceId" to deviceId,
+                                "command" to commandName,
+                                "status" to "pending",
+                                "createdAt" to FieldValue.serverTimestamp()
+                            )
+                            commandData.putAll(payload)
+                            FirebaseFirestore.getInstance().collection("commands")
+                                .add(commandData)
+                                .addOnSuccessListener {
+                                    report("Komut kuyruğa gönderildi. Windows Agent komutu dinlediğinde bilgisayarda uygulanacak.")
+                                }
+                                .addOnFailureListener { error ->
+                                    report("Komut kaydedilemedi: ${error.localizedMessage ?: "Firestore erişim hatası"}")
+                                }
+                        }
+                    },
                     photoImageLoader = profileImageLoader,
                     login = { identity, password, report ->
                         val cleanEmail = identity.trim()
@@ -390,7 +429,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, photoUrl: String, photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
+    email: String, phone: String, photoUrl: String, firebaseUserId: String?,
+    sendRemoteCommand: (String, String, Map<String, Any>, (String) -> Unit) -> Unit,
+    photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
     googleLogin: () -> Unit,
     selectSavedGoogleAccount: (String) -> Unit,
@@ -400,8 +441,55 @@ private fun AssistantScreen(
     var page by remember { mutableStateOf(Page.HOME) }
     var drawer by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
+    var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
+    var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
+    var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var command by remember { mutableStateOf("") }
     var feedback by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(firebaseUserId) {
+        var registration: com.google.firebase.firestore.ListenerRegistration? = null
+        if (!firebaseUserId.isNullOrBlank()) {
+            devicesLoading = true
+            registration = FirebaseFirestore.getInstance()
+                .collection("devices")
+                .whereEqualTo("ownerId", firebaseUserId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        devicesError = error.localizedMessage ?: "Cihaz listesi alınamadı."
+                        devicesLoading = false
+                    } else {
+                        devices = snapshot?.documents.orEmpty().mapNotNull { document ->
+                            if (document.getString("ownerId") != firebaseUserId) return@mapNotNull null
+                            PcDevice(
+                                id = document.id,
+                                name = document.getString("name")
+                                    ?: document.getString("deviceName")
+                                    ?: "Windows bilgisayar",
+                                platform = document.getString("platform")
+                                    ?: document.getString("type")
+                                    ?: document.getString("os")
+                                    ?: "Windows",
+                                status = document.getString("status")
+                                    ?: document.getString("connectionStatus")
+                                    ?: "offline"
+                            )
+                        }
+                        devicesError = null
+                        devicesLoading = false
+                        if (devices.none { it.id == selectedDeviceId }) selectedDeviceId = devices.firstOrNull()?.id
+                    }
+                }
+        } else {
+            devices = emptyList()
+            devicesLoading = false
+            devicesError = null
+            selectedDeviceId = null
+        }
+        onDispose { registration?.remove() }
+    }
+    val selectedDevice = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
@@ -472,28 +560,55 @@ private fun AssistantScreen(
                             )
                             if (!signedIn) {
                                 Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
-                                OutlinedButton(onClick = { page = Page.REGISTER }, modifier = Modifier.fillMaxWidth()) { Text("Kayıt ol") }
                             } else {
-                                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
-                                            Column(Modifier.weight(1f)) {
-                                                Text("Windows bilgisayarım", fontWeight = FontWeight.SemiBold)
-                                                Text("Hesap: " + email.ifBlank { phone }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                if (devicesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                                devicesError?.let { error ->
+                                    Text("Cihazlar okunamadı: $error", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                }
+                                if (!devicesLoading && devices.isEmpty() && devicesError == null) {
+                                    Card(
+                                        Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                    ) {
+                                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+                                            Text("Henüz bilgisayar bağlanmamış", fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                "Windows Agent bu hesaba ait cihaz kaydını Firestore'daki devices koleksiyonuna eklediğinde burada görünecek.",
+                                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                        }
+                                    }
+                                }
+                                devices.forEach { device ->
+                                    Card(
+                                        Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                    ) {
+                                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold)
+                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(20.dp),
+                                                    color = if (device.isOnline) Color(0xFF183D2B) else MaterialTheme.colorScheme.background
+                                                ) {
+                                                    Text(
+                                                        if (device.isOnline) "Çevrimiçi" else "Çevrimdışı",
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                        fontSize = 11.sp,
+                                                        color = if (device.isOnline) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
                                             }
-                                            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.background) {
-                                                Text("Bağlantı bekleniyor", modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp), fontSize = 10.sp)
+                                            Text("Cihaz kimliği: ${device.id}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                                            Button(onClick = { selectedDeviceId = device.id; page = Page.REMOTE }, modifier = Modifier.fillMaxWidth()) {
+                                                Text("PC Kumandasını aç")
                                             }
                                         }
-                                        Text(
-                                            "Windows Agent bu hesapla sunucuya kaydolduğunda bilgisayar otomatik burada görünecek. Başka hesaplardaki kullanıcılar bu cihazı göremeyecek.",
-                                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                                        )
-                                        Text(
-                                            "Not: Bu ekran şu an arayüz taslağıdır. Gerçek cihaz listesini göstermek için Google hesabı doğrulaması ve ortak sunucu bağlantısı gerekiyor.",
-                                            fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary
-                                        )
                                     }
                                 }
                                 OutlinedButton(onClick = { page = Page.SETTINGS }, modifier = Modifier.fillMaxWidth()) {
@@ -512,6 +627,8 @@ private fun AssistantScreen(
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                         }
                         Page.REMOTE -> {
+                            val device = selectedDevice
+                            val remoteOnline = device?.isOnline == true && signedIn
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -519,15 +636,45 @@ private fun AssistantScreen(
                             ) {
                                 Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                 Column(Modifier.weight(1f)) {
-                                    Text("Windows bilgisayar", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                    Text("Bağlı değil • Windows Agent bekleniyor", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                    Text(device?.name ?: "Windows bilgisayar", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text(
+                                        when {
+                                            !signedIn -> "Giriş yapılmamış"
+                                            device == null -> "Cihaz bekleniyor"
+                                            remoteOnline -> "Bağlı • ${device.platform}"
+                                            else -> "Çevrimdışı • Windows Agent bekleniyor"
+                                        },
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                    )
                                 }
-                                Surface(shape = CircleShape, color = Color(0xFFB85C5C)) { Box(Modifier.size(10.dp)) }
+                                Surface(shape = CircleShape, color = if (remoteOnline) Color(0xFF49B86E) else Color(0xFFB85C5C)) {
+                                    Box(Modifier.size(10.dp))
+                                }
+                            }
+                            if (device == null) {
+                                Text(
+                                    "Kumandayı kullanmak için Windows Agent'ın bu Firebase hesabına ait bir cihaz kaydı oluşturması gerekiyor.",
+                                    color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp
+                                )
+                                OutlinedButton(onClick = { page = Page.DEVICES }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Cihazlarımı aç")
+                                }
                             }
                             TvRemotePanel(
-                                onHome = { feedback = "Ana ekran komutu Windows Agent bağlantısı kurulduğunda çalışacak." },
+                                enabled = remoteOnline,
+                                onCommand = { commandName, payload ->
+                                    if (device == null) {
+                                        feedback = "Önce Windows bilgisayarı bu hesaba bağlamalısın."
+                                    } else if (!remoteOnline) {
+                                        feedback = "Bilgisayar çevrimdışı. Windows Agent çevrimiçi olduğunda komut gönderebilirsin."
+                                    } else {
+                                        sendRemoteCommand(device.id, commandName, payload) { message -> feedback = message }
+                                    }
+                                },
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
                         else -> Unit
                     }
@@ -565,7 +712,7 @@ private fun AssistantScreen(
                                         )
                                     }
                                 } else {
-                                    MynLogo()
+                                    MynLogo(48.dp)
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -576,7 +723,9 @@ private fun AssistantScreen(
                             androidx.compose.animation.AnimatedVisibility(visible = accountListExpanded) {
                                 Column(
                                     Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 8.dp)
-                                        .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.background)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = .98f))
+                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .10f), RoundedCornerShape(16.dp))
                                         .padding(vertical = 6.dp),
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
@@ -724,8 +873,8 @@ private fun GoogleGLogo(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MynLogo() {
-    Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         AsyncImage(
             model = "https://raw.githubusercontent.com/kralus24/MynConverter/master/app/src/main/res/drawable/splash_logo.png",
             contentDescription = "MynKralus logosu",
@@ -735,14 +884,18 @@ private fun MynLogo() {
 }
 
 @Composable
-private fun TvRemotePanel(onHome: () -> Unit, modifier: Modifier = Modifier) {
+private fun TvRemotePanel(
+    onCommand: (String, Map<String, Any>) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
     val buttons = listOf(
         Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
-        Triple("Sesi artır", Icons.Default.VolumeUp, "up"),
-        Triple("Sesi kıs", Icons.Default.VolumeDown, "down"),
-        Triple("Ana ekran", Icons.Default.Home, "home"),
-        Triple("Diğer", Icons.Default.MoreHoriz, "more")
+        Triple("...", Icons.Default.MoreHoriz, "home"),
+        Triple("Sesi artır", Icons.Default.VolumeUp, "volume_up"),
+        Triple("Sesi kıs", Icons.Default.VolumeDown, "volume_down"),
+        Triple("...", Icons.Default.MoreHoriz, "placeholder")
     )
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("PC KUMANDASI", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -750,8 +903,18 @@ private fun TvRemotePanel(onHome: () -> Unit, modifier: Modifier = Modifier) {
             buttons.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { item ->
-                        Column(Modifier.weight(1f).height(82.dp).background(MaterialTheme.colorScheme.background, RoundedCornerShape(18.dp)).clickable { if (item.third == "home") onHome() }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            Icon(item.second, contentDescription = item.first, modifier = Modifier.size(27.dp), tint = MaterialTheme.colorScheme.primary)
+                        val buttonActive = enabled && item.third != "placeholder"
+                        Column(
+                            Modifier.weight(1f).height(82.dp)
+                                .background(MaterialTheme.colorScheme.background.copy(alpha = if (buttonActive) 1f else .72f), RoundedCornerShape(18.dp))
+                                .clickable(enabled = buttonActive) { onCommand(item.third, emptyMap()) }
+                                .padding(5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(item.second, contentDescription = if (item.third == "home") "Ana ekran" else item.first,
+                                modifier = Modifier.size(27.dp),
+                                tint = if (buttonActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f))
                             Spacer(Modifier.height(5.dp))
                             Text(item.first, fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 1)
                         }
@@ -759,13 +922,48 @@ private fun TvRemotePanel(onHome: () -> Unit, modifier: Modifier = Modifier) {
                 }
             }
         }
-        Column(Modifier.fillMaxWidth().height(250.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).clickable { }.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+        Column(
+            Modifier.fillMaxWidth().height(250.dp)
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
+                .pointerInput(enabled) {
+                    var deltaX = 0f
+                    var deltaY = 0f
+                    detectDragGestures(
+                        onDragStart = { deltaX = 0f; deltaY = 0f },
+                        onDragEnd = {
+                            if (enabled && (deltaX != 0f || deltaY != 0f)) {
+                                onCommand("mouse_move", mapOf("dx" to deltaX.roundToInt(), "dy" to deltaY.roundToInt()))
+                            }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            deltaX += dragAmount.x * 1.2f
+                            deltaY += dragAmount.y * 1.2f
+                        }
+                    )
+                }
+                .pointerInput(enabled) {
+                    detectTapGestures(
+                        onTap = { if (enabled) onCommand("mouse_click", emptyMap()) },
+                        onLongPress = { if (enabled) onCommand("mouse_right_click", emptyMap()) }
+                    )
+                }
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp),
+                tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f))
             Spacer(Modifier.height(8.dp))
             Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            Text("Bilgisayar faresini kontrol etmek için", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center)
+            Text(
+                if (enabled) "Sürükle: fare • Dokun: sol tık • Basılı tut: sağ tık"
+                else "Bilgisayar bağlandığında fare kontrolü etkinleşecek.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center
+            )
             Spacer(Modifier.height(6.dp))
-            Text("Fare hareketleri, tıklama ve kaydırma bağlantı aşamasında etkinleştirilecek.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center)
+            Text("Komutlar Firebase kuyruğuna gönderilir; Windows Agent'ın bunları alıp uygulaması gerekir.",
+                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center)
         }
     }
 }

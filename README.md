@@ -17,4 +17,7 @@ Pushes to `main` and pull requests run the Android debug build through GitHub Ac
 
 ## Current milestone
 
-The first milestone is a launchable Android shell with a local command input. Commands are not executed on the phone or a PC yet; device pairing and remote control will be added in later, tested stages.
+- Firebase Authentication supports email/password and Google sign-in.
+- The Android app listens to the signed-in user's Firestore `devices` documents filtered by `ownerId`.
+- PC remote actions are queued in Firestore `commands` with the signed-in user's `ownerId` and selected `deviceId`.
+- The Windows Agent still needs to register its device in `devices` and consume/update queued `commands` before remote actions execute on a PC.
