@@ -1494,7 +1494,7 @@ private fun AssistantScreen(
         pendingContactChoice = null
         if (choice.saveImmediately) {
             commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString(choice.aliasKey, normalizeContactText(contact.displayName))
+                .putString(choice.aliasKey, contact.displayName)
                 .putString(choice.aliasKey + "_number", contact.phoneNumber)
                 .apply()
             feedback = choice.aliasLabel + " artık " + contact.displayName + " olarak kaydedildi."
@@ -2339,7 +2339,7 @@ private fun AssistantScreen(
                         Button(onClick = {
                             commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                                 .putString(contactConfirmationForDialog.aliasKey,
-                                    normalizeContactText(contactConfirmationForDialog.contact.displayName))
+                                    contactConfirmationForDialog.contact.displayName)
                                 .putString(contactConfirmationForDialog.aliasKey + "_number",
                                     contactConfirmationForDialog.contact.phoneNumber)
                                 .apply()
@@ -2505,7 +2505,7 @@ private fun AssistantScreen(
                         if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.6", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.2.7", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
