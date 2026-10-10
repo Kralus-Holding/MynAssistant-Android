@@ -9,6 +9,7 @@ import android.util.Base64
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.provider.ContactsContract
 import android.provider.Settings
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
@@ -69,6 +70,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.NoteAlt
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
@@ -176,6 +178,59 @@ private data class PcBridgeResult(
  * Protected operations such as silently toggling Bluetooth or initiating a call
  * are deliberately routed to Android's own UI instead of bypassing user consent.
  */
+private fun launchInstalledApp(context: Context, packageNames: List<String>): Boolean {
+    val launchIntent = packageNames.firstNotNullOfOrNull { packageName ->
+        context.packageManager.getLaunchIntentForPackage(packageName)
+    } ?: return false
+    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    context.startActivity(launchIntent)
+    return true
+}
+
+private fun extractPhoneNumber(rawText: String): String? {
+    val candidate = Regex("""\\+?\\d[\\d\\s().-]{5,}\\d""").find(rawText)?.value ?: return null
+    val digits = candidate.filter { it.isDigit() }
+    return digits.takeIf { it.length >= 7 }
+}
+
+private fun contactActionKind(rawText: String): String? {
+    val normalized = rawText.trim().lowercase(Locale.forLanguageTag("tr-TR"))
+        .replace(Regex("\\s+"), " ")
+    val words = normalized.split(" ")
+    val actionWords = setOf("ara", "aramak", "arayın", "arayalim", "arayalım", "mesaj", "yaz", "gönder", "gonder")
+    if (normalized.contains("whatsapp") && words.any { it in actionWords }) return "WHATSAPP"
+    val searchAppMentioned = listOf("youtube", "google", "chrome", "tarayıcı", "tarayici", "internet").any { normalized.contains(it) }
+    if (!searchAppMentioned && words.any { it in setOf("ara", "aramak", "arayın", "arayalım", "arayalim") }) return "DIAL"
+    return null
+}
+
+private fun normalizeWhatsAppNumber(rawNumber: String): String {
+    val digits = rawNumber.filter { it.isDigit() }
+    return when {
+        digits.length == 11 && digits.startsWith("0") -> "90" + digits.drop(1)
+        digits.length == 10 && Locale.getDefault().country.equals("TR", ignoreCase = true) -> "90$digits"
+        else -> digits
+    }
+}
+
+private fun openWhatsAppChat(context: Context, rawNumber: String): String {
+    val number = normalizeWhatsAppNumber(rawNumber)
+    if (number.length < 7) return "WhatsApp için geçerli bir telefon numarası bulunamadı."
+    val url = Uri.parse("https://wa.me/$number")
+    val appIntent = Intent(Intent.ACTION_VIEW, url).setPackage("com.whatsapp")
+    val intent = if (appIntent.resolveActivity(context.packageManager) != null) {
+        appIntent
+    } else {
+        Intent(Intent.ACTION_VIEW, url)
+    }
+    context.startActivity(intent)
+    return "WhatsApp sohbeti açıldı. Sesli aramayı veya mesajı WhatsApp içinden başlatabilirsin."
+}
+
+/**
+ * Runs supported phone commands locally and hands app-specific actions to Android apps.
+ * Calls and WhatsApp conversations still require the user to confirm the final action.
+ */
 private fun executeAndroidTextCommand(context: Context, rawText: String): String {
     val command = rawText.trim()
         .lowercase(Locale.forLanguageTag("tr-TR"))
@@ -183,6 +238,16 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
     if (command.isBlank()) return "Önce bir telefon komutu yaz."
 
     return try {
+        val contactAction = contactActionKind(rawText)
+        val number = extractPhoneNumber(rawText)
+        if (contactAction == "WHATSAPP" && number != null) {
+            return openWhatsAppChat(context, number)
+        }
+        if (contactAction == "DIAL" && number != null) {
+            context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}")))
+            return "Telefon arama ekranı açıldı. Aramayı sen onaylayabilirsin."
+        }
+
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         when {
             command in setOf(
@@ -208,8 +273,7 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
                 "Telefonun medya sesi açıldı."
             }
             command in setOf("bluetooth ayarlarını aç", "bluetooth aç", "bluetooth'u aç", "bluetoothu aç") -> {
-                val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                context.startActivity(intent)
+                context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
                 "Bluetooth kontrol paneli açıldı. Durumu Android panelinden değiştirebilirsin."
             }
             command in setOf("wifi ayarlarını aç", "wi-fi ayarlarını aç", "wifi aç", "wi-fi aç", "kablosuz ağ ayarlarını aç") -> {
@@ -225,32 +289,102 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
                 context.startActivity(Intent(Settings.ACTION_SETTINGS))
                 "Telefon ayarları açıldı."
             }
-            command in setOf("kamera aç", "kamerayı aç", "fotoğraf çek") -> {
-                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                if (intent.resolveActivity(context.packageManager) == null) {
-                    "Bu telefonda kullanılabilir bir kamera uygulaması bulunamadı."
+            command in setOf("kamera aç", "kamerayı aç", "fotoğraf çek", "kamera uygulamasını aç") -> {
+                val launched = launchInstalledApp(
+                    context,
+                    listOf("com.android.camera", "com.google.android.GoogleCamera", "com.sec.android.app.camera", "com.android.camera2")
+                )
+                if (launched) {
+                    "Kamera uygulaması açıldı."
                 } else {
-                    context.startActivity(intent)
-                    "Kamera açıldı."
+                    val cameraIntent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                    val fallbackIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                    when {
+                        cameraIntent.resolveActivity(context.packageManager) != null -> {
+                            context.startActivity(cameraIntent)
+                            "Kamera uygulaması açıldı."
+                        }
+                        fallbackIntent.resolveActivity(context.packageManager) != null -> {
+                            context.startActivity(fallbackIntent)
+                            "Fotoğraf çekmek için kamera uygulaması açıldı."
+                        }
+                        else -> "Bu telefonda kullanılabilir bir kamera uygulaması bulunamadı."
+                    }
                 }
             }
-            command in setOf("arama ekranını aç", "telefon uygulamasını aç", "arama aç") -> {
+            command in setOf("video kamera aç", "video çek", "kamerayı videoya al", "video kamerasını aç") -> {
+                val videoIntent = Intent(MediaStore.INTENT_ACTION_VIDEO_CAMERA)
+                if (videoIntent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(videoIntent)
+                    "Video kamera uygulaması açıldı."
+                } else {
+                    "Bu telefonda kullanılabilir bir video kamera uygulaması bulunamadı."
+                }
+            }
+            command in setOf("arama ekranını aç", "telefon uygulamasını aç", "arama aç", "telefonu aç") -> {
                 context.startActivity(Intent(Intent.ACTION_DIAL))
                 "Telefon arama ekranı açıldı. Aramayı sen onaylayabilirsin."
             }
             command in setOf("chrome aç", "tarayıcı aç", "internet aç", "google aç") -> {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")))
-                "Telefonun varsayılan tarayıcısı açıldı."
+                if (!launchInstalledApp(context, listOf("com.android.chrome"))) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")))
+                }
+                "Tarayıcı açıldı."
             }
             command in setOf("youtube aç", "youtube'u aç", "youtubeu aç") -> {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com")))
+                if (!launchInstalledApp(context, listOf("com.google.android.youtube"))) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com")))
+                }
                 "YouTube açıldı."
             }
             command in setOf("whatsapp aç", "whatsapp'ı aç", "whatsappı aç") -> {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/")))
-                "WhatsApp bağlantısı açıldı."
+                if (launchInstalledApp(context, listOf("com.whatsapp", "com.whatsapp.w4b"))) {
+                    "WhatsApp uygulaması açıldı."
+                } else {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.whatsapp.com/android")))
+                    "WhatsApp indirme sayfası açıldı."
+                }
             }
-            else -> "Bu telefon komutu henüz desteklenmiyor. Şimdilik ses, Bluetooth/Wi-Fi paneli, ayarlar, kamera, arama ekranı, tarayıcı ve YouTube komutlarını deneyebilirsin."
+            command in setOf("instagram aç", "instagramı aç") -> {
+                if (launchInstalledApp(context, listOf("com.instagram.android"))) "Instagram açıldı."
+                else {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com")))
+                    "Instagram web sayfası açıldı."
+                }
+            }
+            command in setOf("telegram aç", "telegramı aç") -> {
+                if (launchInstalledApp(context, listOf("org.telegram.messenger"))) "Telegram açıldı."
+                else {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://telegram.org")))
+                    "Telegram web sayfası açıldı."
+                }
+            }
+            command in setOf("gmail aç", "gmail'i aç", "gmaili aç") -> {
+                if (launchInstalledApp(context, listOf("com.google.android.gm"))) "Gmail açıldı."
+                else {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://mail.google.com")))
+                    "Gmail web sayfası açıldı."
+                }
+            }
+            command in setOf("galeri aç", "fotoğrafları aç", "fotoğraflarımı aç") -> {
+                if (launchInstalledApp(context, listOf("com.miui.gallery", "com.google.android.apps.photos", "com.sec.android.gallery3d"))) {
+                    "Galeri uygulaması açıldı."
+                } else {
+                    "Bu telefonda tanınan bir galeri uygulaması bulunamadı."
+                }
+            }
+            command in setOf("haritalar aç", "google haritalar aç") -> {
+                if (launchInstalledApp(context, listOf("com.google.android.apps.maps"))) "Haritalar açıldı."
+                else {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com")))
+                    "Haritalar açıldı."
+                }
+            }
+            command in setOf("play store aç", "play store'u aç", "play storeu aç") -> {
+                if (launchInstalledApp(context, listOf("com.android.vending"))) "Play Store açıldı."
+                else "Bu telefonda Play Store bulunamadı."
+            }
+            else -> "Bu telefon komutu henüz desteklenmiyor. Kamera, video kamera, arama ekranı, ses, Bluetooth/Wi-Fi ayarları, WhatsApp, Instagram, Telegram, Gmail, galeri, tarayıcı, Haritalar ve YouTube komutlarını deneyebilirsin."
         }
     } catch (_: Exception) {
         "Telefon komutu açılamadı. Gerekli uygulamanın veya Android ayarının bu cihazda kullanılabildiğini kontrol et."
@@ -354,7 +488,7 @@ private fun saveWindowsBridgeDevice(
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
-private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE }
+private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, NOTES }
 
 class MainActivity : ComponentActivity() {
     private val googleSignInClient by lazy {
@@ -692,7 +826,11 @@ private fun AssistantScreen(
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
+    var pendingContactAction by remember { mutableStateOf<String?>(null) }
     val commandContext = LocalContext.current
+    var noteCommand by remember(commandContext) {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("saved_assistant_command", "") ?: "")
+    }
     var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
     var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
@@ -852,6 +990,91 @@ private fun AssistantScreen(
             }
         }
     }
+
+    val contactPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val action = pendingContactAction
+        pendingContactAction = null
+        val selectedUri = result.data?.data
+        if (result.resultCode != android.app.Activity.RESULT_OK || selectedUri == null || action == null) {
+            feedback = "Kişi seçimi iptal edildi."
+        } else {
+            val phoneNumber = try {
+                commandContext.contentResolver.query(
+                    selectedUri,
+                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                    null,
+                    null,
+                    null
+                )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            } catch (_: Exception) {
+                null
+            }
+            if (phoneNumber.isNullOrBlank()) {
+                feedback = "Seçilen kişide telefon numarası bulunamadı."
+            } else if (action == "WHATSAPP") {
+                feedback = try {
+                    openWhatsAppChat(commandContext, phoneNumber)
+                } catch (_: Exception) {
+                    "WhatsApp sohbeti açılamadı. WhatsApp'ın kurulu olduğunu kontrol et."
+                }
+            } else {
+                feedback = try {
+                    commandContext.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phoneNumber)}")))
+                    "Telefon arama ekranı açıldı. Aramayı sen onaylayabilirsin."
+                } catch (_: Exception) {
+                    "Telefon arama ekranı açılamadı."
+                }
+            }
+        }
+    }
+
+    val runAssistantCommand: (String) -> Unit = { rawCommand ->
+        val textCommand = rawCommand.trim()
+        val computerPrefix = COMPUTER_COMMAND_PREFIX.find(textCommand)
+        val target = when (commandTarget) {
+            "PHONE" -> "PHONE"
+            "PC" -> "PC"
+            else -> if (computerPrefix != null) "PC" else "PHONE"
+        }
+        val routedText = if (target == "PC" && computerPrefix != null) {
+            textCommand.substring(computerPrefix.range.last + 1).trim()
+        } else {
+            textCommand
+        }
+        val contactAction = contactActionKind(textCommand)
+        val phoneNumber = extractPhoneNumber(textCommand)
+
+        when {
+            textCommand.isBlank() -> feedback = "Önce bir komut yaz."
+            target == "PHONE" && contactAction != null && phoneNumber == null -> {
+                pendingContactAction = contactAction
+                feedback = if (contactAction == "WHATSAPP") {
+                    "WhatsApp işlemi için aramak veya mesaj göndermek istediğin kişiyi seç."
+                } else {
+                    "Aramak istediğin kişiyi rehberden seç."
+                }
+                contactPickerLauncher.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
+            }
+            target == "PHONE" -> feedback = executeAndroidTextCommand(commandContext, textCommand)
+            routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
+            !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
+            selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
+                feedback = "Komut bilgisayarına gönderiliyor..."
+                sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
+            }
+            localPcConnected -> {
+                feedback = "Komut bilgisayarına gönderiliyor..."
+                sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, routedText) { result ->
+                    localPcConnected = result.connected
+                    pcBridgeStatus = result.message
+                    feedback = result.message
+                }
+            }
+            else -> feedback = "Şu anda bağlı bilgisayar yok. Windows uygulaması çalıştığında burada görünür."
+        }
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
             Column(
@@ -956,40 +1179,7 @@ private fun AssistantScreen(
                         shape = RoundedCornerShape(16.dp)
                     )
                     Button(
-                        onClick = {
-                            val textCommand = command.trim()
-                            val computerPrefix = COMPUTER_COMMAND_PREFIX.find(textCommand)
-                            val target = when (commandTarget) {
-                                "PHONE" -> "PHONE"
-                                "PC" -> "PC"
-                                else -> if (computerPrefix != null) "PC" else "PHONE"
-                            }
-                            val routedText = if (target == "PC" && computerPrefix != null) {
-                                textCommand.substring(computerPrefix.range.last + 1).trim()
-                            } else {
-                                textCommand
-                            }
-
-                            when {
-                                textCommand.isBlank() -> feedback = "Önce bir komut yaz."
-                                target == "PHONE" -> feedback = executeAndroidTextCommand(commandContext, textCommand)
-                                routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
-                                !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
-                                selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
-                                    feedback = "Komut bilgisayarına gönderiliyor..."
-                                    sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
-                                }
-                                localPcConnected -> {
-                                    feedback = "Komut bilgisayarına gönderiliyor..."
-                                    sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, routedText) { result ->
-                                        localPcConnected = result.connected
-                                        pcBridgeStatus = result.message
-                                        feedback = result.message
-                                    }
-                                }
-                                else -> feedback = "Şu anda bağlı bilgisayar yok. Windows uygulaması çalıştığında burada görünür."
-                            }
-                        },
+                        onClick = { runAssistantCommand(command) },
                         Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp)
                     ) { Text("Komutu çalıştır", fontWeight = FontWeight.SemiBold) }
                     feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
@@ -1000,6 +1190,7 @@ private fun AssistantScreen(
                         Page.DEVICES -> "Cihazlarım"
                         Page.SETTINGS -> "Ayarlar"
                         Page.REMOTE -> "PC Kumandası"
+                        Page.NOTES -> "Notlarım"
                         else -> "Ana sayfa"
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
@@ -1092,6 +1283,50 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+                        }
+                        Page.NOTES -> {
+                            Text(
+                                "Sık kullandığın asistan komutunu kaydet; sonra aynı komutu bu sayfadan yeniden çalıştır.",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
+                                fontSize = 14.sp
+                            )
+                            OutlinedTextField(
+                                value = noteCommand,
+                                onValueChange = { noteCommand = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Komut notu") },
+                                placeholder = { Text("Örn. kamera aç veya bilgisayar Chrome aç") },
+                                minLines = 4,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                        .putString("saved_assistant_command", noteCommand).apply()
+                                    feedback = "Komut notu kaydedildi."
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Notu kaydet") }
+                            Button(
+                                onClick = {
+                                    if (noteCommand.isBlank()) {
+                                        feedback = "Önce çalıştırılacak bir komut yaz."
+                                    } else {
+                                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                            .putString("saved_assistant_command", noteCommand).apply()
+                                        command = noteCommand
+                                        page = Page.HOME
+                                        runAssistantCommand(noteCommand)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Notumdaki komutu çalıştır") }
+                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
+                            Text(
+                                "Notlarım, asistanın desteklediği doğal dil komutlarını çalıştırır; genel amaçlı Kotlin/Java kaynak kodu çalıştırıcısı değildir.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
+                            )
                         }
                         Page.SETTINGS -> {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1262,7 +1497,7 @@ private fun AssistantScreen(
                         else -> Unit
                     }
                 }
-                Text("MynAssistant  •  Android 0.2.0", Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(16.dp), textAlign = TextAlign.Center, fontSize = 13.sp)
+                Text("MynAssistant  •  Android 0.2.2", Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(16.dp), textAlign = TextAlign.Center, fontSize = 13.sp)
             }
             if (drawer) {
                 Row(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .48f))) {
@@ -1377,9 +1612,10 @@ private fun AssistantScreen(
                         DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
                         DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
                         DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
+                        DrawerItem("Notlarım") { page = Page.NOTES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.2.2", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -1397,6 +1633,7 @@ private fun DrawerItem(label: String, action: () -> Unit) {
         "Cihazlarım" -> Icons.Default.Devices
         "Ayarlar" -> Icons.Default.Settings
         "PC Kumandası" -> Icons.Default.Computer
+        "Notlarım" -> Icons.Default.NoteAlt
         else -> Icons.Default.Tv
     }
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1487,8 +1724,8 @@ private fun TvRemotePanel(
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
         Triple("...", Icons.Default.MoreHoriz, "placeholder"),
         Triple("Sesi artır", Icons.Default.VolumeUp, "volume_up"),
-        // Keep the requested three-dot visual, but make this button perform Home.
-        Triple("Ana sayfa", Icons.Default.MoreHoriz, "home"),
+        // The Home control uses a real home icon and sends the desktop Home command.
+        Triple("Ana sayfa", Icons.Default.Home, "home"),
         Triple("Sesi kıs", Icons.Default.VolumeDown, "volume_down")
     )
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
