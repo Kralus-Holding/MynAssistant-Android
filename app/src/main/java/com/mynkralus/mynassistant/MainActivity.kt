@@ -1199,6 +1199,8 @@ private fun AssistantScreen(
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
+    var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
+    var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
     var pendingCommandAfterPermission by remember { mutableStateOf<String?>(null) }
     var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
@@ -1461,6 +1463,50 @@ private fun AssistantScreen(
         }
     }
 
+    val executeResolvedContactAction: (String, ContactPhoneMatch) -> Unit = { commandText, contact ->
+        val action = contactActionKind(commandText)
+        feedback = try {
+            when (action) {
+                "DIAL" -> {
+                    commandContext.startActivity(
+                        Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(contact.phoneNumber)))
+                    )
+                    contact.displayName + " aranıyor."
+                }
+                "WHATSAPP_CALL" -> openWhatsAppChat(
+                    commandContext, contact.phoneNumber, autoAction = "CALL"
+                )
+                "WHATSAPP_MESSAGE" -> openWhatsAppChat(
+                    commandContext,
+                    contact.phoneNumber,
+                    autoAction = "MESSAGE",
+                    message = extractWhatsAppMessage(commandText)
+                )
+                else -> executeAndroidTextCommand(commandContext, commandText)
+            }
+        } catch (_: Exception) {
+            "İşlem başlatılamadı. İzinleri ve ilgili uygulamanın kurulu olduğunu kontrol et."
+        }
+    }
+
+    val chooseContactCandidate: (PendingContactChoice, ContactPhoneMatch) -> Unit = { choice, contact ->
+        pendingContactChoice = null
+        if (choice.saveImmediately) {
+            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(choice.aliasKey, normalizeContactText(contact.displayName))
+                .putString(choice.aliasKey + "_number", contact.phoneNumber)
+                .apply()
+            feedback = choice.aliasLabel + " artık " + contact.displayName + " olarak kaydedildi."
+        } else {
+            pendingContactConfirmation = PendingContactConfirmation(
+                command = choice.command,
+                aliasKey = choice.aliasKey,
+                aliasLabel = choice.aliasLabel,
+                contact = contact
+            )
+        }
+    }
+
     val runAssistantCommand: (String) -> Unit = { rawCommand ->
         val textCommand = rawCommand.trim()
         val computerPrefix = COMPUTER_COMMAND_PREFIX.find(textCommand)
@@ -1493,12 +1539,30 @@ private fun AssistantScreen(
                     permissionLauncher.launch(missing.toTypedArray())
                 } else {
                     val (relationKey, requestedName) = relationshipAssignment
-                    val matchedContact = findContactPhoneForCommand(commandContext, requestedName)
-                    if (matchedContact == null) {
-                        feedback = "Rehberinde “$requestedName” bulunamadı. Rehberdeki görünen adı kullanarak tekrar dene."
+                    val matches = findContactPhonesForCommand(commandContext, requestedName, resolveSavedAlias = false)
+                    if (matches.isEmpty()) {
+                        feedback = "Rehberinde “" + requestedName + "” bulunamadı. Rehberdeki görünen adı kontrol edip tekrar dene."
+                    } else if (matches.size > 1) {
+                        val relationLabel = when (relationKey) {
+                            "father" -> "babam"
+                            "mother" -> "annem"
+                            "brother" -> "abim"
+                            "sister" -> "ablam"
+                            else -> "eşim"
+                        }
+                        pendingContactChoice = PendingContactChoice(
+                            command = textCommand,
+                            aliasKey = "contact_alias_" + relationKey,
+                            aliasLabel = relationLabel,
+                            candidates = matches,
+                            saveImmediately = true
+                        )
+                        feedback = null
                     } else {
+                        val matchedContact = matches.first()
                         commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                            .putString("contact_alias_$relationKey", normalizeContactText(matchedContact.displayName))
+                            .putString("contact_alias_" + relationKey, normalizeContactText(matchedContact.displayName))
+                            .putString("contact_alias_" + relationKey + "_number", matchedContact.phoneNumber)
                             .apply()
                         val relationshipName = when (relationKey) {
                             "father" -> "Baban"
@@ -1507,7 +1571,7 @@ private fun AssistantScreen(
                             "sister" -> "Ablan/kız kardeşin"
                             else -> "Eşin"
                         }
-                        feedback = "$relationshipName artık ${matchedContact.displayName} olarak kaydedildi. Bir sonraki komutta otomatik eşleştireceğim."
+                        feedback = relationshipName + " artık " + matchedContact.displayName + " olarak kaydedildi. Bir sonraki komutta otomatik eşleştireceğim."
                     }
                 }
             }
@@ -1535,36 +1599,32 @@ private fun AssistantScreen(
                     feedback = "MynAssistant rehber/arama izinlerini istiyor; izin verince komut otomatik devam edecek."
                     permissionLauncher.launch(missingContactPermissions.toTypedArray())
                 } else {
-                    val contact = if (phoneNumber != null) {
-                        ContactPhoneMatch("Telefon numarası", phoneNumber, 120)
+                    val contacts = if (phoneNumber != null) {
+                        listOf(ContactPhoneMatch("Telefon numarası", phoneNumber, 120))
                     } else {
-                        findContactPhoneForCommand(commandContext, textCommand)
+                        findContactPhonesForCommand(commandContext, textCommand)
                     }
-                    if (contact == null) {
-                        feedback = "Rehberinde bu komutla eşleşen kişiyi bulamadım. Kişi seçme ekranı açmıyorum; kişiyi rehberdeki adıyla çağırabilir veya bir kez “babam = rehberdeki isim” komutuyla eşleştirebilirsin."
-                    } else {
-                        feedback = try {
-                            when (contactAction) {
-                                "DIAL" -> {
-                                    commandContext.startActivity(
-                                        Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(contact.phoneNumber)}"))
-                                    )
-                                    "${contact.displayName} aranıyor."
-                                }
-                                "WHATSAPP_CALL" -> openWhatsAppChat(
-                                    commandContext, contact.phoneNumber, autoAction = "CALL"
-                                )
-                                "WHATSAPP_MESSAGE" -> openWhatsAppChat(
-                                    commandContext,
-                                    contact.phoneNumber,
-                                    autoAction = "MESSAGE",
-                                    message = extractWhatsAppMessage(textCommand)
-                                )
-                                else -> executeAndroidTextCommand(commandContext, textCommand)
-                            }
-                        } catch (_: Exception) {
-                            "İşlem başlatılamadı. İzinleri ve ilgili uygulamanın kurulu olduğunu kontrol et."
+                    when {
+                        contacts.isEmpty() -> {
+                            feedback = "Rehberinde bu komutla eşleşen kişiyi bulamadım. Adını rehberdeki gibi yazmayı deneyebilirsin."
                         }
+                        contacts.size > 1 -> {
+                            val aliasSpec = contactAliasSpec(textCommand)
+                            val aliasLabel = aliasSpec?.second
+                                ?: contactLookupAlias(textCommand)
+                                ?: contacts.first().displayName
+                            val aliasKey = aliasSpec?.first
+                                ?: ("contact_alias_name_" + normalizeContactText(aliasLabel).replace(" ", "_"))
+                            pendingContactChoice = PendingContactChoice(
+                                command = textCommand,
+                                aliasKey = aliasKey,
+                                aliasLabel = aliasLabel,
+                                candidates = contacts,
+                                saveImmediately = false
+                            )
+                            feedback = null
+                        }
+                        else -> executeResolvedContactAction(textCommand, contacts.first())
                     }
                 }
             }
