@@ -1049,9 +1049,9 @@ private fun AssistantScreen(
                                     MynLogo(48.dp)
                                 }
                                 Column(Modifier.weight(1f)) {
-                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "Giriş yap", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2,
-                                        color = if (signedIn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary)
-                                    Text(if (signedIn) email.ifBlank { phone } else "Google hesabınla devam et", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
+                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(if (signedIn) email.ifBlank { phone } else "Giriş yap veya kayıt ol", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
                                 }
                                 Text(if (accountListExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
                             }
@@ -1059,8 +1059,8 @@ private fun AssistantScreen(
                                 Column(
                                     Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 8.dp)
                                         .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.background)
-                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .12f), RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = .98f))
+                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .10f), RoundedCornerShape(16.dp))
                                         .padding(vertical = 6.dp),
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
