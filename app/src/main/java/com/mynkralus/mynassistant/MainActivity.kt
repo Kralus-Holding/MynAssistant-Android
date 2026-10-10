@@ -319,7 +319,7 @@ private fun contactLookupAlias(rawCommand: String, selectedContactName: String? 
             .filter { it.isNotBlank() }.toMutableList()
         while (phraseTokens.isNotEmpty()) {
             val first = normalizeContactText(phraseTokens.first())
-            if (first == "whatsapp" || first == "whatsapptan" || first in setOf("tan", "ten", "dan", "den")) {
+            if (first.startsWith("whatsapp") || first in setOf("tan", "ten", "dan", "den")) {
                 phraseTokens.removeAt(0)
             } else break
         }
@@ -574,7 +574,7 @@ private fun extractWhatsAppMessage(rawText: String, recipientName: String? = nul
     val phraseTokens = phrase.split(Regex("""\s+""")).filter { it.isNotBlank() }.toMutableList()
     while (phraseTokens.isNotEmpty()) {
         val first = normalizeContactText(phraseTokens.first())
-        if (first == "whatsapp" || first == "whatsapptan" || first in setOf("tan", "ten", "dan", "den")) {
+        if (first.startsWith("whatsapp") || first in setOf("tan", "ten", "dan", "den")) {
             phraseTokens.removeAt(0)
         } else break
     }
@@ -1837,7 +1837,7 @@ private fun AssistantScreen(
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
                 // This toolbar stays fixed while the page content below it scrolls.
                 Row(
                     Modifier.fillMaxWidth().padding(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 8.dp)
@@ -2145,6 +2145,11 @@ private fun AssistantScreen(
                                 Switch(checked = dark, onCheckedChange = { toggleTheme() })
                             }
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
+                            Text(
+                                "Rehber izni verildiğinde, bu telefona senkronize edilmiş Google, SIM ve diğer kişi hesaplarındaki kayıtlar aranır.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                            )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             OutlinedButton(
                                 onClick = {
@@ -2363,7 +2368,7 @@ private fun AssistantScreen(
                     val keyboardController = LocalSoftwareKeyboardController.current
                     Surface(
                         modifier = Modifier.fillMaxWidth()
-                            .then(if (keyboardVisible) Modifier.imePadding() else Modifier.navigationBarsPadding())
+                            .then(if (keyboardVisible) Modifier else Modifier.navigationBarsPadding())
                             .padding(horizontal = 12.dp, vertical = if (keyboardVisible) 0.dp else 8.dp),
                         shape = RoundedCornerShape(28.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
