@@ -1,6 +1,7 @@
 package com.mynkralus.mynassistant
 
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -59,6 +60,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
+import coil.ImageLoader
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
@@ -128,6 +133,18 @@ class MainActivity : ComponentActivity() {
             .remove("name").remove("email").remove("phone").apply()
         val auth = FirebaseAuth.getInstance()
         setContent {
+            val context = LocalContext.current
+            val profileImageLoader = remember(context) {
+                ImageLoader.Builder(context)
+                    .components {
+                        if (Build.VERSION.SDK_INT >= 28) {
+                            add(ImageDecoderDecoder.Factory())
+                        } else {
+                            add(GifDecoder.Factory())
+                        }
+                    }
+                    .build()
+            }
             val currentUser = auth.currentUser
             var dark by remember { mutableStateOf(prefs.getBoolean("dark", true)) }
             var email by remember { mutableStateOf(currentUser?.email.orEmpty()) }
@@ -206,6 +223,7 @@ class MainActivity : ComponentActivity() {
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
+                    photoImageLoader = profileImageLoader,
                     login = { identity, password, report ->
                         val cleanEmail = identity.trim()
                         if (!cleanEmail.contains("@")) {
@@ -328,7 +346,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, photoUrl: String, login: (String, String, (String) -> Unit) -> Unit,
+    email: String, phone: String, photoUrl: String, photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
     googleLogin: () -> Unit,
     googleStatus: String?, accountMenuExpanded: Boolean, toggleAccountMenu: () -> Unit
@@ -487,14 +505,15 @@ private fun AssistantScreen(
                                     if (photoUrl.isNotBlank()) {
                                         AsyncImage(
                                             model = photoUrl,
+                                            imageLoader = photoImageLoader,
                                             contentDescription = "Google profil fotoğrafı",
-                                            modifier = Modifier.size(58.dp).clip(CircleShape)
+                                            modifier = Modifier.size(42.dp).clip(CircleShape)
                                         )
                                     } else {
                                         Icon(
                                             Icons.Default.AccountCircle,
                                             contentDescription = "Hesap fotoğrafı",
-                                            modifier = Modifier.size(58.dp),
+                                            modifier = Modifier.size(42.dp),
                                             tint = MaterialTheme.colorScheme.primary
                                         )
                                     }

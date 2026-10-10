@@ -50,6 +50,7 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
     implementation("com.google.android.gms:play-services-auth:21.4.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
