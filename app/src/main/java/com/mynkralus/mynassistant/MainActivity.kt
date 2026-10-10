@@ -528,12 +528,18 @@ private fun saveWindowsBridgeDevice(
         "lastCheckedAt" to FieldValue.serverTimestamp()
     )
     if (connected) data["lastSeenAt"] = FieldValue.serverTimestamp()
-    FirebaseFirestore.getInstance()
+    val deviceRef = FirebaseFirestore.getInstance()
         .collection("devices")
         .document("windows-" + user.uid)
-        .set(data, SetOptions.merge())
-        .addOnSuccessListener { onComplete(null) }
-        .addOnFailureListener { error -> onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
+    deviceRef.get()
+        .addOnSuccessListener { snapshot ->
+            val existingName = snapshot.getString("name")?.trim().orEmpty()
+            data["name"] = existingName.ifBlank { "Windows bilgisayarım" }
+            deviceRef.set(data, SetOptions.merge())
+                .addOnSuccessListener { onComplete(null) }
+                .addOnFailureListener { onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
+        }
+        .addOnFailureListener { onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
