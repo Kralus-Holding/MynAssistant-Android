@@ -71,7 +71,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.NoteAlt
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Edit
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
@@ -489,7 +490,7 @@ private fun saveWindowsBridgeDevice(
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
-private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, NOTES }
+private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES }
 
 class MainActivity : ComponentActivity() {
     private val googleSignInClient by lazy {
@@ -820,6 +821,7 @@ private fun AssistantScreen(
     var drawer by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
+    var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -829,9 +831,6 @@ private fun AssistantScreen(
     var feedback by remember { mutableStateOf<String?>(null) }
     var pendingContactAction by remember { mutableStateOf<String?>(null) }
     val commandContext = LocalContext.current
-    var noteCommand by remember(commandContext) {
-        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("saved_assistant_command", "") ?: "")
-    }
     var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
     var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
@@ -1078,11 +1077,15 @@ private fun AssistantScreen(
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
-            Column(
-                Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(start = 22.dp, top = 12.dp, end = 22.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                // This toolbar stays fixed while the page content below it scrolls.
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 8.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.background)
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, contentDescription = "Menüyü aç", modifier = Modifier.size(30.dp)) }
                     Spacer(Modifier.weight(1f))
                     Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "PC kumandası", modifier = Modifier.size(32.dp)) }
@@ -1091,6 +1094,27 @@ private fun AssistantScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(18.dp)); Text(if (dark) "Açık" else "Koyu", fontSize = 14.sp) }
                     }
                 }
+                androidx.compose.runtime.SideEffect {
+                    val activity = commandContext as? ComponentActivity
+                    activity?.window?.let { systemWindow ->
+                        val systemBarColor = if (dark) android.graphics.Color.rgb(11, 13, 20) else android.graphics.Color.rgb(245, 246, 250)
+                        systemWindow.statusBarColor = systemBarColor
+                        systemWindow.navigationBarColor = systemBarColor
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            systemWindow.isNavigationBarContrastEnforced = false
+                            systemWindow.isStatusBarContrastEnforced = false
+                        }
+                        val controller = androidx.core.view.WindowCompat.getInsetsController(systemWindow, systemWindow.decorView)
+                        controller.isAppearanceLightStatusBars = !dark
+                        controller.isAppearanceLightNavigationBars = !dark
+                    }
+                }
+                Column(
+                    Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 22.dp, top = 12.dp, end = 22.dp, bottom = 36.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
                 if (page == Page.HOME) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         MynLogo()
@@ -1106,7 +1130,6 @@ private fun AssistantScreen(
                             Text("Telefonuna veya bilgisayarına komut ver; hedefi sen seç veya otomatik yönlendirmeyi kullan.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
                         }
                     }
-                    Text("Komut hedefi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Box(Modifier.fillMaxWidth()) {
                         OutlinedButton(
                             onClick = { targetMenuExpanded = true },
@@ -1122,15 +1145,17 @@ private fun AssistantScreen(
                                 contentDescription = null
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(
-                                when (commandTarget) {
-                                    "PHONE" -> "Bu telefon (Android)"
-                                    "PC" -> "Bilgisayarım (Windows)"
-                                    else -> "Otomatik — komuta göre seç"
-                                },
-                                modifier = Modifier.weight(1f),
-                                textAlign = TextAlign.Start
-                            )
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text("Komut hedefi", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
+                                Text(
+                                    when (commandTarget) {
+                                        "PHONE" -> "Bu telefon (Android)"
+                                        "PC" -> "Bilgisayarım (Windows)"
+                                        else -> "Otomatik — komuta göre seç"
+                                    },
+                                    textAlign = TextAlign.Start
+                                )
+                            }
                             Icon(Icons.Default.MoreHoriz, contentDescription = "Hedef seç")
                         }
                         DropdownMenu(
@@ -1191,7 +1216,7 @@ private fun AssistantScreen(
                         Page.DEVICES -> "Cihazlarım"
                         Page.SETTINGS -> "Ayarlar"
                         Page.REMOTE -> "PC Kumandası"
-                        Page.NOTES -> "Notlarım"
+                        Page.FILES -> "Bilgisayar Dosyaları"
                         else -> "Ana sayfa"
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
@@ -1276,6 +1301,42 @@ private fun AssistantScreen(
                                                     )
                                                 }
                                             }
+                                            var editedDeviceName by remember(device.id, device.name) {
+                                                mutableStateOf(deviceNameDrafts[device.id] ?: device.name)
+                                            }
+                                            OutlinedTextField(
+                                                value = editedDeviceName,
+                                                onValueChange = {
+                                                    editedDeviceName = it
+                                                    deviceNameDrafts = deviceNameDrafts + (device.id to it)
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                label = { Text("Bilgisayar adı") },
+                                                singleLine = true
+                                            )
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val cleanedName = editedDeviceName.trim()
+                                                    if (cleanedName.isBlank()) {
+                                                        feedback = "Bilgisayar adı boş olamaz."
+                                                    } else {
+                                                        FirebaseFirestore.getInstance().collection("devices").document(device.id)
+                                                            .update("name", cleanedName)
+                                                            .addOnSuccessListener {
+                                                                deviceNameDrafts = deviceNameDrafts + (device.id to cleanedName)
+                                                                feedback = "Bilgisayar adı kaydedildi."
+                                                            }
+                                                            .addOnFailureListener {
+                                                                feedback = "Bilgisayar adı kaydedilemedi. Hesap izinlerini kontrol edip tekrar dene."
+                                                            }
+                                                    }
+                                                },
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Icon(Icons.Default.Edit, contentDescription = null)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Adı kaydet")
+                                            }
                                             Text("Cihaz kimliği: " + device.id, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                                             Button(onClick = { selectedDeviceId = device.id; page = Page.REMOTE }, modifier = Modifier.fillMaxWidth()) {
                                                 Text("Bağlan")
@@ -1285,49 +1346,63 @@ private fun AssistantScreen(
                                 }
                             }
                         }
-                        Page.NOTES -> {
+                        Page.FILES -> {
                             Text(
-                                "Sık kullandığın asistan komutunu kaydet; sonra aynı komutu bu sayfadan yeniden çalıştır.",
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
-                                fontSize = 14.sp
+                                "Hesabına bağlı bilgisayarlar alt alta listelenir. Bir bilgisayar seçerek dosya listesi isteyebilirsin.",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
-                            OutlinedTextField(
-                                value = noteCommand,
-                                onValueChange = { noteCommand = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Komut notu") },
-                                placeholder = { Text("Örn. kamera aç veya bilgisayar Chrome aç") },
-                                minLines = 4,
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                                        .putString("saved_assistant_command", noteCommand).apply()
-                                    feedback = "Komut notu kaydedildi."
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("Notu kaydet") }
-                            Button(
-                                onClick = {
-                                    if (noteCommand.isBlank()) {
-                                        feedback = "Önce çalıştırılacak bir komut yaz."
-                                    } else {
-                                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                                            .putString("saved_assistant_command", noteCommand).apply()
-                                        command = noteCommand
-                                        page = Page.HOME
-                                        runAssistantCommand(noteCommand)
+                            if (!signedIn) {
+                                Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                            } else if (devicesLoading) {
+                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                            } else if (devices.isEmpty()) {
+                                Text("Bilgisayar eklendiğinde burada görünecek.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                            } else {
+                                devices.forEach { device ->
+                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+                                    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold)
+                                                    Text(if (deviceOnlineNow) "Çevrimiçi" else "Çevrimdışı", fontSize = 12.sp,
+                                                        color = if (deviceOnlineNow) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
+                                                }
+                                            }
+                                            Button(onClick = {
+                                                selectedDeviceId = device.id
+                                                if (!deviceOnlineNow) {
+                                                    feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
+                                                } else if (device.connectionMode == "firebase-agent") {
+                                                    feedback = "Dosya listesi bilgisayardan isteniyor..."
+                                                    sendTrackedRemoteCommand(device.id, "text_command", mapOf("text" to "bilgisayar dosyalarını listele"))
+                                                } else if (device.id == localPcDeviceId && localPcConnected) {
+                                                    feedback = "Dosya listesi bilgisayardan isteniyor..."
+                                                    sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, "dosyaları listele") { result ->
+                                                        localPcConnected = result.connected
+                                                        pcBridgeStatus = result.message
+                                                        feedback = result.message
+                                                    }
+                                                } else {
+                                                    feedback = "Bu bağlantı türünde dosya listeleme henüz desteklenmiyor."
+                                                }
+                                            }, modifier = Modifier.fillMaxWidth()) {
+                                                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Dosya listesini iste")
+                                            }
+                                            Text(
+                                                "Dosyaları Android içinde gerçek zamanlı gezmek için Windows Agent tarafında dosya listeleme yanıtının desteklenmesi gerekir.",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
+                                            )
+                                        }
                                     }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("Notumdaki komutu çalıştır") }
-                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
-                            Text(
-                                "Notlarım, asistanın desteklediği doğal dil komutlarını çalıştırır; genel amaçlı Kotlin/Java kaynak kodu çalıştırıcısı değildir.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
-                            )
+                                }
+                            }
+                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
                         Page.SETTINGS -> {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1498,7 +1573,7 @@ private fun AssistantScreen(
                         else -> Unit
                     }
                 }
-                Text("MynAssistant  •  Android 0.2.2", Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(16.dp), textAlign = TextAlign.Center, fontSize = 13.sp)
+            }
             }
             if (drawer) {
                 Row(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .48f))) {
@@ -1520,7 +1595,7 @@ private fun AssistantScreen(
                                             model = photoUrl,
                                             imageLoader = photoImageLoader,
                                             contentDescription = "Google profil fotoğrafı",
-                                            modifier = Modifier.size(48.dp).clip(CircleShape)
+                                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
                                         )
                                     } else {
                                         Icon(
@@ -1567,7 +1642,7 @@ private fun AssistantScreen(
                                                 if (saved.photoUrl.isNotBlank()) {
                                                     AsyncImage(model = saved.photoUrl, imageLoader = photoImageLoader,
                                                         contentDescription = "Kaydedilmiş Google hesabı",
-                                                        modifier = Modifier.size(36.dp).clip(CircleShape))
+                                                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)))
                                                 } else {
                                                     Icon(Icons.Default.AccountCircle, contentDescription = null,
                                                         modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
@@ -1613,7 +1688,7 @@ private fun AssistantScreen(
                         DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
                         DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
                         DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
-                        DrawerItem("Notlarım") { page = Page.NOTES; drawer = false }
+                        if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
                         Text("MynAssistant • Android 0.2.2", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
@@ -1634,7 +1709,7 @@ private fun DrawerItem(label: String, action: () -> Unit) {
         "Cihazlarım" -> Icons.Default.Devices
         "Ayarlar" -> Icons.Default.Settings
         "PC Kumandası" -> Icons.Default.Computer
-        "Notlarım" -> Icons.Default.NoteAlt
+        "Bilgisayar Dosyaları" -> Icons.Default.FolderOpen
         else -> Icons.Default.Tv
     }
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
