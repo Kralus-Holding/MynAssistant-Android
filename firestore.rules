@@ -1,18 +1,81 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
-      allow get: if request.auth != null && request.auth.uid == userId;
-      allow list: if false;
-      allow create, update: if request.auth != null
-        && request.auth.uid == userId
-        && request.resource.data.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
 
-      match /devices/{deviceId} {
-        allow read, create, update, delete: if request.auth != null
-          && request.auth.uid == userId;
-      }
+    // =========================
+    // USERS
+    // =========================
+    match /users/{userId} {
+      allow read: if isSignedIn() && isOwner(userId);
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if isSignedIn() && isOwner(userId);
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    // =========================
+    // DEVICES
+    // =========================
+    match /devices/{deviceId} {
+      allow read: if isSignedIn()
+                  && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn()
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isSignedIn()
+                    && resource.data.ownerId == request.auth.uid
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      allow delete: if isSignedIn()
+                    && resource.data.ownerId == request.auth.uid;
+    }
+
+    // =========================
+    // COMMANDS
+    // =========================
+    match /commands/{commandId} {
+      allow read: if isSignedIn()
+                  && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn()
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isSignedIn()
+                    && resource.data.ownerId == request.auth.uid
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      allow delete: if isSignedIn()
+                    && resource.data.ownerId == request.auth.uid;
+    }
+
+    // =========================
+    // CONTACTS
+    // =========================
+    match /contacts/{contactId} {
+      allow read: if isSignedIn()
+                  && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn()
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isSignedIn()
+                    && resource.data.ownerId == request.auth.uid
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      allow delete: if isSignedIn()
+                    && resource.data.ownerId == request.auth.uid;
+    }
+
+    // =========================
+    // HELPERS
+    // =========================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
     }
   }
 }
