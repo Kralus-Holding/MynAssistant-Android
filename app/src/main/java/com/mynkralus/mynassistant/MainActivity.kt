@@ -73,6 +73,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
@@ -352,7 +353,7 @@ private fun findContactPhonesForCommand(
     val relationKey = relationshipPreferenceKey(withoutQuotedMessage)
     val aliasSpec = if (resolveSavedAlias) contactAliasSpec(rawCommand) else null
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    val savedNumber = aliasSpec?.first?.let { prefs.getString("\${it}_number", null) }.orEmpty()
+    val savedNumber = aliasSpec?.first?.let { prefs.getString(it + "_number", null) }.orEmpty()
     val savedDisplayName = aliasSpec?.first?.let { prefs.getString(it, null) }.orEmpty()
     if (savedNumber.isNotBlank()) {
         return listOf(ContactPhoneMatch(savedDisplayName.ifBlank { aliasSpec?.second.orEmpty() }, savedNumber, 200))
@@ -420,7 +421,7 @@ private fun findContactPhonesForCommand(
         }
     }
     val unique = contacts.distinctBy {
-        "\${normalizeContactText(it.displayName)}|\${it.phoneNumber.filter { c -> c.isDigit() }}"
+        normalizeContactText(it.displayName) + "|" + it.phoneNumber.filter { c -> c.isDigit() }
     }.sortedWith(
         compareByDescending<ContactPhoneMatch> { it.score }
             .thenBy { normalizeContactText(it.displayName) }
@@ -2277,6 +2278,86 @@ private fun AssistantScreen(
                         }
                     }
                 }
+            }
+            val contactChoiceForDialog = pendingContactChoice
+            if (contactChoiceForDialog != null) {
+                AlertDialog(
+                    onDismissRequest = { pendingContactChoice = null },
+                    title = { Text("Hangi kişiyi kastediyorsun?") },
+                    text = {
+                        Column(
+                            Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "“" + contactChoiceForDialog.aliasLabel + "” için rehberde birden fazla eşleşme buldum. Doğru kişiye dokun.",
+                                fontSize = 14.sp
+                            )
+                            contactChoiceForDialog.candidates.forEach { candidate ->
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        chooseContactCandidate(contactChoiceForDialog, candidate)
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(13.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.AccountCircle, contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text(candidate.displayName, fontWeight = FontWeight.SemiBold)
+                                            Text(candidate.phoneNumber, fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                                        }
+                                        Icon(Icons.Default.ChevronRight, contentDescription = "Bu kişiyi seç")
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { pendingContactChoice = null }) { Text("İptal") }
+                    }
+                )
+            }
+            val contactConfirmationForDialog = pendingContactConfirmation
+            if (contactConfirmationForDialog != null) {
+                AlertDialog(
+                    onDismissRequest = { pendingContactConfirmation = null },
+                    title = { Text("Bu kişiyi hatırlayayım mı?") },
+                    text = {
+                        Text(
+                            "Bundan sonra “" + contactConfirmationForDialog.aliasLabel + "” dediğinde “" +
+                                contactConfirmationForDialog.contact.displayName + "” kişisini kullanayım mı?"
+                        )
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                .putString(contactConfirmationForDialog.aliasKey,
+                                    normalizeContactText(contactConfirmationForDialog.contact.displayName))
+                                .putString(contactConfirmationForDialog.aliasKey + "_number",
+                                    contactConfirmationForDialog.contact.phoneNumber)
+                                .apply()
+                            pendingContactConfirmation = null
+                            executeResolvedContactAction(
+                                contactConfirmationForDialog.command,
+                                contactConfirmationForDialog.contact
+                            )
+                        }) { Text("Evet, hatırla") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            val oneTime = contactConfirmationForDialog
+                            pendingContactConfirmation = null
+                            executeResolvedContactAction(oneTime.command, oneTime.contact)
+                        }) { Text("Sadece bu sefer") }
+                    }
+                )
             }
             if (showAccessibilitySetupDialog) {
                 AlertDialog(
