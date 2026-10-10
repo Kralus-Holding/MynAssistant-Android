@@ -203,6 +203,21 @@ private fun extractPhoneNumber(rawText: String): String? {
 
 private data class ContactPhoneMatch(val displayName: String, val phoneNumber: String, val score: Int)
 
+private data class PendingContactChoice(
+    val command: String,
+    val aliasKey: String,
+    val aliasLabel: String,
+    val candidates: List<ContactPhoneMatch>,
+    val saveImmediately: Boolean = false
+)
+
+private data class PendingContactConfirmation(
+    val command: String,
+    val aliasKey: String,
+    val aliasLabel: String,
+    val contact: ContactPhoneMatch
+)
+
 private fun normalizeContactText(value: String): String =
     value.lowercase(Locale.forLanguageTag("tr-TR"))
         .replace('ı', 'i')
@@ -269,29 +284,94 @@ private fun relationshipAliasesForCommand(rawCommand: String): Set<String>? {
     }
 }
 
-private fun findContactPhoneForCommand(context: Context, rawCommand: String): ContactPhoneMatch? {
+private fun normalizeContactSearchToken(rawToken: String): String {
+    val token = normalizeContactText(rawToken)
+    val suffixes = listOf(
+        "lardan", "lerden", "larla", "lerle", "dan", "den", "tan", "ten",
+        "nin", "nın", "nun", "nün", "yla", "yle", "yi", "yı", "yu", "yü",
+        "in", "ın", "un", "ün", "la", "le", "da", "de", "a", "e", "i", "ı", "u", "ü"
+    )
+    for (suffix in suffixes) {
+        if (token.endsWith(suffix) && token.length - suffix.length >= 4) {
+            return token.dropLast(suffix.length)
+        }
+    }
+    return token
+}
+
+private fun contactLookupAlias(rawCommand: String): String? {
+    var query = rawCommand.replace(Regex("""["“].*?["”]"""), " ")
+    val messageTail = Regex(
+        """(?iu)\s+.+?\s+diye\s+(?:whatsapp(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(query)
+    if (messageTail != null) query = query.substring(0, messageTail.range.first)
+    val normalized = normalizeContactText(query)
+    val stopWords = setOf(
+        "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "call",
+        "whatsapp", "tan", "ten", "dan", "den", "ile", "yoluyla", "mesaj", "mesaji", "mesajini", "mesajina",
+        "at", "yaz", "gonder", "gönder", "gondermeyi", "lutfen", "ac", "diye", "yolla", "ilet", "whatsapptan", "sms"
+    )
+    val tokens = normalized.split(" ")
+        .filter { it.isNotBlank() && it !in stopWords }
+        .map(::normalizeContactSearchToken)
+        .filter { it.length >= 2 }
+    return tokens.joinToString(" ").trim().takeIf { it.isNotBlank() }
+}
+
+private fun contactAliasSpec(rawCommand: String): Pair<String, String>? {
+    val relationKey = relationshipPreferenceKey(rawCommand)
+    if (relationKey != null) {
+        val label = when (relationKey) {
+            "father" -> "babam"
+            "mother" -> "annem"
+            "brother" -> "abim"
+            "sister" -> "ablam"
+            else -> "eşim"
+        }
+        return "contact_alias_$relationKey" to label
+    }
+    val alias = contactLookupAlias(rawCommand) ?: return null
+    val safeAlias = normalizeContactText(alias).replace(" ", "_")
+    return "contact_alias_name_$safeAlias" to alias
+}
+
+private fun findContactPhonesForCommand(
+    context: Context,
+    rawCommand: String,
+    resolveSavedAlias: Boolean = true
+): List<ContactPhoneMatch> {
     if (androidx.core.content.ContextCompat.checkSelfPermission(
             context,
             android.Manifest.permission.READ_CONTACTS
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-    ) return null
+    ) return emptyList()
 
     val withoutQuotedMessage = rawCommand.replace(Regex("""["“].*?["”]"""), " ")
     val normalizedCommand = normalizeContactText(withoutQuotedMessage)
     val relationAliases = relationshipAliasesForCommand(withoutQuotedMessage)
     val relationKey = relationshipPreferenceKey(withoutQuotedMessage)
+    val aliasSpec = if (resolveSavedAlias) contactAliasSpec(rawCommand) else null
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val savedNumber = aliasSpec?.first?.let { prefs.getString("\${it}_number", null) }.orEmpty()
+    val savedDisplayName = aliasSpec?.first?.let { prefs.getString(it, null) }.orEmpty()
+    if (savedNumber.isNotBlank()) {
+        return listOf(ContactPhoneMatch(savedDisplayName.ifBlank { aliasSpec?.second.orEmpty() }, savedNumber, 200))
+    }
     val savedRelationshipName = relationKey?.let {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("contact_alias_$it", null)
+        prefs.getString("contact_alias_$it", null)
     }?.let { normalizeContactText(it) }.orEmpty()
+
     val stopWords = setOf(
         "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "call",
         "whatsapp", "tan", "ten", "dan", "den", "ile", "yoluyla", "mesaj", "mesaji", "mesajini", "mesajina",
-        "yaz", "gonder", "gönder", "gondermeyi", "lutfen", "a", "ac"
+        "yaz", "gonder", "gönder", "gondermeyi", "lutfen", "a", "ac", "diye", "at", "yolla", "ilet", "sms"
     )
-    val queryTokens = normalizedCommand.split(" ")
+    val alias = contactLookupAlias(rawCommand)
+    val queryTokens = (alias?.split(" ") ?: normalizedCommand.split(" "))
+        .map(::normalizeContactSearchToken)
         .filter { it.isNotBlank() && it !in stopWords && it !in setOf("i", "yi", "yı", "yu", "yü", "ı", "u", "ü") }
     val queryText = queryTokens.joinToString(" ")
-    if (relationAliases == null && queryText.isBlank()) return null
+    if (relationAliases == null && queryText.isBlank()) return emptyList()
 
     val contacts = mutableListOf<ContactPhoneMatch>()
     val projection = arrayOf(
@@ -327,7 +407,9 @@ private fun findContactPhoneForCommand(context: Context, rawCommand: String): Co
                 } else {
                     when {
                         normalizedName == queryText -> 120
-                        queryTokens.isNotEmpty() && queryTokens.all { it in nameWords } -> 100
+                        queryTokens.isNotEmpty() && queryTokens.all { query ->
+                            nameWords.any { it == query || (query.length >= 3 && it.startsWith(query)) }
+                        } -> 100
                         queryText.isNotBlank() && normalizedName.contains(queryText) -> 90
                         queryTokens.size == 1 && queryTokens.first() in nameWords -> 80
                         else -> 0
@@ -337,9 +419,18 @@ private fun findContactPhoneForCommand(context: Context, rawCommand: String): Co
             }
         }
     }
-    return contacts.maxWithOrNull(
-        compareBy<ContactPhoneMatch> { it.score }.thenByDescending { it.displayName.length }
+    val unique = contacts.distinctBy {
+        "\${normalizeContactText(it.displayName)}|\${it.phoneNumber.filter { c -> c.isDigit() }}"
+    }.sortedWith(
+        compareByDescending<ContactPhoneMatch> { it.score }
+            .thenBy { normalizeContactText(it.displayName) }
+            .thenBy { it.phoneNumber }
     )
+    if (savedNumber.isBlank() && savedRelationshipName.isNotBlank()) {
+        val mapped = unique.filter { normalizeContactText(it.displayName) == savedRelationshipName }
+        if (mapped.isNotEmpty()) return mapped
+    }
+    return unique.take(12)
 }
 
 private fun requiredRuntimePermissionList(): List<String> = buildList {
