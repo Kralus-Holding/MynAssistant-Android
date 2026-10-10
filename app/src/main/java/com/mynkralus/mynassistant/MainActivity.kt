@@ -3059,7 +3059,7 @@ private fun AssistantScreen(
                             }
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                        DrawerItem("Ana sayfa") { page = Page.HOME; drawer = false }
+                        DrawerItem("Ana sayfa") { navigateToPage(Page.HOME) }
                         DrawerItem(if (signedIn) "Hesabım" else "Giriş yap") { navigateToPage(Page.LOGIN); drawer = false }
                         if (!signedIn) DrawerItem("Kayıt ol") { navigateToPage(Page.REGISTER); drawer = false }
                         DrawerItem("Cihazlarım") { navigateToPage(Page.DEVICES); drawer = false }
@@ -3067,7 +3067,7 @@ private fun AssistantScreen(
                         DrawerItem("PC Kumandası") { navigateToPage(Page.REMOTE); drawer = false }
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
-                        if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
+                        if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
                         Text("MynAssistant • Android 0.3.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
