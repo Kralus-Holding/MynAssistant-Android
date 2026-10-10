@@ -26,6 +26,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -66,6 +67,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.SettingsRemote
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Login
@@ -1300,6 +1302,7 @@ private fun AssistantScreen(
     googleStatus: String?
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
+    val pageHistory = remember { mutableStateListOf<Page>() }
     var drawer by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
@@ -1316,6 +1319,25 @@ private fun AssistantScreen(
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val navigateToPage: (Page) -> Unit = { targetPage ->
+        if (targetPage == Page.HOME) {
+            pageHistory.clear()
+            page = Page.HOME
+        } else if (targetPage != page) {
+            pageHistory.add(page)
+            page = targetPage
+        }
+        drawer = false
+    }
+    BackHandler(enabled = drawer || (page != Page.HOME && !keyboardVisible)) {
+        if (drawer) {
+            drawer = false
+        } else if (pageHistory.isNotEmpty()) {
+            page = pageHistory.removeAt(pageHistory.lastIndex)
+        } else {
+            page = Page.HOME
+        }
+    }
     val recordIssue: (String, String, String, String, String) -> String = {
             codePrefix, category, userMessage, commandText, technicalDetails ->
         val issueId = MynAssistantDiagnostics.record(
@@ -1613,7 +1635,7 @@ private fun AssistantScreen(
             feedback = "Devam etmek için önce giriş yap."
         } else if (pcBridgeUrl.isBlank()) {
             feedback = "Önce bilgisayar bağlantı ayarlarını tamamla."
-            page = Page.SETTINGS
+            navigateToPage(Page.SETTINGS)
         } else {
             savePcBridgeSettings(pcBridgeUrl, pcBridgeToken)
             pcBridgeBusy = true
@@ -1904,7 +1926,7 @@ private fun AssistantScreen(
                 ) {
                     IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, contentDescription = "Menüyü aç", modifier = Modifier.size(30.dp)) }
                     Spacer(Modifier.weight(1f))
-                    Box(Modifier.size(42.dp).clickable { page = Page.REMOTE }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "PC kumandası", modifier = Modifier.size(32.dp)) }
+                    Box(Modifier.size(42.dp).clickable { navigateToPage(Page.REMOTE) }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "PC kumandası", modifier = Modifier.size(32.dp)) }
                     Spacer(Modifier.width(10.dp))
                     Button(onClick = toggleTheme, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(18.dp)); Text(if (dark) "Açık" else "Koyu", fontSize = 14.sp) }
@@ -1969,7 +1991,7 @@ private fun AssistantScreen(
                                         else -> MaterialTheme.colorScheme.secondary
                                     }, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.REGISTER })
+                        } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.REGISTER) })
                         Page.REGISTER -> if (signedIn) {
                             Text("Oturum açık.", color = MaterialTheme.colorScheme.secondary)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
@@ -1979,7 +2001,7 @@ private fun AssistantScreen(
                                         else -> MaterialTheme.colorScheme.secondary
                                     }, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.LOGIN })
+                        } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.LOGIN) })
                         Page.DEVICES -> {
                             Text(
                                 if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
@@ -1988,7 +2010,7 @@ private fun AssistantScreen(
                                 fontSize = 14.sp
                             )
                             if (!signedIn) {
-                                Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                Button(onClick = { navigateToPage(Page.LOGIN) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
                             } else {
                                 Text(
                                     "Windows uygulaması aynı hesapla giriş yaptığında bilgisayarın burada otomatik görünür. Ek bağlantı bilgisi girmen gerekmez.",
@@ -2076,7 +2098,7 @@ private fun AssistantScreen(
                                                 Text("Adı kaydet")
                                             }
                                             Text("Cihaz kimliği: " + device.id, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
-                                            Button(onClick = { selectedDeviceId = device.id; page = Page.REMOTE }, modifier = Modifier.fillMaxWidth()) {
+                                            Button(onClick = { selectedDeviceId = device.id; navigateToPage(Page.REMOTE) }, modifier = Modifier.fillMaxWidth()) {
                                                 Text("Bağlan")
                                             }
                                         }
@@ -2144,7 +2166,7 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
                             if (!signedIn) {
-                                Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                Button(onClick = { navigateToPage(Page.LOGIN) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
                             } else if (connectedDevices.isEmpty()) {
@@ -2208,7 +2230,7 @@ private fun AssistantScreen(
                             )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             OutlinedButton(
-                                onClick = { page = Page.DIAGNOSTICS },
+                                onClick = { navigateToPage(Page.DIAGNOSTICS) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.BugReport, contentDescription = null)
@@ -2289,7 +2311,7 @@ private fun AssistantScreen(
                                         color = MaterialTheme.colorScheme.secondary
                                     )
                                     OutlinedButton(
-                                        onClick = { page = Page.DEVICES },
+                                        onClick = { navigateToPage(Page.DEVICES) },
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Icon(Icons.Default.Devices, contentDescription = null)
@@ -2379,7 +2401,7 @@ private fun AssistantScreen(
                             }
                             if (!remoteOnline) {
                                 OutlinedButton(
-                                    onClick = { page = Page.DEVICES },
+                                    onClick = { navigateToPage(Page.DEVICES) },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(if (device == null) "Cihaz listesine dön" else "Cihaz durumunu gör")
@@ -2459,7 +2481,7 @@ private fun AssistantScreen(
                                             when (commandTarget) {
                                                 "PHONE" -> Icons.Default.Devices
                                                 "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.SettingsRemote
+                                                else -> Icons.Default.Tune
                                             },
                                             contentDescription = when (commandTarget) {
                                                 "PHONE" -> "Hedef: bu Android telefonu"
@@ -2486,7 +2508,7 @@ private fun AssistantScreen(
                                     ) {
                                         DropdownMenuItem(
                                             text = { Text("Otomatik — komuta göre seç") },
-                                            leadingIcon = { Icon(Icons.Default.SettingsRemote, contentDescription = null) },
+                                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
                                             onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
                                         )
                                         DropdownMenuItem(
@@ -2794,15 +2816,15 @@ private fun AssistantScreen(
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         DrawerItem("Ana sayfa") { page = Page.HOME; drawer = false }
-                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap") { page = Page.LOGIN; drawer = false }
-                        if (!signedIn) DrawerItem("Kayıt ol") { page = Page.REGISTER; drawer = false }
-                        DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
-                        DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
-                        DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
-                        if (hasConnectedPc) DrawerItem("PcFiles") { page = Page.FILES; drawer = false }
+                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap") { navigateToPage(Page.LOGIN); drawer = false }
+                        if (!signedIn) DrawerItem("Kayıt ol") { navigateToPage(Page.REGISTER); drawer = false }
+                        DrawerItem("Cihazlarım") { navigateToPage(Page.DEVICES); drawer = false }
+                        DrawerItem("Ayarlar") { navigateToPage(Page.SETTINGS); drawer = false }
+                        DrawerItem("PC Kumandası") { navigateToPage(Page.REMOTE); drawer = false }
+                        DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.3.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.3.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
