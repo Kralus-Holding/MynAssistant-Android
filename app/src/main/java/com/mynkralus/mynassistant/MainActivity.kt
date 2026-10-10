@@ -466,7 +466,8 @@ private fun AssistantScreen(
                 Row(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .48f))) {
                     Column(
                         Modifier.fillMaxHeight().fillMaxWidth(.84f).background(MaterialTheme.colorScheme.surface)
-                            .verticalScroll(rememberScrollState()).padding(18.dp),
+                            .statusBarsPadding().verticalScroll(rememberScrollState())
+                            .padding(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 18.dp),
                         verticalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Column {
