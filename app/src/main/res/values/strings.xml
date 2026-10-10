@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MynAssistant</string>
+    <string name="accessibility_service_label">MynAssistant WhatsApp komutları</string>
+    <string name="accessibility_service_description">Yalnızca sen açıkça WhatsApp arama veya mesaj komutu verdiğinde ilgili sohbet ekranındaki sesli arama ya da gönder düğmesini çalıştırır. Ekran içeriği kaydedilmez ve sunucuya gönderilmez.</string>
 </resources>
