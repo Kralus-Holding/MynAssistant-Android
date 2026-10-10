@@ -569,7 +569,7 @@ private fun AssistantScreen(
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    Text(if (signedIn) email.ifBlank { phone } else "Google hesabını bağla", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
+                                    Text(if (signedIn) email.ifBlank { phone } else "Giriş yap", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
                                 }
                                 Text(if (accountListExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
                             }
