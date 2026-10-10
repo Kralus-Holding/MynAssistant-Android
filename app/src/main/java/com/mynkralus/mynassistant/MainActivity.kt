@@ -1,6 +1,8 @@
 package com.mynkralus.mynassistant
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.util.Base64
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +36,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +75,7 @@ import coil.decode.ImageDecoderDecoder
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
@@ -83,7 +88,9 @@ private data class PcDevice(
     val id: String,
     val name: String,
     val platform: String,
-    val status: String
+    val status: String,
+    val connectionMode: String = "",
+    val screenJpegBase64: String = ""
 ) {
     val isOnline: Boolean
         get() = status.trim().lowercase() in setOf("online", "connected", "ready", "active")
@@ -624,7 +631,9 @@ private fun AssistantScreen(
                                     ?: "Windows",
                                 status = document.getString("status")
                                     ?: document.getString("connectionStatus")
-                                    ?: "offline"
+                                    ?: "offline",
+                                connectionMode = document.getString("connectionMode").orEmpty(),
+                                screenJpegBase64 = document.getString("screenJpegBase64").orEmpty()
                             )
                         }
                         devicesError = null
@@ -641,6 +650,31 @@ private fun AssistantScreen(
         onDispose { registration?.remove() }
     }
     val selectedDevice = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
+
+    // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
+    // The agent only sends frames while this lease is refreshed, so it does not upload screenshots in the background.
+    LaunchedEffect(page, selectedDevice?.id, selectedDevice?.connectionMode, firebaseUserId, signedIn) {
+        val target = selectedDevice
+        if (page == Page.REMOTE && signedIn && !firebaseUserId.isNullOrBlank() &&
+            target != null && target.connectionMode == "firebase-agent") {
+            val deviceRef = FirebaseFirestore.getInstance().collection("devices").document(target.id)
+            try {
+                while (true) {
+                    deviceRef.update(
+                        "screenRequested", true,
+                        "screenRequestedAt", FieldValue.serverTimestamp()
+                    )
+                    delay(10_000)
+                }
+            } finally {
+                deviceRef.update(
+                    "screenRequested", false,
+                    "screenRequestedAt", FieldValue.serverTimestamp()
+                )
+            }
+        }
+    }
+
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val testPcBridgeNow: () -> Unit = {
         if (!signedIn) {
@@ -855,6 +889,15 @@ private fun AssistantScreen(
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
+                            val screenBitmap = remember(device?.id, device?.screenJpegBase64) {
+                                val encoded = device?.screenJpegBase64.orEmpty()
+                                if (encoded.isBlank()) null else try {
+                                    val bytes = Base64.decode(encoded, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            }
                             val localBridgeSelected = signedIn && localPcConnected &&
                                 (device == null || device.id == localPcDeviceId)
                             val remoteOnline = localBridgeSelected ||
@@ -882,6 +925,44 @@ private fun AssistantScreen(
                                 }
                                 Surface(shape = CircleShape, color = if (remoteOnline) Color(0xFF49B86E) else Color(0xFFB85C5C)) {
                                     Box(Modifier.size(10.dp))
+                                }
+                            }
+                            if (device?.connectionMode == "firebase-agent") {
+                                Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                                if (screenBitmap != null) {
+                                    Image(
+                                        bitmap = screenBitmap,
+                                        contentDescription = "Windows masaüstü önizlemesi",
+                                        modifier = Modifier.fillMaxWidth()
+                                            .heightIn(max = 330.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .12f), RoundedCornerShape(16.dp)),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                    Text(
+                                        "Ekran önizlemesi yaklaşık saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                    )
+                                } else {
+                                    Card(
+                                        Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                    ) {
+                                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                                            Text(
+                                                if (remoteOnline) "Windows ekranı bekleniyor..." else "Bilgisayar çevrimdışı",
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                "Önizleme yalnızca bu sayfa açıkken istenir; Windows Agent çalışıyor olmalı.",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                            if (remoteOnline) LinearProgressIndicator(Modifier.fillMaxWidth())
+                                        }
+                                    }
                                 }
                             }
                             if (!remoteOnline) {
