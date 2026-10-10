@@ -824,53 +824,48 @@ private fun AssistantScreen(
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             HorizontalDivider()
-                            Text("Windows bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                            Text(
-                                "Windows PC'de scripts\\start_mynai_mobile_bridge.ps1 dosyasını çalıştır. Konsolda yazan http://...:8765 adresini buraya gir.",
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                            )
-                            OutlinedTextField(
-                                value = pcBridgeUrl,
-                                onValueChange = { pcBridgeUrl = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Windows köprü adresi") },
-                                placeholder = { Text("http://192.168.1.34:8765") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
-                            )
-                            OutlinedTextField(
-                                value = pcBridgeToken,
-                                onValueChange = { pcBridgeToken = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Güvenlik tokeni") },
-                                placeholder = { Text("meyene") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation()
-                            )
-                            Text(
-                                "Varsayılan token: meyene. Telefon ve bilgisayar aynı güvenilir Wi-Fi ağında olmalı. Bu yerel HTTP bağlantısını internete port yönlendirmesiyle açma.",
-                                fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary
-                            )
-                            Button(
-                                onClick = {
-                                    savePcBridgeSettings(pcBridgeUrl, pcBridgeToken)
-                                    pcBridgeStatus = "Bilgisayar bağlantı ayarları kaydedildi."
-                                    feedback = pcBridgeStatus
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("Ayarları kaydet") }
-                            OutlinedButton(
-                                onClick = testPcBridgeNow,
-                                enabled = !pcBridgeBusy && pcBridgeUrl.isNotBlank(),
-                                modifier = Modifier.fillMaxWidth()
+                            Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
+                                Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Text(if (pcBridgeBusy) "Bağlantı test ediliyor..." else "Bağlantıyı test et")
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Windows Agent", fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                when {
+                                                    !signedIn -> "Önce Google hesabınla giriş yap."
+                                                    devicesLoading -> "Hesabına bağlı cihazlar aranıyor..."
+                                                    devices.any { it.isOnline } -> "En az bir cihaz çevrimiçi."
+                                                    else -> "Henüz çevrimiçi Windows Agent yok."
+                                                },
+                                                fontSize = 12.sp,
+                                                color = if (devices.any { it.isOnline }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "Windows Agent aynı Google hesabıyla bağlandığında bilgisayarını otomatik kaydeder. Cihaz adı ve çevrimiçi durumu Firebase üzerinden güncellenir. Telefona IP adresi veya güvenlik tokeni yazman gerekmez.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .76f)
+                                    )
+                                    Text(
+                                        "Not: Bilgisayarın otomatik görünmesi için Windows Agent'ın ayrıca kurulup çalışıyor olması gerekir.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                    OutlinedButton(
+                                        onClick = { page = Page.DEVICES },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Devices, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Cihazlarımı gör")
+                                    }
+                                }
                             }
-                            Text(
-                                pcBridgeStatus,
-                                color = if (localPcConnected) Color(0xFF65D68B) else MaterialTheme.colorScheme.secondary,
-                                fontSize = 12.sp
-                            )
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
