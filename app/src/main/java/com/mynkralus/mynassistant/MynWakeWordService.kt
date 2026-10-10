@@ -24,6 +24,7 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -253,13 +254,11 @@ class MynWakeWordService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val mic = TextView(this).apply {
-            text = "●"
-            textSize = 16f
-            setTextColor(Color.rgb(139, 156, 255))
-            gravity = Gravity.CENTER
+        val mic = ImageView(this).apply {
+            setImageResource(R.drawable.ic_myn_microphone)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(11), dp(11), dp(11), dp(11))
             background = roundedBackground(Color.rgb(39, 48, 79), dp(18))
-            setPadding(dp(13), dp(9), dp(13), dp(9))
         }
         heading.addView(mic, LinearLayout.LayoutParams(dp(44), dp(44)))
         val labels = LinearLayout(this).apply {
