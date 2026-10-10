@@ -728,15 +728,36 @@ private fun AssistantScreen(
                         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("KOMUT MERKEZİ", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Text("Sana nasıl yardımcı olabilirim?", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Metin veya sesli komutlarını buradan yönet.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                            Text("Bilgisayarına komut gönder, ses ve fare kontrolünü tek yerden yönet.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
                         }
                     }
                     Text("Ne yapmamı istersin?", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(command, { command = it; feedback = null }, Modifier.fillMaxWidth(), placeholder = { Text("Bir komut yaz...") }, minLines = 2, shape = RoundedCornerShape(16.dp))
+                    OutlinedTextField(command, { command = it; feedback = null }, Modifier.fillMaxWidth(), placeholder = { Text("Bilgisayar için komut yaz...") }, minLines = 2, shape = RoundedCornerShape(16.dp))
                     Button(
-                        onClick = { feedback = if (command.isBlank()) "Önce bir komut yaz." else "Komut alındı. Gerçek komut çalıştırma sonraki aşamada eklenecek." },
+                        onClick = {
+                            val textCommand = command.trim()
+                            when {
+                                textCommand.isBlank() -> feedback = "Önce bir komut yaz."
+                                !signedIn -> feedback = "Komut göndermek için önce giriş yap."
+                                selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
+                                    feedback = "Komut bilgisayarına gönderiliyor..."
+                                    sendRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to textCommand)) { message ->
+                                        feedback = message
+                                    }
+                                }
+                                localPcConnected -> {
+                                    feedback = "Komut bilgisayarına gönderiliyor..."
+                                    sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, textCommand) { result ->
+                                        localPcConnected = result.connected
+                                        pcBridgeStatus = result.message
+                                        feedback = result.message
+                                    }
+                                }
+                                else -> feedback = "Şu anda bağlı bilgisayar yok. Bilgisayar uygulaması çalıştığında burada görünür."
+                            }
+                        },
                         Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp)
-                    ) { Text("Komutu gönder", fontWeight = FontWeight.SemiBold) }
+                    ) { Text("Bilgisayara gönder", fontWeight = FontWeight.SemiBold) }
                     feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
                 } else {
                     Text(when (page) {

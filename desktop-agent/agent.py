@@ -6,7 +6,9 @@ import io
 import json
 import os
 import platform
+import subprocess
 import sys
+import unicodedata
 import time
 import uuid
 from datetime import datetime, timezone
@@ -25,7 +27,7 @@ IDENTITY_TOOLKIT = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN = "https://securetoken.googleapis.com/v1/token"
 FIRESTORE = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 SCOPES = ["openid", "email", "profile"]
-AGENT_VERSION = "0.1.0"
+AGENT_VERSION = "0.2.0"
 POLL_SECONDS = 2.0
 COMMAND_POLL_SECONDS = 2.0
 SCREEN_CHECK_SECONDS = 8.0
@@ -394,8 +396,94 @@ def press_virtual_key(vk: int, repeat: int = 1) -> None:
         user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
 
 
+def normalize_text_command(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.casefold())
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = normalized.replace("ı", "i")
+    return " ".join(normalized.split())
+
+
+def execute_text_command(text: str) -> str:
+    command = normalize_text_command(text)
+    if not command:
+        return "Önce bir komut yaz."
+
+    if command in {"sesi kapa", "sesi kapat", "sessize al", "sesi sustur", "mute"}:
+        press_virtual_key(VK_VOLUME_MUTE)
+        return "Bilgisayarın sesi sessize alındı veya açıldı."
+    if command in {"ses arttir", "sesi arttir", "ses artır", "sesi artır", "ses yuksel", "sesi yuksel", "ses ac", "sesi ac", "volume up"}:
+        press_virtual_key(VK_VOLUME_UP, 3)
+        return "Bilgisayarın sesi artırıldı."
+    if command in {"ses azalt", "sesi azalt", "ses kis", "sesi kis", "volume down"}:
+        press_virtual_key(VK_VOLUME_DOWN, 3)
+        return "Bilgisayarın sesi azaltıldı."
+    if command in {"masaustu goster", "masaustunu goster", "masaustune don", "masaustu", "show desktop"}:
+        pyautogui.hotkey("win", "d")
+        return "Masaüstü gösterildi."
+
+    if command in {"not defteri ac", "not defterini ac", "notepad ac", "notepad"}:
+        subprocess.Popen(["notepad.exe"])
+        return "Not Defteri açıldı."
+    if command in {"hesap makinesi ac", "hesap makinesini ac", "calculator ac", "calc ac"}:
+        subprocess.Popen(["calc.exe"])
+        return "Hesap makinesi açıldı."
+    if command in {"dosya gezgini ac", "dosya yoneticisini ac", "explorer ac"}:
+        subprocess.Popen(["explorer.exe"])
+        return "Dosya Gezgini açıldı."
+    if command in {"gorev yoneticisi ac", "task manager ac", "taskmgr ac"}:
+        subprocess.Popen(["taskmgr.exe"])
+        return "Görev Yöneticisi açıldı."
+    if command in {"ayarlar ac", "windows ayarlari ac"}:
+        os.startfile("ms-settings:")
+        return "Windows Ayarları açıldı."
+    if command in {"chrome ac", "google chrome ac"}:
+        candidates = [
+            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Google/Chrome/Application/chrome.exe",
+        ]
+        chrome = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if chrome:
+            subprocess.Popen([str(chrome)])
+            return "Google Chrome açıldı."
+        os.startfile("https://www.google.com")
+        return "Varsayılan tarayıcı açıldı."
+    if command in {"youtube ac", "youtube'u ac", "youtubeu ac"}:
+        os.startfile("https://www.youtube.com")
+        return "YouTube açıldı."
+    if command in {"google ac", "google'i ac", "googlei ac"}:
+        os.startfile("https://www.google.com")
+        return "Google açıldı."
+
+    search_prefixes = ("internette ara ", "google'da ara ", "googleda ara ", "webde ara ")
+    for prefix in search_prefixes:
+        if command.startswith(prefix) and command[len(prefix):].strip():
+            query = command[len(prefix):].strip()
+            os.startfile("https://www.google.com/search?" + urlencode({"q": query}))
+            return "İnternet araması açıldı."
+
+    site_prefixes = ("site ac ", "web sitesi ac ", "adres ac ")
+    for prefix in site_prefixes:
+        if command.startswith(prefix):
+            address = text.strip()[len(prefix):].strip()
+            if not address:
+                return "Açılacak site adresini yaz."
+            if "://" not in address:
+                address = "https://" + address
+            from urllib.parse import urlsplit
+            parts = urlsplit(address)
+            if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+                return "Güvenli bir web adresi yazıp tekrar dene."
+            os.startfile(address)
+            return "Web sitesi açıldı."
+
+    return "Desteklenmeyen komut. Şunları deneyebilirsin: Chrome aç, Not Defteri aç, Hesap makinesi aç, YouTube aç, sesi artır, sesi azalt, masaüstünü göster."
+
+
 def execute_command(command: str, fields: dict) -> str:
     command = command.strip().lower()
+    if command == "text_command":
+        return execute_text_command(str(fields.get("text") or ""))
     if command == "mute":
         press_virtual_key(VK_VOLUME_MUTE)
         return "Bilgisayarın sesi aç/kapat tuşuyla değiştirildi."
@@ -427,7 +515,7 @@ def execute_command(command: str, fields: dict) -> str:
 def command_is_supported(command: str) -> bool:
     return command in {
         "mute", "volume_up", "volume_down", "home",
-        "mouse_move", "mouse_click", "mouse_right_click", "power"
+        "mouse_move", "mouse_click", "mouse_right_click", "power", "text_command"
     }
 
 
@@ -531,7 +619,7 @@ def run_agent() -> int:
                     update_command(session, document, "running", "Windows Agent komutu çalıştırıyor.")
                     try:
                         result = execute_command(command, fields)
-                        status = "completed" if not result.startswith("Desteklenmeyen") else "failed"
+                        status = "failed" if result.startswith("Desteklenmeyen komut") else "completed"
                         update_command(session, document, status, result)
                         print(f"[Komut] {command}: {result}")
                     except Exception as exc:
