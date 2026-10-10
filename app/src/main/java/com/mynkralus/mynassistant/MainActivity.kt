@@ -27,7 +27,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -422,8 +421,12 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
             return openWhatsAppChat(context, number, autoAction = "MESSAGE", message = message)
         }
         if (contactAction == "DIAL" && number != null) {
-            context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(number)}")))
-            return "Telefon arama ekranı açıldı. Aramayı sen onaylayabilirsin."
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.CALL_PHONE
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) return "Telefon araması için Arama iznini vermen gerekiyor."
+            context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(number)}")))
+            return "Arama başlatılıyor."
         }
 
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -980,6 +983,36 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("pending_whatsapp_waiting_accessibility", false)) return
+        val requestedAt = prefs.getLong("pending_whatsapp_action_at", 0L)
+        if (requestedAt <= 0L || System.currentTimeMillis() - requestedAt > 120_000L) {
+            prefs.edit()
+                .remove("pending_whatsapp_action")
+                .remove("pending_whatsapp_phone")
+                .remove("pending_whatsapp_message")
+                .remove("pending_whatsapp_action_at")
+                .putBoolean("pending_whatsapp_waiting_accessibility", false)
+                .putString("whatsapp_auto_call_status", "expired")
+                .apply()
+            return
+        }
+        if (!isMynAssistantAccessibilityEnabled(this)) return
+        val action = prefs.getString("pending_whatsapp_action", null) ?: return
+        val phoneNumber = prefs.getString("pending_whatsapp_phone", null) ?: return
+        val message = prefs.getString("pending_whatsapp_message", null)
+        prefs.edit().putBoolean("pending_whatsapp_waiting_accessibility", false).apply()
+        window.decorView.post {
+            try {
+                openWhatsAppChat(this, phoneNumber, action, message)
+            } catch (_: Exception) {
+                prefs.edit().putString("whatsapp_auto_call_status", "expired").apply()
+            }
+        }
+    }
 }
 
 @Composable
@@ -1011,9 +1044,48 @@ private fun AssistantScreen(
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
-    var pendingContactAction by remember { mutableStateOf<String?>(null) }
-    var pendingWhatsappMessage by remember { mutableStateOf<String?>(null) }
     val commandContext = LocalContext.current
+    var pendingCommandAfterPermission by remember { mutableStateOf<String?>(null) }
+    var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
+    var permissionResultTick by remember { mutableIntStateOf(0) }
+    var startupPermissionRequestPending by remember { mutableStateOf(false) }
+    var showAccessibilitySetupDialog by remember { mutableStateOf(false) }
+    val runtimePermissions = remember { requiredRuntimePermissionList() }
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        permissionResultTick += 1
+        val denied = results.filterValues { granted -> !granted }.keys
+        feedback = if (denied.isEmpty()) {
+            "İzinler güncellendi."
+        } else {
+            "Bazı izinler verilmedi. Rehber, arama ve medya komutları için bu izinleri açman gerekebilir."
+        }
+        if (startupPermissionRequestPending) {
+            startupPermissionRequestPending = false
+            val prefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            if (!isMynAssistantAccessibilityEnabled(commandContext) &&
+                !prefs.getBoolean("whatsapp_accessibility_setup_seen", false)
+            ) {
+                showAccessibilitySetupDialog = true
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        val missing = runtimePermissions.filter { permission ->
+            androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        val prefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (missing.isNotEmpty()) {
+            startupPermissionRequestPending = true
+            permissionLauncher.launch(missing.toTypedArray())
+        } else if (!isMynAssistantAccessibilityEnabled(commandContext) &&
+            !prefs.getBoolean("whatsapp_accessibility_setup_seen", false)
+        ) {
+            showAccessibilitySetupDialog = true
+        }
+    }
     var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
     var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
@@ -1194,57 +1266,6 @@ private fun AssistantScreen(
         }
     }
 
-    val contactPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val action = pendingContactAction
-        pendingContactAction = null
-        val selectedUri = result.data?.data
-        if (result.resultCode != android.app.Activity.RESULT_OK || selectedUri == null || action == null) {
-            feedback = "Kişi seçimi iptal edildi."
-        } else {
-            val phoneNumber = try {
-                commandContext.contentResolver.query(
-                    selectedUri,
-                    arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
-                    null,
-                    null,
-                    null
-                )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-            } catch (_: Exception) {
-                null
-            }
-            if (phoneNumber.isNullOrBlank()) {
-                feedback = "Seçilen kişide telefon numarası bulunamadı."
-            } else if (action == "WHATSAPP_CALL") {
-                feedback = try {
-                    openWhatsAppChat(commandContext, phoneNumber, autoAction = "CALL")
-                } catch (_: Exception) {
-                    "WhatsApp araması başlatılamadı. WhatsApp'ın kurulu olduğunu kontrol et."
-                }
-            } else if (action == "WHATSAPP_MESSAGE") {
-                val message = pendingWhatsappMessage
-                pendingWhatsappMessage = null
-                if (message.isNullOrBlank()) {
-                    feedback = "Göndermek istediğin mesajı tırnak içinde komuta ekle. Örn. Anneme WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
-                } else {
-                    feedback = try {
-                        openWhatsAppChat(commandContext, phoneNumber, autoAction = "MESSAGE", message = message)
-                    } catch (_: Exception) {
-                        "WhatsApp mesajı gönderilemedi. WhatsApp'ın kurulu olduğunu kontrol et."
-                    }
-                }
-            } else {
-                feedback = try {
-                    commandContext.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phoneNumber)}")))
-                    "Telefon arama ekranı açıldı. Aramayı sen onaylayabilirsin."
-                } catch (_: Exception) {
-                    "Telefon arama ekranı açılamadı."
-                }
-            }
-        }
-    }
-
     val runAssistantCommand: (String) -> Unit = { rawCommand ->
         val textCommand = rawCommand.trim()
         val computerPrefix = COMPUTER_COMMAND_PREFIX.find(textCommand)
@@ -1266,15 +1287,59 @@ private fun AssistantScreen(
             target == "PHONE" && contactAction == "WHATSAPP_MESSAGE" && extractWhatsAppMessage(textCommand) == null -> {
                 feedback = "Göndermek istediğin mesajı tırnak içinde komuta ekle. Örn. Anneme WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
             }
-            target == "PHONE" && contactAction != null && phoneNumber == null -> {
-                pendingContactAction = contactAction
-                pendingWhatsappMessage = extractWhatsAppMessage(textCommand)
-                feedback = when (contactAction) {
-                    "WHATSAPP_CALL" -> "WhatsApp'tan aranacak kişiyi rehberden seç."
-                    "WHATSAPP_MESSAGE" -> "WhatsApp mesajı gönderilecek kişiyi rehberden seç."
-                    else -> "Aramak istediğin kişiyi rehberden seç."
+            target == "PHONE" && contactAction != null -> {
+                val missingContactPermissions = buildList {
+                    if (phoneNumber == null &&
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                            commandContext,
+                            android.Manifest.permission.READ_CONTACTS
+                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) add(android.Manifest.permission.READ_CONTACTS)
+                    if (contactAction == "DIAL" &&
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                            commandContext,
+                            android.Manifest.permission.CALL_PHONE
+                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) add(android.Manifest.permission.CALL_PHONE)
                 }
-                contactPickerLauncher.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
+                if (missingContactPermissions.isNotEmpty()) {
+                    pendingCommandAfterPermission = textCommand
+                    pendingPermissionResultTick = permissionResultTick + 1
+                    feedback = "MynAssistant rehber/arama izinlerini istiyor; izin verince komut otomatik devam edecek."
+                    permissionLauncher.launch(missingContactPermissions.toTypedArray())
+                } else {
+                    val contact = if (phoneNumber != null) {
+                        ContactPhoneMatch("Telefon numarası", phoneNumber, 120)
+                    } else {
+                        findContactPhoneForCommand(commandContext, textCommand)
+                    }
+                    if (contact == null) {
+                        feedback = "Rehberinde bu komutla eşleşen kişiyi bulamadım. Kişi seçme ekranı açmıyorum; rehber kaydını Baba/Babam gibi bir adla kaydedebilir veya kişinin rehberdeki adını doğrudan komutta kullanabilirsin."
+                    } else {
+                        feedback = try {
+                            when (contactAction) {
+                                "DIAL" -> {
+                                    commandContext.startActivity(
+                                        Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(contact.phoneNumber)}"))
+                                    )
+                                    "${contact.displayName} aranıyor."
+                                }
+                                "WHATSAPP_CALL" -> openWhatsAppChat(
+                                    commandContext, contact.phoneNumber, autoAction = "CALL"
+                                )
+                                "WHATSAPP_MESSAGE" -> openWhatsAppChat(
+                                    commandContext,
+                                    contact.phoneNumber,
+                                    autoAction = "MESSAGE",
+                                    message = extractWhatsAppMessage(textCommand)
+                                )
+                                else -> executeAndroidTextCommand(commandContext, textCommand)
+                            }
+                        } catch (_: Exception) {
+                            "İşlem başlatılamadı. İzinleri ve ilgili uygulamanın kurulu olduğunu kontrol et."
+                        }
+                    }
+                }
             }
             target == "PHONE" -> feedback = executeAndroidTextCommand(commandContext, textCommand)
             routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
@@ -1292,6 +1357,25 @@ private fun AssistantScreen(
                 }
             }
             else -> feedback = "Şu anda bağlı bilgisayar yok. Windows uygulaması çalıştığında burada görünür."
+        }
+    }
+    LaunchedEffect(permissionResultTick, pendingCommandAfterPermission) {
+        val pending = pendingCommandAfterPermission ?: return@LaunchedEffect
+        if (permissionResultTick < pendingPermissionResultTick) return@LaunchedEffect
+        val action = contactActionKind(pending)
+        val hasContacts = androidx.core.content.ContextCompat.checkSelfPermission(
+            commandContext, android.Manifest.permission.READ_CONTACTS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCall = androidx.core.content.ContextCompat.checkSelfPermission(
+            commandContext, android.Manifest.permission.CALL_PHONE
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val canContinue = (extractPhoneNumber(pending) != null || hasContacts) &&
+            (action != "DIAL" || hasCall)
+        pendingCommandAfterPermission = null
+        if (canContinue) {
+            runAssistantCommand(pending)
+        } else {
+            feedback = "Gerekli izin verilmediği için komut çalıştırılmadı. İzni verip komutu yeniden deneyebilirsin."
         }
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -1814,6 +1898,36 @@ private fun AssistantScreen(
                     }
                 }
             }
+            }
+            if (showAccessibilitySetupDialog) {
+                AlertDialog(
+                    onDismissRequest = {
+                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                            .putBoolean("whatsapp_accessibility_setup_seen", true).apply()
+                        showAccessibilitySetupDialog = false
+                    },
+                    title = { Text("WhatsApp otomasyonunu etkinleştir") },
+                    text = {
+                        Text(
+                            "WhatsApp'ta babanı aramak veya mesaj göndermek için MynAssistant'a bir kez Erişilebilirlik izni vermelisin. Android bu özel izni ayrı ayardan onaylatır."
+                        )
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                .putBoolean("whatsapp_accessibility_setup_seen", true).apply()
+                            showAccessibilitySetupDialog = false
+                            commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        }) { Text("İzin ayarlarını aç") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                .putBoolean("whatsapp_accessibility_setup_seen", true).apply()
+                            showAccessibilitySetupDialog = false
+                        }) { Text("Daha sonra") }
+                    }
+                )
             }
             if (drawer) {
                 Row(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .48f))) {
