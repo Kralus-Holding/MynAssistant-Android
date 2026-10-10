@@ -1236,10 +1236,11 @@ private fun TvRemotePanel(
     val buttons = listOf(
         Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
-        Triple("...", Icons.Default.MoreHoriz, "home"),
+        Triple("...", Icons.Default.MoreHoriz, "placeholder"),
         Triple("Sesi artır", Icons.Default.VolumeUp, "volume_up"),
-        Triple("Sesi kıs", Icons.Default.VolumeDown, "volume_down"),
-        Triple("...", Icons.Default.MoreHoriz, "placeholder")
+        // Keep the requested three-dot visual, but make this button perform Home.
+        Triple("Ana sayfa", Icons.Default.MoreHoriz, "home"),
+        Triple("Sesi kıs", Icons.Default.VolumeDown, "volume_down")
     )
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("PC KUMANDASI", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -1301,15 +1302,15 @@ private fun TvRemotePanel(
             Spacer(Modifier.height(8.dp))
             Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
             Text(
-                if (mouseEnabled) "Sürükle: fare • Dokun: sol tık • Basılı tut: sağ tık"
-                else if (enabled) "Ses ve masaüstü komutları bağlı. Yerel köprü fare hareketini desteklemiyor."
-                else "Bilgisayar bağlandığında fare kontrolü etkinleşecek.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f), textAlign = TextAlign.Center
+                if (mouseEnabled) "Sürükle: fareyi hareket ettir • Dokun: sol tık • Basılı tut: sağ tık"
+                else if (enabled) "Ses ve masaüstü komutları bağlı; fare kontrolü bu bağlantı türünde kullanılamıyor."
+                else "Fare kontrolü Windows Agent çevrimiçi olduğunda açılır.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                if (mouseEnabled) "Komutlar Firebase kuyruğuna gönderilir; Windows Agent'ın bunları alıp uygulaması gerekir."
-                else "Ses ve masaüstü komutları yerel Windows köprüsüne gönderilir.",
+                if (mouseEnabled) "Fare hareketi ve tıklamalar güvenli şekilde oturumunun Windows cihazına gönderilir."
+                else "Çevrimdışıyken tıklama veya fare komutu kuyruğa eklenmez.",
                 fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center
             )
         }
