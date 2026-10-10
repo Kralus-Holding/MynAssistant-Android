@@ -526,19 +526,27 @@ private fun requiredRuntimePermissionList(): List<String> = buildList {
 }
 
 private fun contactActionKind(rawText: String): String? {
-    val normalized = rawText.trim().lowercase(Locale.forLanguageTag("tr-TR"))
-        .replace(Regex("\\s+"), " ")
-    val words = normalized.split(" ")
-    val whatsappCallWords = setOf("ara", "aramak", "arayın", "arayalim", "arayalım", "call")
-    val messageWords = setOf("mesaj", "mesajı", "mesaji", "mesajini", "mesajını", "mesajina", "message")
-    val messageVerbs = setOf("at", "yaz", "gönder", "gonder", "yolla", "yollayiver", "yollayıver", "ilet")
-    val hasMessageAction = words.any { it in messageWords } && words.any { it in messageVerbs }
-    if (normalized.contains("whatsapp") && words.any { it in whatsappCallWords }) return "WHATSAPP_CALL"
-    if (normalized.contains("whatsapp") && (hasMessageAction || words.any { it in messageWords })) return "WHATSAPP_MESSAGE"
-    // In MynAssistant, an unqualified "mesaj at" request defaults to WhatsApp unless SMS is explicit.
-    if (!normalized.contains("sms") && hasMessageAction) return "WHATSAPP_MESSAGE"
-    val searchAppMentioned = listOf("youtube", "google", "chrome", "tarayıcı", "tarayici", "internet").any { normalized.contains(it) }
-    if (!searchAppMentioned && words.any { it in setOf("ara", "aramak", "arayın", "arayalım", "arayalim") }) return "DIAL"
+    val normalized = normalizeContactText(rawText)
+    val words = normalized.split(" ").filter { it.isNotBlank() }
+    val hasCallVerb = words.any {
+        it in setOf("ara", "aramak", "arayin", "arayalim", "call") ||
+            it.startsWith("aray") || it.startsWith("ara")
+    }
+    val messageNouns = setOf("mesaj", "mesaji", "mesajini", "mesajina", "message", "text")
+    val messageVerbs = setOf("at", "yaz", "gonder", "yolla", "ilet")
+    val hasMessageNoun = words.any { it in messageNouns }
+    val hasMessageVerb = words.any {
+        it in messageVerbs || it.startsWith("at") || it.startsWith("yaz") ||
+            it.startsWith("gonder") || it.startsWith("yolla") || it.startsWith("ilet")
+    }
+    val containsWhatsApp = normalized.contains("whatsapp")
+    val containsOtherDeliveryTarget = listOf("sms", "gmail", "mail", "e posta", "e-posta", "email")
+        .any { normalized.contains(it) }
+
+    if (containsWhatsApp && hasCallVerb) return "WHATSAPP_CALL"
+    if (containsWhatsApp && (hasMessageNoun || hasMessageVerb)) return "WHATSAPP_MESSAGE"
+    if (!containsOtherDeliveryTarget && hasMessageNoun && hasMessageVerb) return "WHATSAPP_MESSAGE"
+    if (!containsWhatsApp && !containsOtherDeliveryTarget && hasCallVerb) return "DIAL"
     return null
 }
 
@@ -1362,7 +1370,12 @@ private fun AssistantScreen(
         feedback = if (denied.isEmpty()) {
             "İzinler güncellendi."
         } else {
-            "Bazı izinler verilmedi. Rehber, arama ve medya komutları için bu izinleri açman gerekebilir."
+            recordIssue(
+                "MYN-PERM-4001", "İzinler",
+                "Bazı izinler verilmedi. İlgili özelliği kullanırken izinleri açman gerekebilir.",
+                command,
+                "DENIED_PERMISSIONS=" + denied.joinToString(",")
+            )
         }
         if (startupPermissionRequestPending) {
             startupPermissionRequestPending = false
@@ -2116,7 +2129,7 @@ private fun AssistantScreen(
                                                 Text("Dosya listesini iste")
                                             }
                                             Text(
-                                                "Dosyaları Android içinde gerçek zamanlı gezmek için Windows Agent tarafında dosya listeleme yanıtının desteklenmesi gerekir.",
+                                                "Bilgisayardaki klasörleri burada görüntülemek için Windows yardımcı uygulamasının dosya listesini göndermesi gerekir.",
                                                 fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
                                             )
@@ -2717,7 +2730,7 @@ private fun AssistantScreen(
                         if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.7", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.2.8", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
