@@ -940,7 +940,7 @@ private fun AssistantScreen(
                                         contentScale = ContentScale.Fit
                                     )
                                     Text(
-                                        "Ekran önizlemesi yaklaşık saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
+                                        "Ekran önizlemesi yaklaşık 1–2 saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )

@@ -23,4 +23,4 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 
 ## Current scope
 
-The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands. Live desktop video streaming and a full remote desktop session are a later milestone; this initial version does not claim screen streaming.
+The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands, and an on-demand low-frame-rate JPEG desktop preview. Smooth full-screen remote desktop streaming is a later WebRTC milestone.

@@ -8,6 +8,7 @@ Bu, Android MynAssistant uygulamasından ayrı çalışan yeni bir Windows yard�
 - Firebase Authentication üzerinden aynı kullanıcı hesabına bağlanır.
 - Windows cihazını Firestore içindeki devices koleksiyonuna otomatik kaydeder.
 - Yaklaşık 25 saniyede bir çevrimiçi durumunu günceller.
+- Android uygulamasındaki PC Kumandası açıkken yaklaşık 1–2 saniyede bir küçültülmüş JPEG masaüstü karesi gönderir. Önizleme isteği süreli olduğundan sayfa kapandığında veya istek yenilenmediğinde kare gönderimi durur.
 - Aynı hesaba ve bu cihaza ait commands kuyruğunu okur.
 - Ses aç/kapat, ses artırma/azaltma, masaüstünü gösterme, fare hareketi ve tıklama komutlarını işler.
 - Oturum yenileme anahtarını Windows DPAPI ile şifreleyerek saklar.
@@ -35,4 +36,4 @@ EXE paketi GitHub Actions'ta windows-latest üzerinde oluşturulur. Artifact ZIP
 
 ## Önemli sınırlar
 
-Bu ilk sürüm cihaz keşfi, çevrimiçi durumu ve temel komut/fare kontrolüdür. Canlı ekran görüntüsü/video akışı ve Chrome Uzaktan Masaüstü seviyesinde tam ekran paylaşımı henüz bu sürümde yoktur. Bunun için sonraki aşamada WebRTC ekran aktarımı ve güvenli bağlantı pazarlığı gerekir. Bilgisayarın gerçekten görünmesi için Windows Agent'ın çalışması ve aynı Firebase hesabına kaydolması gerekir.
+Bu ilk sürüm otomatik cihaz keşfi, çevrimiçi durumu, temel komut/fare kontrolü ve düşük kare hızlı masaüstü önizlemesi sağlar. Önizleme Chrome Uzaktan Masaüstü gibi akıcı bir video oturumu değildir; yaklaşık 1–2 saniyede bir JPEG kare gönderir. Sonraki aşamada WebRTC tabanlı akıcı ekran aktarımı ve güvenli bağlantı pazarlığı gerekir. Bilgisayarın görünmesi için Windows Agent'ın çalışması ve aynı Firebase hesabına kaydolması gerekir.
