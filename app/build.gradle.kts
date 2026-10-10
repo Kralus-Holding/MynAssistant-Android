@@ -13,8 +13,8 @@ android {
         applicationId = "com.mynkralus.mynassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.2"
+        versionCode = 4
+        versionName = "0.2.3"
     }
 
     // Keep the debug APK signed with the same certificate used for Google OAuth setup.
