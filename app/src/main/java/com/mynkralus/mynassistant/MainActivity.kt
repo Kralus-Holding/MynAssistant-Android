@@ -210,6 +210,38 @@ private fun normalizeContactText(value: String): String =
         .trim()
         .replace(Regex("""\s+"""), " ")
 
+
+private fun parseRelationshipAliasAssignment(rawCommand: String): Pair<String, String>? {
+    val match = Regex(
+        """^\s*(babam(?:ın|in)?|baba|annem(?:in|in)?|anne|abim|abi|ablam|abla|eşim|esim)\s*(?:=|:|\s+(?:adı|adi|ismi))\s*(.+?)\s*$""",
+        RegexOption.IGNORE_CASE
+    ).find(rawCommand) ?: return null
+    val relation = normalizeContactText(match.groupValues[1])
+    val contactName = match.groupValues[2].trim()
+    if (contactName.length < 2) return null
+    val key = when {
+        relation.startsWith("babam") || relation == "baba" -> "father"
+        relation.startsWith("annem") || relation == "anne" -> "mother"
+        relation.startsWith("abim") || relation == "abi" -> "brother"
+        relation.startsWith("ablam") || relation == "abla" -> "sister"
+        relation.startsWith("esim") -> "spouse"
+        else -> return null
+    }
+    return key to contactName
+}
+
+private fun relationshipPreferenceKey(rawCommand: String): String? {
+    val tokens = normalizeContactText(rawCommand).split(" ").toSet()
+    return when {
+        tokens.any { it in setOf("babam", "babami", "babamin", "babamla", "babamdan", "babaya", "baba", "babacigim", "peder", "dad", "daddy", "father") } -> "father"
+        tokens.any { it in setOf("annem", "annemi", "annemin", "anneme", "annemle", "anne", "annecigim", "anam", "mom", "mommy", "mum", "mother") } -> "mother"
+        tokens.any { it in setOf("abim", "abimi", "abime", "abi", "agabey", "kardesim", "kardesimi", "kardese") } -> "brother"
+        tokens.any { it in setOf("ablam", "ablami", "ablama", "abla", "kizkardesim", "kizkardesimi") } -> "sister"
+        tokens.any { it in setOf("esim", "esimi", "esime", "karim", "karimi", "kocam", "kocami", "partnerim") } -> "spouse"
+        else -> null
+    }
+}
+
 private fun relationshipAliasesForCommand(rawCommand: String): Set<String>? {
     val tokens = normalizeContactText(rawCommand).split(" ").toSet()
     val fatherWords = setOf("babam", "babami", "babamin", "babamla", "babamdan", "babaya", "baba", "babacigim", "peder", "dad", "daddy", "father")
@@ -237,6 +269,10 @@ private fun findContactPhoneForCommand(context: Context, rawCommand: String): Co
     val withoutQuotedMessage = rawCommand.replace(Regex("""["“].*?["”]"""), " ")
     val normalizedCommand = normalizeContactText(withoutQuotedMessage)
     val relationAliases = relationshipAliasesForCommand(withoutQuotedMessage)
+    val relationKey = relationshipPreferenceKey(withoutQuotedMessage)
+    val savedRelationshipName = relationKey?.let {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("contact_alias_$it", null)
+    }?.let { normalizeContactText(it) }.orEmpty()
     val stopWords = setOf(
         "beni", "bana", "icin", "telefonla", "telefon", "ara", "aramak", "arayin", "arayalim", "call",
         "whatsapp", "tan", "ten", "dan", "den", "ile", "yoluyla", "mesaj", "mesaji", "mesajini", "mesajina",
@@ -270,6 +306,8 @@ private fun findContactPhoneForCommand(context: Context, rawCommand: String): Co
                 val nameWords = normalizedName.split(" ").toSet()
                 val score = if (relationAliases != null) {
                     when {
+                        savedRelationshipName.isNotBlank() && normalizedName == savedRelationshipName -> 150
+                        savedRelationshipName.isNotBlank() && normalizedName.contains(savedRelationshipName) -> 135
                         normalizedName in relationAliases -> 120
                         nameWords.any { it in relationAliases } -> 100
                         relationAliases.any { normalizedName.startsWith("$it ") } -> 90
@@ -1281,9 +1319,41 @@ private fun AssistantScreen(
         }
         val contactAction = contactActionKind(textCommand)
         val phoneNumber = extractPhoneNumber(textCommand)
+        val relationshipAssignment = parseRelationshipAliasAssignment(textCommand)
 
         when {
             textCommand.isBlank() -> feedback = "Önce bir komut yaz."
+            target == "PHONE" && relationshipAssignment != null -> {
+                val missing = if (
+                    androidx.core.content.ContextCompat.checkSelfPermission(
+                        commandContext, android.Manifest.permission.READ_CONTACTS
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) listOf(android.Manifest.permission.READ_CONTACTS) else emptyList()
+                if (missing.isNotEmpty()) {
+                    pendingCommandAfterPermission = textCommand
+                    pendingPermissionResultTick = permissionResultTick + 1
+                    feedback = "Rehber izni isteniyor; izin verince kişi eşleştirmesi otomatik devam edecek."
+                    permissionLauncher.launch(missing.toTypedArray())
+                } else {
+                    val (relationKey, requestedName) = relationshipAssignment
+                    val matchedContact = findContactPhoneForCommand(commandContext, requestedName)
+                    if (matchedContact == null) {
+                        feedback = "Rehberinde “$requestedName” bulunamadı. Rehberdeki görünen adı kullanarak tekrar dene."
+                    } else {
+                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                            .putString("contact_alias_$relationKey", normalizeContactText(matchedContact.displayName))
+                            .apply()
+                        val relationshipName = when (relationKey) {
+                            "father" -> "Baban"
+                            "mother" -> "Annen"
+                            "brother" -> "Ağabeyin/kardeşin"
+                            "sister" -> "Ablan/kız kardeşin"
+                            else -> "Eşin"
+                        }
+                        feedback = "$relationshipName artık ${matchedContact.displayName} olarak kaydedildi. Bir sonraki komutta otomatik eşleştireceğim."
+                    }
+                }
+            }
             target == "PHONE" && contactAction == "WHATSAPP_MESSAGE" && extractWhatsAppMessage(textCommand) == null -> {
                 feedback = "Göndermek istediğin mesajı tırnak içinde komuta ekle. Örn. Anneme WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
             }
@@ -1314,7 +1384,7 @@ private fun AssistantScreen(
                         findContactPhoneForCommand(commandContext, textCommand)
                     }
                     if (contact == null) {
-                        feedback = "Rehberinde bu komutla eşleşen kişiyi bulamadım. Kişi seçme ekranı açmıyorum; rehber kaydını Baba/Babam gibi bir adla kaydedebilir veya kişinin rehberdeki adını doğrudan komutta kullanabilirsin."
+                        feedback = "Rehberinde bu komutla eşleşen kişiyi bulamadım. Kişi seçme ekranı açmıyorum; kişiyi rehberdeki adıyla çağırabilir veya bir kez “babam = rehberdeki isim” komutuyla eşleştirebilirsin."
                     } else {
                         feedback = try {
                             when (contactAction) {
