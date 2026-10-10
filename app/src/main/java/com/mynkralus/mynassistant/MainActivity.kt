@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -73,12 +74,15 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Send
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import coil.ImageLoader
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
@@ -1110,6 +1114,35 @@ private fun AssistantScreen(
     var startupPermissionRequestPending by remember { mutableStateOf(false) }
     var showAccessibilitySetupDialog by remember { mutableStateOf(false) }
     val runtimePermissions = remember { requiredRuntimePermissionList() }
+    var startSpeechAfterPermission by remember { mutableStateOf(false) }
+    val speechLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val spokenText = result.data
+            ?.getStringArrayListExtra("android.speech.extra.RESULTS")
+            ?.firstOrNull()
+            ?.trim()
+        if (result.resultCode == android.app.Activity.RESULT_OK && !spokenText.isNullOrBlank()) {
+            command = spokenText
+            feedback = null
+        } else if (result.resultCode == android.app.Activity.RESULT_OK) {
+            feedback = "Ses algılanamadı. Tekrar deneyebilirsin."
+        }
+    }
+    val launchSpeechInput: () -> Unit = {
+        try {
+            speechLauncher.launch(
+                Intent("android.speech.action.RECOGNIZE_SPEECH").apply {
+                    putExtra("android.speech.extra.LANGUAGE_MODEL", "free_form")
+                    putExtra("android.speech.extra.LANGUAGE", "tr-TR")
+                    putExtra("android.speech.extra.PROMPT", "Komutunu söyle")
+                    putExtra("android.speech.extra.MAX_RESULTS", 1)
+                }
+            )
+        } catch (_: Exception) {
+            feedback = "Bu telefonda sesli giriş hizmeti bulunamadı."
+        }
+    }
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -1127,6 +1160,17 @@ private fun AssistantScreen(
                 !prefs.getBoolean("whatsapp_accessibility_setup_seen", false)
             ) {
                 showAccessibilitySetupDialog = true
+            }
+        }
+        if (startSpeechAfterPermission) {
+            startSpeechAfterPermission = false
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    commandContext, android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                launchSpeechInput()
+            } else {
+                feedback = "Sesli komut için mikrofon izni gerekiyor."
             }
         }
     }
@@ -1504,9 +1548,9 @@ private fun AssistantScreen(
                     }
                 }
                 Column(
-                    Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()
+                    Modifier.weight(1f).fillMaxWidth()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = 22.dp, top = 12.dp, end = 22.dp, bottom = 36.dp),
+                        .padding(start = 22.dp, top = 12.dp, end = 22.dp, bottom = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                 if (page == Page.HOME) {
@@ -1524,85 +1568,6 @@ private fun AssistantScreen(
                             Text("Telefonuna veya bilgisayarına komut ver; hedefi sen seç veya otomatik yönlendirmeyi kullan.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
                         }
                     }
-                    Box(Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = { targetMenuExpanded = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Icon(
-                                when (commandTarget) {
-                                    "PHONE" -> Icons.Default.Devices
-                                    "PC" -> Icons.Default.Computer
-                                    else -> Icons.Default.SettingsRemote
-                                },
-                                contentDescription = null
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                Text("Komut hedefi", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f))
-                                Text(
-                                    when (commandTarget) {
-                                        "PHONE" -> "Bu telefon (Android)"
-                                        "PC" -> "Bilgisayarım (Windows)"
-                                        else -> "Otomatik — komuta göre seç"
-                                    },
-                                    textAlign = TextAlign.Start
-                                )
-                            }
-                            Icon(Icons.Default.MoreHoriz, contentDescription = "Hedef seç")
-                        }
-                        DropdownMenu(
-                            expanded = targetMenuExpanded,
-                            onDismissRequest = { targetMenuExpanded = false },
-                            modifier = Modifier.fillMaxWidth(.92f)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Otomatik (bilgisayar yazarsan PC'ye)") },
-                                onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Bu telefon (Android)") },
-                                onClick = { commandTarget = "PHONE"; targetMenuExpanded = false; feedback = null }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Bilgisayarım (Windows)") },
-                                onClick = { commandTarget = "PC"; targetMenuExpanded = false; feedback = null }
-                            )
-                        }
-                    }
-                    val detectedComputerPrefix = COMPUTER_COMMAND_PREFIX.find(command.trim())
-                    val previewTarget = when (commandTarget) {
-                        "PHONE" -> "PHONE"
-                        "PC" -> "PC"
-                        else -> if (detectedComputerPrefix != null) "PC" else "PHONE"
-                    }
-                    Text(
-                        when {
-                            command.isBlank() && commandTarget == "AUTO" ->
-                                "Otomatik modda “bilgisayar …”, “PC …” veya “Windows …” yazarsan komut bilgisayara gider."
-                            previewTarget == "PC" ->
-                                "Hedef: Windows bilgisayar. Varsa bilgisayar/PC etiketi gönderilmeden önce kaldırılır."
-                            else ->
-                                "Hedef: Bu Android telefonu."
-                        },
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                    )
-                    Text("Ne yapmamı istersin?", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(
-                        command,
-                        { command = it; feedback = null },
-                        Modifier.fillMaxWidth(),
-                        placeholder = { Text("Örn. sesi artır veya bilgisayar Chrome aç") },
-                        minLines = 2,
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    Button(
-                        onClick = { runAssistantCommand(command) },
-                        Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp)
-                    ) { Text("Komutu çalıştır", fontWeight = FontWeight.SemiBold) }
-                    feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
                 } else {
                     Text(when (page) {
                         Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap"
@@ -2008,6 +1973,158 @@ private fun AssistantScreen(
                     }
                 }
             }
+                if (page == Page.HOME) {
+                    val keyboardController = LocalSoftwareKeyboardController.current
+                    Surface(
+                        modifier = Modifier.fillMaxWidth()
+                            .imePadding()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(28.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        tonalElevation = 2.dp
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box {
+                                    Column(
+                                        modifier = Modifier.width(52.dp).clip(RoundedCornerShape(18.dp))
+                                            .clickable { targetMenuExpanded = true }
+                                            .padding(vertical = 3.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            when (commandTarget) {
+                                                "PHONE" -> Icons.Default.Devices
+                                                "PC" -> Icons.Default.Computer
+                                                else -> Icons.Default.SettingsRemote
+                                            },
+                                            contentDescription = when (commandTarget) {
+                                                "PHONE" -> "Hedef: bu Android telefonu"
+                                                "PC" -> "Hedef: Windows bilgisayar"
+                                                else -> "Hedef: otomatik yönlendirme"
+                                            },
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Text(
+                                            when (commandTarget) {
+                                                "PHONE" -> "Telefon"
+                                                "PC" -> "PC"
+                                                else -> "Oto"
+                                            },
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f),
+                                            maxLines = 1
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = targetMenuExpanded,
+                                        onDismissRequest = { targetMenuExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Otomatik — komuta göre seç") },
+                                            leadingIcon = { Icon(Icons.Default.SettingsRemote, contentDescription = null) },
+                                            onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Bu telefon (Android)") },
+                                            leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                            onClick = { commandTarget = "PHONE"; targetMenuExpanded = false; feedback = null }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Bilgisayarım (Windows)") },
+                                            leadingIcon = { Icon(Icons.Default.Computer, contentDescription = null) },
+                                            onClick = { commandTarget = "PC"; targetMenuExpanded = false; feedback = null }
+                                        )
+                                    }
+                                }
+                                BasicTextField(
+                                    value = command,
+                                    onValueChange = { command = it; feedback = null },
+                                    modifier = Modifier.weight(1f).height(58.dp),
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    maxLines = 4,
+                                    keyboardOptions = KeyboardOptions.Default,
+                                    decorationBox = { innerTextField ->
+                                        Box(
+                                            Modifier.fillMaxSize().padding(horizontal = 6.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (command.isBlank()) {
+                                                Text(
+                                                    "Komut yaz…",
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f),
+                                                    fontSize = 16.sp
+                                                )
+                                            }
+                                            innerTextField()
+                                        }
+                                    }
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val canRecord = androidx.core.content.ContextCompat.checkSelfPermission(
+                                            commandContext, android.Manifest.permission.RECORD_AUDIO
+                                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        if (canRecord) {
+                                            launchSpeechInput()
+                                        } else {
+                                            startSpeechAfterPermission = true
+                                            permissionLauncher.launch(arrayOf(android.Manifest.permission.RECORD_AUDIO))
+                                        }
+                                    },
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Mic,
+                                        contentDescription = "Sesli komut",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (command.isNotBlank()) {
+                                            keyboardController?.hide()
+                                            runAssistantCommand(command)
+                                        }
+                                    },
+                                    enabled = command.isNotBlank(),
+                                    modifier = Modifier.size(42.dp).clip(CircleShape).background(
+                                        if (command.isNotBlank()) Accent else MaterialTheme.colorScheme.outline.copy(alpha = .25f)
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.Send,
+                                        contentDescription = "Komutu gönder",
+                                        tint = if (command.isNotBlank()) Color(0xFF10121A) else MaterialTheme.colorScheme.onSurface.copy(alpha = .4f),
+                                        modifier = Modifier.size(21.dp)
+                                    )
+                                }
+                            }
+                            feedback?.let {
+                                Text(
+                                    it,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
             }
             if (showAccessibilitySetupDialog) {
                 AlertDialog(
