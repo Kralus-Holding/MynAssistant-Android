@@ -754,7 +754,7 @@ private fun AssistantScreen(
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
                             googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
                                         status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
                                         else -> MaterialTheme.colorScheme.secondary
                                     }, fontSize = 12.sp) }
@@ -764,7 +764,7 @@ private fun AssistantScreen(
                             Text("Oturum açık.", color = MaterialTheme.colorScheme.secondary)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
                                         status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
                                         else -> MaterialTheme.colorScheme.secondary
                                     }, fontSize = 12.sp) }
@@ -1108,7 +1108,7 @@ private fun AssistantScreen(
                                     modifier = Modifier.fillMaxWidth().padding(start = 60.dp, bottom = 4.dp),
                                     fontSize = 11.sp,
                                     color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
                                         status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
                                         else -> MaterialTheme.colorScheme.secondary
                                     }
@@ -1188,7 +1188,7 @@ private fun AuthForm(
                 }
             }
             googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
                                         status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
                                         else -> MaterialTheme.colorScheme.secondary
                                     }, fontSize = 12.sp) }
