@@ -1364,6 +1364,15 @@ private fun AssistantScreen(
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
+    var wakeWordEnabled by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean("wake_word_enabled", false))
+    }
+    var wakeWordStatus by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("wake_word_status", "Kapalı").orEmpty())
+    }
+    var wakeWordActivationPending by remember { mutableStateOf(false) }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val navigateToPage: (Page) -> Unit = { targetPage ->
         if (targetPage == Page.HOME) {
@@ -1436,6 +1445,38 @@ private fun AssistantScreen(
             )
         }
     }
+    val overlayPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Settings.canDrawOverlays(commandContext)) {
+            wakeWordActivationPending = false
+            try {
+                val started = startMynWakeWordService(commandContext)
+                wakeWordEnabled = started
+                wakeWordStatus = if (started) "Mikrofon açık · Hey Meyene dinleniyor"
+                    else "Yerleşik çevrimdışı ses tanıma kullanılamıyor."
+                if (!started) {
+                    feedback = recordIssue(
+                        "MYN-WAKE-8001", "Hey Meyene",
+                        "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı.",
+                        "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
+                    )
+                }
+            } catch (error: Exception) {
+                wakeWordEnabled = false
+                wakeWordStatus = "Başlatılamadı"
+                feedback = recordIssue(
+                    "MYN-WAKE-8009", "Hey Meyene",
+                    "Uyandırma dinlemesi başlatılamadı. Telefon ayarlarını kontrol et.",
+                    "", error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                )
+            }
+        } else {
+            wakeWordActivationPending = false
+            wakeWordStatus = "Ekran üstü izni gerekli."
+            feedback = "Hey Meyene paneli için ekran üstünde gösterme izni gerekli."
+        }
+    }
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -1469,6 +1510,96 @@ private fun AssistantScreen(
                 launchSpeechInput()
             } else {
                 feedback = "Sesli komut için mikrofon izni gerekiyor."
+            }
+        }
+        if (wakeWordActivationPending) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    commandContext, android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                if (!Settings.canDrawOverlays(commandContext)) {
+                    overlayPermissionLauncher.launch(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + commandContext.packageName)
+                        )
+                    )
+                } else {
+                    wakeWordActivationPending = false
+                    try {
+                        val started = startMynWakeWordService(commandContext)
+                        wakeWordEnabled = started
+                        wakeWordStatus = if (started) "Mikrofon açık · Hey Meyene dinleniyor"
+                            else "Yerleşik çevrimdışı ses tanıma kullanılamıyor."
+                        if (!started) {
+                            feedback = recordIssue(
+                                "MYN-WAKE-8001", "Hey Meyene",
+                                "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı.",
+                                "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
+                            )
+                        }
+                    } catch (error: Exception) {
+                        wakeWordEnabled = false
+                        wakeWordStatus = "Başlatılamadı"
+                        feedback = recordIssue(
+                            "MYN-WAKE-8009", "Hey Meyene",
+                            "Uyandırma dinlemesi başlatılamadı. Telefon ayarlarını kontrol et.",
+                            "", error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                        )
+                    }
+                }
+            } else {
+                wakeWordActivationPending = false
+                wakeWordStatus = "Mikrofon izni gerekli."
+                feedback = "Hey Meyene için mikrofon izni vermelisin."
+            }
+        }
+    }
+    val requestWakeWordActivation: () -> Unit = {
+        if (wakeWordEnabled) {
+            stopMynWakeWordService(commandContext)
+            wakeWordEnabled = false
+            wakeWordStatus = "Kapalı"
+        } else if (!isOfflineWakeWordAvailable(commandContext)) {
+            wakeWordStatus = "Yerleşik çevrimdışı ses tanıma kullanılamıyor."
+            feedback = recordIssue(
+                "MYN-WAKE-8001", "Hey Meyene",
+                "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı. Android'in çevrimdışı Türkçe konuşma hizmetini etkinleştir.",
+                "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
+            )
+        } else {
+            val missing = listOf(
+                android.Manifest.permission.RECORD_AUDIO,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ).filter { permission ->
+                androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+            if (missing.isNotEmpty()) {
+                wakeWordActivationPending = true
+                permissionLauncher.launch(missing.toTypedArray())
+            } else if (!Settings.canDrawOverlays(commandContext)) {
+                wakeWordActivationPending = true
+                overlayPermissionLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + commandContext.packageName)
+                    )
+                )
+            } else {
+                try {
+                    val started = startMynWakeWordService(commandContext)
+                    wakeWordEnabled = started
+                    wakeWordStatus = if (started) "Mikrofon açık · Hey Meyene dinleniyor" else "Başlatılamadı"
+                } catch (error: Exception) {
+                    wakeWordEnabled = false
+                    wakeWordStatus = "Başlatılamadı"
+                    feedback = recordIssue(
+                        "MYN-WAKE-8009", "Hey Meyene",
+                        "Uyandırma dinlemesi başlatılamadı. Telefon ayarlarını kontrol et.",
+                        "", error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                    )
+                }
             }
         }
     }
@@ -1577,6 +1708,17 @@ private fun AssistantScreen(
         }
     }
 
+    DisposableEffect(commandContext) {
+        val wakePrefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val wakeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
+            if (key == "wake_word_enabled" || key == "wake_word_status") {
+                wakeWordEnabled = shared?.getBoolean("wake_word_enabled", false) ?: false
+                wakeWordStatus = shared?.getString("wake_word_status", "Kapalı").orEmpty()
+            }
+        }
+        wakePrefs.registerOnSharedPreferenceChangeListener(wakeListener)
+        onDispose { wakePrefs.unregisterOnSharedPreferenceChangeListener(wakeListener) }
+    }
     DisposableEffect(commandContext) {
         val prefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
@@ -2275,6 +2417,62 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                             )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        Box(
+                                            Modifier.size(58.dp).background(
+                                                MaterialTheme.colorScheme.primary.copy(alpha = .16f), CircleShape
+                                            ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Mic, contentDescription = null,
+                                                modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("Hey Meyene", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                                            Text("Çevrimdışı uyandırma", fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                                        }
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = if (wakeWordEnabled) Color(0xFF49B86E) else MaterialTheme.colorScheme.outline.copy(alpha = .5f)
+                                        ) { Box(Modifier.size(10.dp)) }
+                                    }
+                                    Text(
+                                        if (wakeWordEnabled) "“Hey Meyene” dediğinde ekran üstü panel açılır."
+                                        else "Etkinleştirdikten sonra “Hey Meyene” diyerek diğer uygulamaların üzerinde yüzen mikrofon panelini çağırabilirsin.",
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f)
+                                    )
+                                    Text(
+                                        wakeWordStatus,
+                                        fontSize = 12.sp,
+                                        color = if (wakeWordEnabled) Color(0xFF65D68B)
+                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                    )
+                                    Button(onClick = requestWakeWordActivation, modifier = Modifier.fillMaxWidth()) {
+                                        Icon(Icons.Default.Mic, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (wakeWordEnabled) "Dinlemeyi durdur" else "Hey Meyene'yi etkinleştir")
+                                    }
+                                    Text(
+                                        "Çevrimdışı çalışma için yerleşik konuşma tanıma hizmetinde Türkçe dil verisi bulunmalı. İlk etkinleştirmede mikrofon, bildirim ve ekran üstünde gösterme izinleri istenir. Dinleme açıkken kalıcı bildirim görünür.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
+                                    )
+                                }
+                            }
                             OutlinedButton(
                                 onClick = { navigateToPage(Page.DIAGNOSTICS) },
                                 modifier = Modifier.fillMaxWidth()
