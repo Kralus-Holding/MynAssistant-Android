@@ -156,7 +156,6 @@ class MainActivity : ComponentActivity() {
             var signedIn by remember { mutableStateOf(currentUser != null) }
             var photoUrl by remember { mutableStateOf(currentUser?.photoUrl?.toString().orEmpty()) }
             var googleStatus by remember { mutableStateOf<String?>(null) }
-            var accountMenuExpanded by remember { mutableStateOf(false) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) { activityResult ->
@@ -208,7 +207,11 @@ class MainActivity : ComponentActivity() {
                     googleStatus = "Google giriş sonucu okunamadı (${error.javaClass.simpleName}). Tekrar dene."
                 }
             }
-            val startGoogleSignIn = { googleLauncher.launch(googleSignInClient.signInIntent) }
+            val startGoogleSignIn: () -> Unit = {
+                googleSignInClient.signOut().addOnCompleteListener {
+                    googleLauncher.launch(googleSignInClient.signInIntent)
+                }
+            }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
                 background = Color(0xFF0B0D14), surface = Color(0xFF171C2A),
@@ -335,8 +338,6 @@ class MainActivity : ComponentActivity() {
                     },
                     googleLogin = startGoogleSignIn,
                     googleStatus = googleStatus,
-                    accountMenuExpanded = accountMenuExpanded,
-                    toggleAccountMenu = { accountMenuExpanded = !accountMenuExpanded }
                 )
             }
         }
@@ -349,7 +350,7 @@ private fun AssistantScreen(
     email: String, phone: String, photoUrl: String, photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
     googleLogin: () -> Unit,
-    googleStatus: String?, accountMenuExpanded: Boolean, toggleAccountMenu: () -> Unit
+    googleStatus: String?
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
     var drawer by remember { mutableStateOf(false) }
@@ -497,7 +498,7 @@ private fun AssistantScreen(
                     ) {
                         Column {
                             Row(
-                                Modifier.fillMaxWidth().clickable(onClick = toggleAccountMenu).padding(vertical = 8.dp),
+                                Modifier.fillMaxWidth().clickable(onClick = googleLogin).padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
@@ -507,13 +508,13 @@ private fun AssistantScreen(
                                             model = photoUrl,
                                             imageLoader = photoImageLoader,
                                             contentDescription = "Google profil fotoğrafı",
-                                            modifier = Modifier.size(42.dp).clip(CircleShape)
+                                            modifier = Modifier.size(48.dp).clip(CircleShape)
                                         )
                                     } else {
                                         Icon(
                                             Icons.Default.AccountCircle,
                                             contentDescription = "Hesap fotoğrafı",
-                                            modifier = Modifier.size(42.dp),
+                                            modifier = Modifier.size(48.dp),
                                             tint = MaterialTheme.colorScheme.primary
                                         )
                                     }
@@ -524,39 +525,15 @@ private fun AssistantScreen(
                                     Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                     Text(if (signedIn) email.ifBlank { phone } else "Google hesabını bağla", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
                                 }
-                                Text(if (accountMenuExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
+                                Text("▼", color = MaterialTheme.colorScheme.primary)
                             }
-                            androidx.compose.animation.AnimatedVisibility(visible = accountMenuExpanded) {
-                                Column(
-                                    Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 8.dp)
-                                        .background(MaterialTheme.colorScheme.background, RoundedCornerShape(14.dp)).padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    if (signedIn) {
-                                        Text("Google hesabı", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
-                                        Text(email.ifBlank { phone.ifBlank { name } }, fontSize = 14.sp)
-                                        Text("Başka bir hesap kullanmak için aşağıdan hesap seç.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
-                                        OutlinedButton(
-                                            onClick = { toggleAccountMenu(); googleLogin() },
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) { Text("Hesabı değiştir") }
-                                    } else {
-                                        Text("Google hesabınla giriş yaparak cihazlarını bu hesaba bağlayabilirsin.", fontSize = 12.sp)
-                                        Button(
-                                            onClick = { toggleAccountMenu(); googleLogin() },
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                GoogleGLogo(Modifier.size(20.dp))
-                                                Text("Google ile devam et")
-                                            }
-                                        }
-                                    }
-                                    googleStatus?.let { status -> Text(status, fontSize = 11.sp, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary) }
-                                }
+                            googleStatus?.let { status ->
+                                Text(
+                                    status,
+                                    modifier = Modifier.fillMaxWidth().padding(start = 60.dp, bottom = 4.dp),
+                                    fontSize = 11.sp,
+                                    color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary
+                                )
                             }
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
