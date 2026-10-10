@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.ContactsContract
 import android.provider.Settings
+import android.speech.SpeechRecognizer
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -946,7 +947,33 @@ private fun saveWindowsBridgeDevice(
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
 
+private fun isOfflineWakeWordAvailable(context: Context): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+
+private fun startMynWakeWordService(context: Context): Boolean {
+    if (!isOfflineWakeWordAvailable(context)) return false
+    androidx.core.content.ContextCompat.startForegroundService(
+        context, Intent(context, MynWakeWordService::class.java)
+    )
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putBoolean("wake_word_enabled", true)
+        .putString("wake_word_status", "Mikrofon açık · Hey Meyene dinleniyor")
+        .remove("wake_word_error_code")
+        .apply()
+    return true
+}
+
+private fun stopMynWakeWordService(context: Context) {
+    context.stopService(Intent(context, MynWakeWordService::class.java))
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putBoolean("wake_word_enabled", false)
+        .putString("wake_word_status", "Kapalı")
+        .apply()
+}
+
 class MainActivity : ComponentActivity() {
+    private val incomingWakeCommand = mutableStateOf<String?>(null)
     private val googleSignInClient by lazy {
         val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
@@ -958,6 +985,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         // Remove old local-only demo account data. Firebase now owns auth sessions.
         prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider")
@@ -1248,9 +1276,17 @@ class MainActivity : ComponentActivity() {
                     selectSavedGoogleAccount = selectSavedGoogleAccount,
                     savedGoogleAccounts = savedGoogleAccounts,
                     googleStatus = googleStatus,
+                    wakeCommandFromOverlay = incomingWakeCommand.value,
+                    onWakeCommandConsumed = { incomingWakeCommand.value = null }
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
     }
 
     override fun onResume() {
@@ -1299,7 +1335,9 @@ private fun AssistantScreen(
     googleLogin: () -> Unit,
     selectSavedGoogleAccount: (String) -> Unit,
     savedGoogleAccounts: List<SavedGoogleAccount>,
-    googleStatus: String?
+    googleStatus: String?,
+    wakeCommandFromOverlay: String? = null,
+    onWakeCommandConsumed: () -> Unit = {}
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
     val pageHistory = remember { mutableStateListOf<Page>() }
@@ -1311,6 +1349,14 @@ private fun AssistantScreen(
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var command by remember { mutableStateOf("") }
+    LaunchedEffect(wakeCommandFromOverlay) {
+        val incoming = wakeCommandFromOverlay?.trim().orEmpty()
+        if (incoming.isNotBlank()) {
+            command = incoming
+            feedback = "Sesli komut hazır. Kontrol edip gönder simgesine dokun."
+            onWakeCommandConsumed()
+        }
+    }
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
