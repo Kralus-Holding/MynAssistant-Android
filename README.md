@@ -1,23 +1,26 @@
-# MynAssistant Android
+# MynAssistant Android + Desktop Agent
 
-Native Android application for the MynAssistant project.
+Native Android companion app for MynAssistant, with an isolated Windows companion agent under desktop-agent/. The existing MynAi/Python project is not modified.
 
-## Development
+## Android development
 
 - Kotlin
 - Jetpack Compose
-- Gradle
+- Firebase Authentication and Cloud Firestore
 - GitHub Actions for cloud APK builds
 
-This repository is intentionally separate from the existing Windows and Python projects.
+## Automatic device discovery
 
-## Build
+- Android listens in real time to Firestore devices documents filtered by the signed-in user's ownerId.
+- Windows Agent signs in via Google OAuth on first launch and registers the PC under the same Firebase user.
+- Android remote actions are queued in Firestore commands; the Windows Agent consumes commands for its registered device.
+- The Android app no longer requires the user to type a Windows IP address or local bridge token.
 
-Pushes to `main` and pull requests run the Android debug build through GitHub Actions. The generated `app-debug.apk` is uploaded as a workflow artifact.
+## Build outputs
 
-## Current milestone
+- Android APK: Android APK workflow artifact MynAssistant-debug-apk.
+- Windows companion: Windows Agent workflow artifact MynAssistant-Windows-Agent.
 
-- Firebase Authentication supports email/password and Google sign-in.
-- The Android app listens to the signed-in user's Firestore `devices` documents filtered by `ownerId`.
-- PC remote actions are queued in Firestore `commands` with the signed-in user's `ownerId` and selected `deviceId`.
-- The Windows Agent still needs to register its device in `devices` and consume/update queued `commands` before remote actions execute on a PC.
+## Current scope
+
+The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands. Live desktop video streaming and a full remote desktop session are a later milestone; this initial version does not claim screen streaming.
