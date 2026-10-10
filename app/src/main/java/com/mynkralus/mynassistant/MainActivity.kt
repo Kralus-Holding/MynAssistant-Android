@@ -428,7 +428,7 @@ class MainActivity : ComponentActivity() {
                     sendRemoteCommand = { deviceId, commandName, payload, report ->
                         val user = auth.currentUser
                         if (user == null) {
-                            report("Devam etmek için önce giriş yap.")
+                            report("Devam etmek için önce giriş yap.", null)
                         } else {
                             val commandData = hashMapOf<String, Any>(
                                 "ownerId" to user.uid,
@@ -440,11 +440,14 @@ class MainActivity : ComponentActivity() {
                             commandData.putAll(payload)
                             FirebaseFirestore.getInstance().collection("commands")
                                 .add(commandData)
-                                .addOnSuccessListener {
-                                    report("Komut gönderildi. Bilgisayar çevrimiçiyse birazdan uygulanır.")
+                                .addOnSuccessListener { document ->
+                                    report(
+                                        "Komut bilgisayara iletildi; işlem sonucu bekleniyor.",
+                                        document.id
+                                    )
                                 }
-                                .addOnFailureListener { error ->
-                                    report("Komut gönderilemedi. Lütfen tekrar dene.")
+                                .addOnFailureListener {
+                                    report("Komut gönderilemedi. İnternet bağlantını kontrol edip tekrar dene.", null)
                                 }
                         }
                     },
@@ -577,7 +580,7 @@ private fun AssistantScreen(
     savePcBridgeSettings: (String, String) -> Unit,
     checkPcBridge: (String, String, (PcBridgeResult) -> Unit) -> Unit,
     sendPcBridgeCommand: (String, String, String, (PcBridgeResult) -> Unit) -> Unit,
-    sendRemoteCommand: (String, String, Map<String, Any>, (String) -> Unit) -> Unit,
+    sendRemoteCommand: (String, String, Map<String, Any>, (String, String?) -> Unit) -> Unit,
     photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
     googleLogin: () -> Unit,
@@ -599,6 +602,58 @@ private fun AssistantScreen(
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var activeCommandListener by remember {
+        mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
+    }
+
+    // Keep the most recently submitted Firebase command observed until it reaches a terminal state.
+    DisposableEffect(firebaseUserId, activeCommandListener) {
+        val listenerToDispose = activeCommandListener
+        onDispose { listenerToDispose?.remove() }
+    }
+
+    val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = {
+            targetDeviceId, targetCommandName, targetPayload ->
+        activeCommandListener?.remove()
+        activeCommandListener = null
+        feedback = "Komut bilgisayara gönderiliyor..."
+        sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
+            feedback = message
+            if (commandId != null) {
+                val registration = FirebaseFirestore.getInstance()
+                    .collection("commands")
+                    .document(commandId)
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            feedback = "Komut gönderildi ancak işlem durumu okunamadı."
+                            activeCommandListener = null
+                        } else if (snapshot == null || !snapshot.exists()) {
+                            feedback = "Komut kaydı bulunamadı; bilgisayarın bağlantısını kontrol et."
+                            activeCommandListener = null
+                        } else {
+                            val status = snapshot.getString("status").orEmpty()
+                            val result = snapshot.getString("result").orEmpty()
+                            when (status) {
+                                "pending" -> feedback = "Komut kuyruğa alındı; Windows Agent'ın işlemesi bekleniyor."
+                                "running" -> feedback = "Windows Agent komutu uyguluyor..."
+                                "completed" -> {
+                                    feedback = result.ifBlank { "Komut tamamlandı." }
+                                    activeCommandListener = null
+                                }
+                                "failed" -> {
+                                    feedback = result.ifBlank { "Komut uygulanamadı." }
+                                    activeCommandListener = null
+                                }
+                                else -> feedback = result.ifBlank {
+                                    "Komut durumu: " + status.ifBlank { "bilinmiyor" }
+                                }
+                            }
+                        }
+                    }
+                activeCommandListener = registration
+            }
+        }
+    }
 
     DisposableEffect(firebaseUserId) {
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
@@ -741,9 +796,7 @@ private fun AssistantScreen(
                                 !signedIn -> feedback = "Komut göndermek için önce giriş yap."
                                 selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
                                     feedback = "Komut bilgisayarına gönderiliyor..."
-                                    sendRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to textCommand)) { message ->
-                                        feedback = message
-                                    }
+                                    sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to textCommand))
                                 }
                                 localPcConnected -> {
                                     feedback = "Komut bilgisayarına gönderiliyor..."
@@ -1018,7 +1071,7 @@ private fun AssistantScreen(
                                     } else if (!remoteOnline) {
                                         feedback = "Bilgisayar çevrimdışı. Bağlantı kurulduğunda komut gönderebilirsin."
                                     } else {
-                                        sendRemoteCommand(device.id, commandName, payload) { message -> feedback = message }
+                                        sendTrackedRemoteCommand(device.id, commandName, payload)
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth()
