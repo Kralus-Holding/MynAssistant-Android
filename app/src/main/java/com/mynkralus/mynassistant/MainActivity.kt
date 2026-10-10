@@ -233,11 +233,11 @@ private fun parseRelationshipAliasAssignment(rawCommand: String): Pair<String, S
 private fun relationshipPreferenceKey(rawCommand: String): String? {
     val tokens = normalizeContactText(rawCommand).split(" ").toSet()
     return when {
-        tokens.any { it in setOf("babam", "babami", "babamin", "babamla", "babamdan", "babaya", "baba", "babacigim", "peder", "dad", "daddy", "father") } -> "father"
-        tokens.any { it in setOf("annem", "annemi", "annemin", "anneme", "annemle", "anne", "annecigim", "anam", "mom", "mommy", "mum", "mother") } -> "mother"
-        tokens.any { it in setOf("abim", "abimi", "abime", "abi", "agabey", "kardesim", "kardesimi", "kardese") } -> "brother"
-        tokens.any { it in setOf("ablam", "ablami", "ablama", "abla", "kizkardesim", "kizkardesimi") } -> "sister"
-        tokens.any { it in setOf("esim", "esimi", "esime", "karim", "karimi", "kocam", "kocami", "partnerim") } -> "spouse"
+        tokens.any { it.startsWith("baba") || it.startsWith("babam") || it in setOf("peder", "dad", "daddy", "father") } -> "father"
+        tokens.any { it.startsWith("anne") || it.startsWith("annem") || it in setOf("anam", "mom", "mommy", "mum", "mother") } -> "mother"
+        tokens.any { it.startsWith("abi") || it.startsWith("abim") || it.startsWith("kardes") || it == "agabey" } -> "brother"
+        tokens.any { it.startsWith("abla") || it.startsWith("kizkardes") } -> "sister"
+        tokens.any { it.startsWith("esim") || it.startsWith("karim") || it.startsWith("kocam") || it == "partnerim" } -> "spouse"
         else -> null
     }
 }
@@ -250,11 +250,16 @@ private fun relationshipAliasesForCommand(rawCommand: String): Set<String>? {
     val sisterWords = setOf("ablam", "ablami", "ablama", "abla", "kizkardesim", "kizkardesimi")
     val spouseWords = setOf("esim", "esimi", "esime", "karim", "karimi", "kocam", "kocami", "partnerim")
     return when {
-        tokens.any { it in fatherWords } -> setOf("baba", "babam", "babacigim", "peder", "dad", "daddy", "father")
-        tokens.any { it in motherWords } -> setOf("anne", "annem", "annecigim", "anam", "mom", "mommy", "mum", "mother")
-        tokens.any { it in brotherWords } -> setOf("abi", "abim", "agabey", "kardesim")
-        tokens.any { it in sisterWords } -> setOf("abla", "ablam", "kizkardesim")
-        tokens.any { it in spouseWords } -> setOf("esim", "karim", "kocam", "partnerim")
+        tokens.any { token -> token in fatherWords || token.startsWith("baba") || token.startsWith("babam") } ->
+            setOf("baba", "babam", "babacigim", "peder", "dad", "daddy", "father")
+        tokens.any { token -> token in motherWords || token.startsWith("anne") || token.startsWith("annem") } ->
+            setOf("anne", "annem", "annecigim", "anam", "mom", "mommy", "mum", "mother")
+        tokens.any { token -> token in brotherWords || token.startsWith("abim") || token.startsWith("kardes") } ->
+            setOf("abi", "abim", "agabey", "kardesim")
+        tokens.any { token -> token in sisterWords || token.startsWith("abla") || token.startsWith("kizkardes") } ->
+            setOf("abla", "ablam", "kizkardesim")
+        tokens.any { token -> token in spouseWords || token.startsWith("esim") || token.startsWith("karim") || token.startsWith("kocam") } ->
+            setOf("esim", "karim", "kocam", "partnerim")
         else -> null
     }
 }
@@ -354,16 +359,32 @@ private fun contactActionKind(rawText: String): String? {
         .replace(Regex("\\s+"), " ")
     val words = normalized.split(" ")
     val whatsappCallWords = setOf("ara", "aramak", "arayın", "arayalim", "arayalım", "call")
-    val whatsappMessageWords = setOf("mesaj", "mesajı", "mesajini", "mesajını", "yaz", "gönder", "gonder")
+    val messageWords = setOf("mesaj", "mesajı", "mesaji", "mesajini", "mesajını", "mesajina", "message")
+    val messageVerbs = setOf("at", "yaz", "gönder", "gonder", "yolla", "yollayiver", "yollayıver", "ilet")
+    val hasMessageAction = words.any { it in messageWords } && words.any { it in messageVerbs }
     if (normalized.contains("whatsapp") && words.any { it in whatsappCallWords }) return "WHATSAPP_CALL"
-    if (normalized.contains("whatsapp") && words.any { it in whatsappMessageWords }) return "WHATSAPP_MESSAGE"
+    if (normalized.contains("whatsapp") && (hasMessageAction || words.any { it in messageWords })) return "WHATSAPP_MESSAGE"
+    // In MynAssistant, an unqualified "mesaj at" request defaults to WhatsApp unless SMS is explicit.
+    if (!normalized.contains("sms") && hasMessageAction) return "WHATSAPP_MESSAGE"
     val searchAppMentioned = listOf("youtube", "google", "chrome", "tarayıcı", "tarayici", "internet").any { normalized.contains(it) }
     if (!searchAppMentioned && words.any { it in setOf("ara", "aramak", "arayın", "arayalım", "arayalim") }) return "DIAL"
     return null
 }
 
-private fun extractWhatsAppMessage(rawText: String): String? =
-    Regex("""["“](.+?)["”]""").find(rawText)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+private fun extractWhatsAppMessage(rawText: String): String? {
+    val quoted = Regex("""["“](.+?)["”]""").find(rawText)?.groupValues?.getOrNull(1)?.trim()
+    if (!quoted.isNullOrBlank()) return quoted
+
+    val relationLead = Regex(
+        """(?iu)\b(?:babam|baba|annem|anne|abim|abi|ablam|abla|eşim|esim)[\p{L}]*\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+)?(.+?)\s+diye\s+mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(rawText)?.groupValues?.getOrNull(1)?.trim()
+    if (!relationLead.isNullOrBlank()) return relationLead.trim().trim('"', '\'', '“', '”', ' ')
+
+    val appLead = Regex(
+        """(?iu)\bwhatsapp(?:['’]?(?:tan|ten|dan|den))?(?:\s+(?:tan|ten|dan|den))?\s+(.+?)\s+diye\s+mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+    ).find(rawText)?.groupValues?.getOrNull(1)?.trim()
+    return appLead?.takeIf { it.isNotBlank() }?.trim('"', '\'', '“', '”', ' ')
+}
 
 private fun isMynAssistantAccessibilityEnabled(context: Context): Boolean {
     val enabledServices = Settings.Secure.getString(
