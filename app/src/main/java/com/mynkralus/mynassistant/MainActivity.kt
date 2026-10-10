@@ -198,7 +198,7 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
                 audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
                 "Telefonun medya sesi azaltıldı."
             }
-            command in setOf("sessize al", "telefonu sessize al", "medya sesini kapat", "medya sesini sessize al") -> {
+            command in setOf("sessize al", "sesi kapat", "sesini kapat", "medya sesini kapat", "medya sesini sessize al") -> {
                 audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
                 "Telefonun medya sesi kapatıldı."
             }
