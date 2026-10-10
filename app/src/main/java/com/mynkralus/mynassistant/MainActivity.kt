@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
@@ -1603,6 +1604,10 @@ private fun AssistantScreen(
     }
 
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
+    val connectedDevices = devices.filter { device ->
+        if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+    }
+    val hasConnectedPc = signedIn && connectedDevices.isNotEmpty()
     val testPcBridgeNow: () -> Unit = {
         if (!signedIn) {
             feedback = "Devam etmek için önce giriş yap."
@@ -1927,9 +1932,9 @@ private fun AssistantScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                 if (page == Page.HOME) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        MynLogo()
-                        Column {
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Box(Modifier.padding(top = 3.dp)) { MynLogo(56.dp) }
+                        Column(Modifier.weight(1f)) {
                             Text("MynAssistant", fontSize = 29.sp, fontWeight = FontWeight.Bold)
                             Text("Kişisel asistanın için yeni başlangıç.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onBackground.copy(alpha = .68f))
                         }
@@ -1948,8 +1953,8 @@ private fun AssistantScreen(
                         Page.DEVICES -> "Cihazlarım"
                         Page.SETTINGS -> "Ayarlar"
                         Page.REMOTE -> "PC Kumandası"
-                        Page.FILES -> "Bilgisayar Dosyaları"
-                        Page.DIAGNOSTICS -> "Sorun kayıtları"
+                        Page.FILES -> "PcFiles"
+                        Page.DIAGNOSTICS -> "Hata kayıtları"
                         else -> "Ana sayfa"
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
@@ -2097,7 +2102,7 @@ private fun AssistantScreen(
                                     onClick = {
                                         MynAssistantDiagnostics.clear(commandContext)
                                         diagnosticsRevision += 1
-                                        feedback = "Sorun kayıtları temizlendi."
+                                        feedback = "Hata kayıtları temizlendi."
                                     },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -2134,7 +2139,7 @@ private fun AssistantScreen(
                         }
                         Page.FILES -> {
                             Text(
-                                "Hesabına bağlı bilgisayarlar alt alta listelenir. Bir bilgisayar seçerek dosya listesi isteyebilirsin.",
+                                "Yalnızca şu anda aktif ve bağlı bilgisayarlar burada görünür.",
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
@@ -2142,11 +2147,11 @@ private fun AssistantScreen(
                                 Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                            } else if (devices.isEmpty()) {
-                                Text("Bilgisayar eklendiğinde burada görünecek.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                            } else if (connectedDevices.isEmpty()) {
+                                Text("Şu anda aktif ve bağlı bilgisayar yok.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
-                                devices.forEach { device ->
-                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+                                connectedDevices.forEach { device ->
+                                    val deviceOnlineNow = true
                                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2202,6 +2207,14 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                             )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            OutlinedButton(
+                                onClick = { page = Page.DIAGNOSTICS },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.BugReport, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Hata kayıtları")
+                            }
                             OutlinedButton(
                                 onClick = {
                                     val missing = requiredRuntimePermissionList().filter { permission ->
@@ -2781,12 +2794,11 @@ private fun AssistantScreen(
                         if (!signedIn) DrawerItem("Kayıt ol") { page = Page.REGISTER; drawer = false }
                         DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
                         DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
-                        DrawerItem("Sorun kayıtları") { page = Page.DIAGNOSTICS; drawer = false }
                         DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
-                        if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
+                        if (hasConnectedPc) DrawerItem("PcFiles") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.8", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.3.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -2804,7 +2816,7 @@ private fun DrawerItem(label: String, action: () -> Unit) {
         "Cihazlarım" -> Icons.Default.Devices
         "Ayarlar" -> Icons.Default.Settings
         "PC Kumandası" -> Icons.Default.Computer
-        "Bilgisayar Dosyaları" -> Icons.Default.FolderOpen
+        "PcFiles" -> Icons.Default.FolderOpen
         else -> Icons.Default.Tv
     }
     Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
