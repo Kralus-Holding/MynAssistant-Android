@@ -338,10 +338,24 @@ def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
             "structuredQuery": {
                 "from": [{"collectionId": "commands"}],
                 "where": {
-                    "fieldFilter": {
-                        "field": {"fieldPath": "ownerId"},
-                        "op": "EQUAL",
-                        "value": {"stringValue": session.uid},
+                    "compositeFilter": {
+                        "op": "AND",
+                        "filters": [
+                            {
+                                "fieldFilter": {
+                                    "field": {"fieldPath": "ownerId"},
+                                    "op": "EQUAL",
+                                    "value": {"stringValue": session.uid},
+                                }
+                            },
+                            {
+                                "fieldFilter": {
+                                    "field": {"fieldPath": "status"},
+                                    "op": "EQUAL",
+                                    "value": {"stringValue": "pending"},
+                                }
+                            },
+                        ],
                     }
                 },
                 "limit": 100,
