@@ -759,13 +759,21 @@ private fun AssistantScreen(
                             Text("Ad: " + name)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+                            googleStatus?.let { status -> Text(status, color = when {
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
+                                        else -> MaterialTheme.colorScheme.secondary
+                                    }, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
                         } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.REGISTER })
                         Page.REGISTER -> if (signedIn) {
                             Text("Firebase hesabın açık.", color = MaterialTheme.colorScheme.secondary)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+                            googleStatus?.let { status -> Text(status, color = when {
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
+                                        else -> MaterialTheme.colorScheme.secondary
+                                    }, fontSize = 12.sp) }
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
                         } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.LOGIN })
                         Page.DEVICES -> {
@@ -1041,8 +1049,9 @@ private fun AssistantScreen(
                                     MynLogo(48.dp)
                                 }
                                 Column(Modifier.weight(1f)) {
-                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2)
-                                    Text(if (signedIn) email.ifBlank { phone } else "Giriş yap", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
+                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "Giriş yap", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2,
+                                        color = if (signedIn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary)
+                                    Text(if (signedIn) email.ifBlank { phone } else "Google hesabınla devam et", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
                                 }
                                 Text(if (accountListExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
                             }
@@ -1104,7 +1113,11 @@ private fun AssistantScreen(
                                     status,
                                     modifier = Modifier.fillMaxWidth().padding(start = 60.dp, bottom = 4.dp),
                                     fontSize = 11.sp,
-                                    color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary
+                                    color = when {
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
+                                        else -> MaterialTheme.colorScheme.secondary
+                                    }
                                 )
                             }
                         }
@@ -1180,7 +1193,11 @@ private fun AuthForm(
                     Text("Google ile devam et")
                 }
             }
-            googleStatus?.let { status -> Text(status, color = if (status == "Google ile giriş yapıldı.") Color(0xFF4CAF50) else MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+            googleStatus?.let { status -> Text(status, color = when {
+                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
+                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
+                                        else -> MaterialTheme.colorScheme.secondary
+                                    }, fontSize = 12.sp) }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
             Text("Hesap Firebase Authentication ile yönetilir. E-posta doğrulaması için gelen kutunu kontrol et.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
