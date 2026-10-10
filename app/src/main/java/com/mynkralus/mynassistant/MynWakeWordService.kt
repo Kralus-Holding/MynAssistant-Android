@@ -235,7 +235,7 @@ class MynWakeWordService : Service() {
                 y = dp(54)
             }
             try {
-                windowManager.addView(overlayView, params)
+                windowManager.addView(overlayView ?: return, params)
             } catch (error: Exception) {
                 fail("MYN-WAKE-8007", "Mikrofon paneli ekranın üzerine açılamadı.")
             }
@@ -284,7 +284,7 @@ class MynWakeWordService : Service() {
             setTextColor(Color.rgb(202, 207, 226))
             gravity = Gravity.CENTER
             setPadding(dp(8), 0, dp(4), 0)
-            setOnClickListener { hideOverlay(); awaitingCommand = false; commandReady = false }
+            setOnClickListener { hideOverlay(); awaitingCommand = false; commandReady = false; startListeningSoon(150) }
         })
         root.addView(heading)
         overlayStatus = TextView(this).apply {
