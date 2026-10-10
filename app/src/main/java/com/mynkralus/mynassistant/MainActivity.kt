@@ -555,7 +555,7 @@ class MainActivity : ComponentActivity() {
                         email = ""
                         phone = ""
                         photoUrl = ""
-                        googleStatus = "Oturum kapatıldı."
+                        googleStatus = null
                     },
                     googleLogin = startGoogleSignIn,
                     selectSavedGoogleAccount = selectSavedGoogleAccount,
