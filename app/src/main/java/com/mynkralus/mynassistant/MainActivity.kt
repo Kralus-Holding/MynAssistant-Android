@@ -335,7 +335,7 @@ private fun contactLookupAlias(rawCommand: String, selectedContactName: String? 
             }
         }
         if (matchedCount != null) {
-            return queryTokens.take(matchedCount).joinToString(" ").trim().takeIf { it.isNotBlank() }
+            return nameTokens.take(matchedCount).joinToString(" ").trim().takeIf { it.isNotBlank() }
         }
     }
 
@@ -1807,7 +1807,7 @@ private fun AssistantScreen(
                             )
                         }
                         contacts.size > 1 -> {
-                            val aliasSpec = contactAliasSpec(textCommand)
+                            val aliasSpec = contactAliasSpec(textCommand, contacts.first().displayName)
                             val includesNaturalMessage = Regex(
                                 """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
                             ).containsMatchIn(textCommand)
