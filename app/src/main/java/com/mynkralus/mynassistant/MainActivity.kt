@@ -207,11 +207,7 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
                 "Telefonun medya sesi açıldı."
             }
             command in setOf("bluetooth ayarlarını aç", "bluetooth aç", "bluetooth'u aç", "bluetoothu aç") -> {
-                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    Intent(Settings.Panel.ACTION_BLUETOOTH)
-                } else {
-                    Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                }
+                val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
                 context.startActivity(intent)
                 "Bluetooth kontrol paneli açıldı. Durumu Android panelinden değiştirebilirsin."
             }
