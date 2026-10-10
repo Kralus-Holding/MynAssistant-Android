@@ -1714,6 +1714,25 @@ private fun AssistantScreen(
                             }
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            OutlinedButton(
+                                onClick = {
+                                    val missing = requiredRuntimePermissionList().filter { permission ->
+                                        androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
+                                            android.content.pm.PackageManager.PERMISSION_GRANTED
+                                    }
+                                    if (missing.isEmpty()) {
+                                        feedback = "Tanımlı çalışma zamanı izinleri zaten açık."
+                                    } else {
+                                        permissionLauncher.launch(missing.toTypedArray())
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Settings, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Eksik izinleri iste")
+                            }
+                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                             HorizontalDivider()
                             Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
