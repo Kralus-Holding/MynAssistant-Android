@@ -1,10 +1,16 @@
 package com.mynkralus.mynassistant
 
 import android.content.Context
+import android.content.Intent
+import android.media.AudioManager
+import android.net.Uri
 import android.graphics.BitmapFactory
 import android.util.Base64
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.provider.Settings
+import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -163,6 +169,96 @@ private data class PcBridgeResult(
     val success: Boolean,
     val message: String
 )
+
+/**
+ * Executes the Android-side command subset locally on this handset.
+ * Protected operations such as silently toggling Bluetooth or initiating a call
+ * are deliberately routed to Android's own UI instead of bypassing user consent.
+ */
+private fun executeAndroidTextCommand(context: Context, rawText: String): String {
+    val command = rawText.trim()
+        .lowercase(Locale.forLanguageTag("tr-TR"))
+        .replace(Regex("\\s+"), " ")
+    if (command.isBlank()) return "Önce bir telefon komutu yaz."
+
+    return try {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        when {
+            command in setOf(
+                "ses artır", "sesi artır", "sesini artır", "ses yükselt", "sesi yükselt", "sesini yükselt",
+                "ses arttır", "sesi arttır", "sesini arttır", "volume up"
+            ) -> {
+                audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                "Telefonun medya sesi artırıldı."
+            }
+            command in setOf(
+                "ses azalt", "sesi azalt", "sesini azalt", "ses kıs", "sesi kıs", "sesini kıs",
+                "volume down"
+            ) -> {
+                audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                "Telefonun medya sesi azaltıldı."
+            }
+            command in setOf("sessize al", "telefonu sessize al", "medya sesini kapat", "medya sesini sessize al") -> {
+                audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                "Telefonun medya sesi kapatıldı."
+            }
+            command in setOf("medya sesini aç", "sessizden çıkar") -> {
+                audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI)
+                "Telefonun medya sesi açıldı."
+            }
+            command in setOf("bluetooth ayarlarını aç", "bluetooth aç", "bluetooth'u aç", "bluetoothu aç") -> {
+                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Intent(Settings.Panel.ACTION_BLUETOOTH)
+                } else {
+                    Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                }
+                context.startActivity(intent)
+                "Bluetooth kontrol paneli açıldı. Durumu Android panelinden değiştirebilirsin."
+            }
+            command in setOf("wifi ayarlarını aç", "wi-fi ayarlarını aç", "wifi aç", "wi-fi aç", "kablosuz ağ ayarlarını aç") -> {
+                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Intent(Settings.Panel.ACTION_WIFI)
+                } else {
+                    Intent(Settings.ACTION_WIFI_SETTINGS)
+                }
+                context.startActivity(intent)
+                "Wi-Fi kontrol paneli açıldı. Bağlantı durumunu Android panelinden değiştirebilirsin."
+            }
+            command in setOf("ayarları aç", "telefon ayarlarını aç", "android ayarlarını aç") -> {
+                context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                "Telefon ayarları açıldı."
+            }
+            command in setOf("kamera aç", "kamerayı aç", "fotoğraf çek") -> {
+                val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                if (intent.resolveActivity(context.packageManager) == null) {
+                    "Bu telefonda kullanılabilir bir kamera uygulaması bulunamadı."
+                } else {
+                    context.startActivity(intent)
+                    "Kamera açıldı."
+                }
+            }
+            command in setOf("arama ekranını aç", "telefon uygulamasını aç", "arama aç") -> {
+                context.startActivity(Intent(Intent.ACTION_DIAL))
+                "Telefon arama ekranı açıldı. Aramayı sen onaylayabilirsin."
+            }
+            command in setOf("chrome aç", "tarayıcı aç", "internet aç", "google aç") -> {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")))
+                "Telefonun varsayılan tarayıcısı açıldı."
+            }
+            command in setOf("youtube aç", "youtube'u aç", "youtubeu aç") -> {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com")))
+                "YouTube açıldı."
+            }
+            command in setOf("whatsapp aç", "whatsapp'ı aç", "whatsappı aç") -> {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/")))
+                "WhatsApp bağlantısı açıldı."
+            }
+            else -> "Bu telefon komutu henüz desteklenmiyor. Şimdilik ses, Bluetooth/Wi-Fi paneli, ayarlar, kamera, arama ekranı, tarayıcı ve YouTube komutlarını deneyebilirsin."
+        }
+    } catch (_: Exception) {
+        "Telefon komutu açılamadı. Gerekli uygulamanın veya Android ayarının bu cihazda kullanılabildiğini kontrol et."
+    }
+}
 
 private fun callMynAiBridge(baseUrl: String, token: String, command: String? = null): PcBridgeResult {
     var base = baseUrl.trim().trimEnd('/')
@@ -596,7 +692,10 @@ private fun AssistantScreen(
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var command by remember { mutableStateOf("") }
+    var commandTarget by remember { mutableStateOf("AUTO") }
+    var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
+    val commandContext = LocalContext.current
     var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
     var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
@@ -783,34 +882,106 @@ private fun AssistantScreen(
                         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("KOMUT MERKEZİ", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Text("Sana nasıl yardımcı olabilirim?", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Bilgisayarına komut gönder, ses ve fare kontrolünü tek yerden yönet.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                            Text("Telefonuna veya bilgisayarına komut ver; hedefi sen seç veya otomatik yönlendirmeyi kullan.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
                         }
                     }
+                    Text("Komut hedefi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { targetMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(
+                                when (commandTarget) {
+                                    "PHONE" -> Icons.Default.Devices
+                                    "PC" -> Icons.Default.Computer
+                                    else -> Icons.Default.SettingsRemote
+                                },
+                                contentDescription = null
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                when (commandTarget) {
+                                    "PHONE" -> "Bu telefon (Android)"
+                                    "PC" -> "Bilgisayarım (Windows)"
+                                    else -> "Otomatik — komuta göre seç"
+                                },
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Start
+                            )
+                            Icon(Icons.Default.MoreHoriz, contentDescription = "Hedef seç")
+                        }
+                        DropdownMenu(
+                            expanded = targetMenuExpanded,
+                            onDismissRequest = { targetMenuExpanded = false },
+                            modifier = Modifier.fillMaxWidth(.92f)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Otomatik (bilgisayar yazarsan PC'ye)") },
+                                onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Bu telefon (Android)") },
+                                onClick = { commandTarget = "PHONE"; targetMenuExpanded = false; feedback = null }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Bilgisayarım (Windows)") },
+                                onClick = { commandTarget = "PC"; targetMenuExpanded = false; feedback = null }
+                            )
+                        }
+                    }
+                    Text(
+                        "Otomatik modda “bilgisayar …” diye başlayan komutlar Windows'a, diğer komutlar bu telefona gönderilir.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                    )
                     Text("Ne yapmamı istersin?", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(command, { command = it; feedback = null }, Modifier.fillMaxWidth(), placeholder = { Text("Bilgisayar için komut yaz...") }, minLines = 2, shape = RoundedCornerShape(16.dp))
+                    OutlinedTextField(
+                        command,
+                        { command = it; feedback = null },
+                        Modifier.fillMaxWidth(),
+                        placeholder = { Text("Örn. sesi artır veya bilgisayar Chrome aç") },
+                        minLines = 2,
+                        shape = RoundedCornerShape(16.dp)
+                    )
                     Button(
                         onClick = {
                             val textCommand = command.trim()
+                            val computerPrefix = Regex("^bilgisayar\\s+", RegexOption.IGNORE_CASE).find(textCommand)
+                            val target = when (commandTarget) {
+                                "PHONE" -> "PHONE"
+                                "PC" -> "PC"
+                                else -> if (computerPrefix != null) "PC" else "PHONE"
+                            }
+                            val routedText = if (target == "PC" && computerPrefix != null) {
+                                textCommand.substring(computerPrefix.range.last + 1).trim()
+                            } else {
+                                textCommand
+                            }
+
                             when {
                                 textCommand.isBlank() -> feedback = "Önce bir komut yaz."
-                                !signedIn -> feedback = "Komut göndermek için önce giriş yap."
+                                target == "PHONE" -> feedback = executeAndroidTextCommand(commandContext, textCommand)
+                                routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
+                                !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
                                 selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
                                     feedback = "Komut bilgisayarına gönderiliyor..."
-                                    sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to textCommand))
+                                    sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
                                 }
                                 localPcConnected -> {
                                     feedback = "Komut bilgisayarına gönderiliyor..."
-                                    sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, textCommand) { result ->
+                                    sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, routedText) { result ->
                                         localPcConnected = result.connected
                                         pcBridgeStatus = result.message
                                         feedback = result.message
                                     }
                                 }
-                                else -> feedback = "Şu anda bağlı bilgisayar yok. Bilgisayar uygulaması çalıştığında burada görünür."
+                                else -> feedback = "Şu anda bağlı bilgisayar yok. Windows uygulaması çalıştığında burada görünür."
                             }
                         },
                         Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp)
-                    ) { Text("Bilgisayara gönder", fontWeight = FontWeight.SemiBold) }
+                    ) { Text("Komutu çalıştır", fontWeight = FontWeight.SemiBold) }
                     feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
                 } else {
                     Text(when (page) {
