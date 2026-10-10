@@ -40,7 +40,7 @@ object MynAssistantDiagnostics {
         val next = JSONArray()
         val start = (old.length() - MAX_ENTRIES + 1).coerceAtLeast(0)
         for (index in start until old.length()) {
-            runCatching { old.getJSONObject(index) }.getOrNull()?.let(next::put)
+            runCatching { old.getJSONObject(index) }.getOrNull()?.let { preserved -> next.put(preserved) }
         }
         next.put(entry)
         prefs.edit().putString(HISTORY_KEY, next.toString()).apply()
