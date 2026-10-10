@@ -118,18 +118,17 @@ private fun saveGoogleAccount(prefs: android.content.SharedPreferences, account:
 private fun firebaseAuthErrorMessage(error: Exception?): String {
     val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
     return when {
-        code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyebilirsin."
-        code.contains("INVALID_EMAIL") -> "E-posta adresini kontrol et."
+        code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı deneyebilirsin."
+        code.contains("INVALID_EMAIL") -> "Geçerli bir e-posta adresi gir."
         code.contains("WEAK_PASSWORD") -> "Daha güçlü bir şifre seç. En az 6 karakter kullan."
         code.contains("USER_NOT_FOUND") || code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
-            "E-posta veya şifre hatalı. Bilgilerini kontrol edip tekrar dene."
+            "E-posta adresi veya şifre hatalı."
         code.contains("OPERATION_NOT_ALLOWED") -> "Bu giriş yöntemi şu anda kullanılamıyor. Daha sonra tekrar dene."
-        code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar dene."
-        code.contains("NETWORK_REQUEST_FAILED") -> "Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene."
+        code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Bir süre bekleyip tekrar dene."
+        code.contains("NETWORK_REQUEST_FAILED") -> "Bağlantı kurulamadı. İnternet bağlantını kontrol edip tekrar dene."
         code.contains("ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL") ->
-            "Bu e-posta başka bir giriş yöntemiyle kayıtlı. O yöntemle giriş yapmayı dene."
-        code.contains("USER_DISABLED") -> "Bu hesap şu anda kullanılamıyor. Destek ekibiyle iletişime geç."
-        else -> "İşlem tamamlanamadı. Lütfen tekrar dene."
+            "Bu e-posta başka bir giriş yöntemiyle kayıtlı. Diğer giriş yöntemini dene."
+        else -> "Giriş yapılamadı. Bilgilerini kontrol edip tekrar dene."
     }
 }
 
@@ -171,7 +170,7 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
     if (base.endsWith("/command")) base = base.removeSuffix("/command")
     base = base.trimEnd('/')
     if (base.isBlank() || !(base.startsWith("http://") || base.startsWith("https://"))) {
-        return PcBridgeResult(false, false, "Windows köprü adresini http://192.168.x.x:8765 biçiminde gir.")
+        return PcBridgeResult(false, false, "Bilgisayar bağlantı adresini kontrol et.")
     }
 
     var connection: java.net.HttpURLConnection? = null
@@ -203,16 +202,11 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
         }
         val bodyText = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
         if (statusCode !in 200..299) {
-            val serverError = try { JSONObject(bodyText).optString("error") } catch (_: Exception) { "" }
-            return PcBridgeResult(
-                false, false,
-                "PC köprüsü HTTP " + statusCode + " yanıtı verdi" +
-                    (if (serverError.isNotBlank()) ": " + serverError else ".")
-            )
+            return PcBridgeResult(false, false, "Bilgisayara ulaşılamadı. Bağlantı ayarlarını kontrol edip tekrar dene.")
         }
 
         val response = try { JSONObject(bodyText) } catch (_: Exception) {
-            return PcBridgeResult(true, false, "PC köprüsüne ulaşıldı ancak yanıt JSON biçiminde değil.")
+            return PcBridgeResult(true, false, "Bilgisayardan beklenen yanıt alınamadı. Yardımcı uygulamayı yeniden başlatıp tekrar dene.")
         }
         if (command == null) {
             val ok = response.optBoolean("ok", true)
@@ -234,8 +228,7 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
     } catch (error: Exception) {
         PcBridgeResult(
             false, false,
-            "PC köprüsüne ulaşılamadı: " + (error.message ?: error.javaClass.simpleName) +
-                ". Telefon ve bilgisayarın aynı Wi-Fi ağında olduğundan emin ol."
+            "Bilgisayara ulaşılamadı. Telefon ve bilgisayarın aynı Wi-Fi ağına bağlı olduğunu ve bilgisayar uygulamasının açık olduğunu kontrol et."
         )
     } finally {
         connection?.disconnect()
@@ -435,7 +428,7 @@ class MainActivity : ComponentActivity() {
                     sendRemoteCommand = { deviceId, commandName, payload, report ->
                         val user = auth.currentUser
                         if (user == null) {
-                            report("Önce Firebase hesabına giriş yap.")
+                            report("Devam etmek için önce giriş yap.")
                         } else {
                             val commandData = hashMapOf<String, Any>(
                                 "ownerId" to user.uid,
@@ -448,10 +441,10 @@ class MainActivity : ComponentActivity() {
                             FirebaseFirestore.getInstance().collection("commands")
                                 .add(commandData)
                                 .addOnSuccessListener {
-                                    report("Komut kuyruğa gönderildi. Windows Agent komutu dinlediğinde bilgisayarda uygulanacak.")
+                                    report("Komut gönderildi. Bilgisayar çevrimiçiyse birazdan uygulanır.")
                                 }
                                 .addOnFailureListener { error ->
-                                    report("Komut kaydedilemedi: ${error.localizedMessage ?: "Firestore erişim hatası"}")
+                                    report("Komut gönderilemedi. Lütfen tekrar dene.")
                                 }
                         }
                     },
@@ -616,7 +609,7 @@ private fun AssistantScreen(
                 .whereEqualTo("ownerId", firebaseUserId)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        devicesError = error.localizedMessage ?: "Cihaz listesi alınamadı."
+                        devicesError = "Cihaz listesi şu anda yüklenemedi. İnternet bağlantını kontrol edip tekrar dene."
                         devicesLoading = false
                     } else {
                         devices = snapshot?.documents.orEmpty().mapNotNull { document ->
@@ -679,7 +672,7 @@ private fun AssistantScreen(
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val testPcBridgeNow: () -> Unit = {
         if (!signedIn) {
-            feedback = "Önce Firebase hesabına giriş yap."
+            feedback = "Devam etmek için önce giriş yap."
         } else if (pcBridgeUrl.isBlank()) {
             feedback = "Önce Ayarlar bölümüne Windows köprü adresini gir."
             page = Page.SETTINGS
@@ -697,7 +690,7 @@ private fun AssistantScreen(
     }
     val sendLocalPcText: (String) -> Unit = { commandText ->
         if (!signedIn) {
-            feedback = "Önce Firebase hesabına giriş yap."
+            feedback = "Devam etmek için önce giriş yap."
         } else if (!localPcConnected) {
             feedback = "Önce Ayarlar bölümünden Windows köprüsünü bağla ve bağlantıyı test et."
         } else {
@@ -768,7 +761,7 @@ private fun AssistantScreen(
                             OutlinedButton(onClick = logout) { Text("Çıkış yap") }
                         } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { page = Page.REGISTER })
                         Page.REGISTER -> if (signedIn) {
-                            Text("Firebase hesabın açık.", color = MaterialTheme.colorScheme.secondary)
+                            Text("Oturum açık.", color = MaterialTheme.colorScheme.secondary)
                             Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
                             googleStatus?.let { status -> Text(status, color = when {
                                         status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) -> Color(0xFF65D68B)
@@ -876,7 +869,7 @@ private fun AssistantScreen(
                                         }
                                     }
                                     Text(
-                                        "Windows Agent aynı Google hesabıyla bağlandığında bilgisayarını otomatik kaydeder. Cihaz adı ve çevrimiçi durumu Firebase üzerinden güncellenir. Telefona IP adresi veya güvenlik tokeni yazman gerekmez.",
+                                        "Windows yardımcı uygulamasında aynı hesapla giriş yaptığında bilgisayarın burada otomatik görünür. Telefona adres veya güvenlik kodu girmen gerekmez.",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .76f)
                                     )
@@ -987,7 +980,7 @@ private fun AssistantScreen(
                                 mouseEnabled = remoteOnline && !localBridgeSelected,
                                 onCommand = { commandName, payload ->
                                     if (!signedIn) {
-                                        feedback = "Önce Firebase hesabına giriş yap."
+                                        feedback = "Devam etmek için önce giriş yap."
                                     } else if (localBridgeSelected) {
                                         when (commandName) {
                                             "mute" -> sendLocalPcText("sesi kapa")
@@ -996,7 +989,7 @@ private fun AssistantScreen(
                                             "home" -> sendLocalPcText("masaustunu goster")
                                             "power" -> feedback = "Güç düğmesi bu yerel köprü sürümünde desteklenmiyor. Bilgisayar kapalıyken açmak için ayrıca Wake-on-LAN gerekir."
                                             "mouse_move", "mouse_click", "mouse_right_click" ->
-                                                feedback = "Bu yerel köprü fare hareketini henüz desteklemiyor. Fare kontrolünü Windows Agent aşamasında etkinleştireceğiz."
+                                                feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
                                             else -> feedback = "Bu kumanda işlemi bu bağlantı türünde desteklenmiyor."
                                         }
                                     } else if (device == null) {
@@ -1131,7 +1124,7 @@ private fun AssistantScreen(
                         DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.2.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -1201,7 +1194,7 @@ private fun AuthForm(
                                     }, fontSize = 12.sp) }
             TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
-            Text("Hesap Firebase Authentication ile yönetilir. E-posta doğrulaması için gelen kutunu kontrol et.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+            Text("Hesabını tamamlamak için e-posta kutuna gönderilen doğrulama bağlantısını aç.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
         }
     }
 }

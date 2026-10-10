@@ -519,7 +519,7 @@ def run_agent() -> int:
                     print(f"[Önizleme] Ekran karesi gönderilemedi: {exc}")
                     last_screen_frame = now
 
-            if screen_active and now - last_command_poll >= COMMAND_POLL_SECONDS:
+            if now - last_command_poll >= COMMAND_POLL_SECONDS:
                 for document in fetch_owner_commands(session):
                     fields = decode_document(document)
                     if fields.get("deviceId") != device_id or fields.get("status") != "pending":
