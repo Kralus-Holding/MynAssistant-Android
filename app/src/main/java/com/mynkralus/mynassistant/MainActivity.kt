@@ -118,17 +118,18 @@ private fun saveGoogleAccount(prefs: android.content.SharedPreferences, account:
 private fun firebaseAuthErrorMessage(error: Exception?): String {
     val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
     return when {
-        code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı dene."
-        code.contains("INVALID_EMAIL") -> "E-posta adresi geçerli değil."
-        code.contains("WEAK_PASSWORD") -> "Şifre çok zayıf. Daha güçlü bir şifre kullan."
+        code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyebilirsin."
+        code.contains("INVALID_EMAIL") -> "E-posta adresini kontrol et."
+        code.contains("WEAK_PASSWORD") -> "Daha güçlü bir şifre seç. En az 6 karakter kullan."
         code.contains("USER_NOT_FOUND") || code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
-            "E-posta veya şifre hatalı."
-        code.contains("OPERATION_NOT_ALLOWED") -> "Bu giriş yöntemi Firebase Console'da etkin değil."
-        code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
-        code.contains("NETWORK_REQUEST_FAILED") -> "Bağlantı hatası. İnternetini kontrol edip tekrar dene."
+            "E-posta veya şifre hatalı. Bilgilerini kontrol edip tekrar dene."
+        code.contains("OPERATION_NOT_ALLOWED") -> "Bu giriş yöntemi şu anda kullanılamıyor. Daha sonra tekrar dene."
+        code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar dene."
+        code.contains("NETWORK_REQUEST_FAILED") -> "Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene."
         code.contains("ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL") ->
-            "Bu e-posta başka bir giriş yöntemiyle kayıtlı. Önce o yöntemle giriş yap."
-        else -> "Firebase işlemi başarısız${if (code.isNotBlank()) " ($code)" else ""}: ${error?.localizedMessage ?: "bilinmeyen hata"}"
+            "Bu e-posta başka bir giriş yöntemiyle kayıtlı. O yöntemle giriş yapmayı dene."
+        code.contains("USER_DISABLED") -> "Bu hesap şu anda kullanılamıyor. Destek ekibiyle iletişime geç."
+        else -> "İşlem tamamlanamadı. Lütfen tekrar dene."
     }
 }
 
@@ -155,7 +156,7 @@ private fun saveFirebaseProfile(
         .set(profile, SetOptions.merge())
         .addOnSuccessListener { onComplete(null) }
         .addOnFailureListener { error ->
-            onComplete(error.localizedMessage ?: "Firestore'a yazılamadı.")
+            onComplete("Profil kaydedilemedi.")
         }
 }
 private data class PcBridgeResult(
@@ -263,7 +264,7 @@ private fun saveWindowsBridgeDevice(
         .document("windows-" + user.uid)
         .set(data, SetOptions.merge())
         .addOnSuccessListener { onComplete(null) }
-        .addOnFailureListener { error -> onComplete(error.localizedMessage ?: "Firestore cihaz kaydı başarısız.") }
+        .addOnFailureListener { error -> onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
@@ -327,7 +328,7 @@ class MainActivity : ComponentActivity() {
                         .getResult(ApiException::class.java)
                     val idToken = account.idToken
                     if (idToken.isNullOrBlank()) {
-                        googleStatus = "Google kimlik anahtarı alınamadı. OAuth yapılandırmasını ve SHA-1 değerini kontrol et."
+                        googleStatus = "Google ile giriş şu anda tamamlanamıyor. Lütfen tekrar dene."
                     } else {
                         val credential = GoogleAuthProvider.getCredential(idToken, null)
                         auth.signInWithCredential(credential).addOnCompleteListener { task ->
@@ -336,7 +337,7 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 val user = task.result?.user ?: auth.currentUser
                                 if (user == null) {
-                                    googleStatus = "Google girişi tamamlandı ancak Firebase kullanıcı bilgisi alınamadı."
+                                    googleStatus = "Giriş tamamlandı ancak hesap bilgileri alınamadı. Lütfen tekrar dene."
                                 } else {
                                     name = user.displayName?.takeIf { it.isNotBlank() }
                                         ?: user.email?.substringBefore("@").orEmpty()
@@ -354,7 +355,7 @@ class MainActivity : ComponentActivity() {
                                         googleStatus = if (firestoreError == null) {
                                             "Google ile giriş yapıldı."
                                         } else {
-                                            "Giriş başarılı; profil Firestore'a kaydedilemedi. Firestore veritabanını ve güvenlik kurallarını kontrol et. ($firestoreError)"
+                                            "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
                                         }
                                     }
                                 }
@@ -363,12 +364,12 @@ class MainActivity : ComponentActivity() {
                     }
                 } catch (error: ApiException) {
                     googleStatus = when (error.statusCode) {
-                        10 -> "Google OAuth yapılandırma hatası (10). Android OAuth istemcisindeki paket adı ve SHA-1 eşleşmesini kontrol et."
-                        12501 -> "Google hesabı seçilmedi veya giriş iptal edildi (12501)."
-                        else -> "Google giriş başarısız (kod ${error.statusCode}). OAuth ve test kullanıcısı ayarlarını kontrol et."
+                        10 -> "Google ile giriş şu anda kullanılamıyor. Lütfen daha sonra tekrar dene."
+                        12501 -> "Giriş iptal edildi."
+                        else -> "Google ile giriş tamamlanamadı. Lütfen tekrar dene."
                     }
                 } catch (error: Exception) {
-                    googleStatus = "Google giriş sonucu okunamadı (${error.javaClass.simpleName}). Tekrar dene."
+                    googleStatus = "Bir sorun oluştu. Lütfen tekrar dene."
                 }
             }
             val startGoogleSignIn: () -> Unit = {
@@ -415,7 +416,7 @@ class MainActivity : ComponentActivity() {
                                 if (user != null && url.isNotBlank()) {
                                     saveWindowsBridgeDevice(user, url, result.connected) { firestoreError ->
                                         val finalResult = if (firestoreError == null) result else result.copy(
-                                            message = result.message + "\nCihaz bağlantısı Firebase'e kaydedilemedi: " + firestoreError
+                                            message = "Bağlantı kontrol edildi ancak bilgisayar bilgileri kaydedilemedi."
                                         )
                                         report(finalResult)
                                     }
@@ -458,7 +459,7 @@ class MainActivity : ComponentActivity() {
                     login = { identity, password, report ->
                         val cleanEmail = identity.trim()
                         if (!cleanEmail.contains("@")) {
-                            val message = "Firebase hesabıyla giriş için e-posta adresini gir."
+                            val message = "E-posta adresinle giriş yapmak için e-posta adresini gir."
                             googleStatus = message
                             report(message)
                         } else {
@@ -483,9 +484,9 @@ class MainActivity : ComponentActivity() {
                                             signedIn = true
                                             saveFirebaseProfile(user, "password", false) { firestoreError ->
                                                 val message = if (firestoreError == null) {
-                                                    "Firebase hesabıyla giriş başarılı."
+                                                    "Giriş yapıldı."
                                                 } else {
-                                                    "Giriş başarılı; profil Firestore'a kaydedilemedi. Firestore veritabanı ve güvenlik kurallarını kontrol et. ($firestoreError)"
+                                                    "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
                                                 }
                                                 googleStatus = message
                                                 report(message)
@@ -512,7 +513,7 @@ class MainActivity : ComponentActivity() {
                                     } else {
                                         val user = task.result?.user
                                         if (user == null) {
-                                            val message = "Hesap oluşturuldu ancak Firebase kullanıcı bilgisi alınamadı."
+                                            val message = "Hesap oluşturulamadı. Lütfen tekrar dene."
                                             googleStatus = message
                                             report(message)
                                         } else {
@@ -541,9 +542,9 @@ class MainActivity : ComponentActivity() {
                                                         val profileMessage = if (firestoreError == null) {
                                                             ""
                                                         } else {
-                                                            " Profil Firestore'a kaydedilemedi; veritabanını ve güvenlik kurallarını kontrol et. ($firestoreError)"
+                                                            " Hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
                                                         }
-                                                        val message = "Firebase hesabın oluşturuldu." + verificationMessage + profileMessage
+                                                        val message = "Hesabın oluşturuldu." + verificationMessage + profileMessage
                                                         googleStatus = message
                                                         report(message)
                                                     }
