@@ -54,6 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Computer
@@ -905,7 +907,7 @@ private fun saveWindowsBridgeDevice(
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
-private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES }
+private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
 
 class MainActivity : ComponentActivity() {
     private val googleSignInClient by lazy {
@@ -1274,9 +1276,23 @@ private fun AssistantScreen(
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
+    var diagnosticsRevision by remember { mutableIntStateOf(0) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val recordIssue: (String, String, String, String, String) -> String = {
+            codePrefix, category, userMessage, commandText, technicalDetails ->
+        val issueId = MynAssistantDiagnostics.record(
+            commandContext,
+            codePrefix,
+            category,
+            commandText,
+            technicalDetails
+        )
+        diagnosticsRevision += 1
+        userMessage + "\nSorun kodu: " + issueId
+    }
     var pendingCommandAfterPermission by remember { mutableStateOf<String?>(null) }
     var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
     var permissionResultTick by remember { mutableIntStateOf(0) }
@@ -1551,16 +1567,33 @@ private fun AssistantScreen(
                 "WHATSAPP_CALL" -> openWhatsAppChat(
                     commandContext, contact.phoneNumber, autoAction = "CALL"
                 )
-                "WHATSAPP_MESSAGE" -> openWhatsAppChat(
-                    commandContext,
-                    contact.phoneNumber,
-                    autoAction = "MESSAGE",
-                    message = extractWhatsAppMessage(commandText)
-                )
+                "WHATSAPP_MESSAGE" -> {
+                    val message = extractWhatsAppMessage(commandText, contact.displayName)
+                    if (message.isNullOrBlank()) {
+                        recordIssue(
+                            "MYN-WA-3001", "WhatsApp", 
+                            "Mesajın içeriğini ayıramadım. Örneğin: “Fatih'e naber diye WhatsApp'tan mesaj at” ya da “Fatih'e \\"Merhaba\\" mesajı gönder.”",
+                            commandText,
+                            "MESSAGE_PARSE_EMPTY; resolvedContact=" + contact.displayName
+                        )
+                    } else {
+                        openWhatsAppChat(
+                            commandContext,
+                            contact.phoneNumber,
+                            autoAction = "MESSAGE",
+                            message = message
+                        )
+                    }
+                }
                 else -> executeAndroidTextCommand(commandContext, commandText)
             }
-        } catch (_: Exception) {
-            "İşlem başlatılamadı. İzinleri ve ilgili uygulamanın kurulu olduğunu kontrol et."
+        } catch (error: Exception) {
+            recordIssue(
+                "MYN-ACT-5001", "Komut yürütme",
+                "İşlemi başlatamadım. İzinleri ve ilgili uygulamayı kontrol et.",
+                commandText,
+                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+            )
         }
     }
 
@@ -1573,10 +1606,11 @@ private fun AssistantScreen(
                 .apply()
             feedback = choice.aliasLabel + " artık " + contact.displayName + " olarak kaydedildi."
         } else {
+            val selectedAlias = contactAliasSpec(choice.command, contact.displayName)
             pendingContactConfirmation = PendingContactConfirmation(
                 command = choice.command,
-                aliasKey = choice.aliasKey,
-                aliasLabel = choice.aliasLabel,
+                aliasKey = selectedAlias?.first ?: choice.aliasKey,
+                aliasLabel = selectedAlias?.second ?: choice.aliasLabel,
                 contact = contact
             )
         }
@@ -1616,7 +1650,11 @@ private fun AssistantScreen(
                     val (relationKey, requestedName) = relationshipAssignment
                     val matches = findContactPhonesForCommand(commandContext, requestedName, resolveSavedAlias = false)
                     if (matches.isEmpty()) {
-                        feedback = "Rehberinde “" + requestedName + "” bulunamadı. Rehberdeki görünen adı kontrol edip tekrar dene."
+                        feedback = recordIssue(
+                            "MYN-CON-2001", "Kişi eşleştirme",
+                            "Bu isimle kayıtlı bir telefon numarası bulamadım. Rehberdeki adı kontrol edip tekrar dene.",
+                            textCommand, "NO_CONTACT_MATCH; requestedName=" + requestedName
+                        )
                     } else if (matches.size > 1) {
                         val relationLabel = when (relationKey) {
                             "father" -> "babam"
@@ -1650,9 +1688,6 @@ private fun AssistantScreen(
                     }
                 }
             }
-            target == "PHONE" && contactAction == "WHATSAPP_MESSAGE" && extractWhatsAppMessage(textCommand) == null -> {
-                feedback = "Göndermek istediğin mesajı tırnak içinde komuta ekle. Örn. Anneme WhatsApp'tan \"Eve geç kalacağım\" mesajını gönder."
-            }
             target == "PHONE" && contactAction != null -> {
                 val missingContactPermissions = buildList {
                     if (phoneNumber == null &&
@@ -1681,12 +1716,22 @@ private fun AssistantScreen(
                     }
                     when {
                         contacts.isEmpty() -> {
-                            feedback = "Rehberinde bu komutla eşleşen kişiyi bulamadım. Adını rehberdeki gibi yazmayı deneyebilirsin."
+                            feedback = recordIssue(
+                                "MYN-CON-2001", "Kişi eşleştirme",
+                                "Bu kişiyle eşleşen telefon numarası bulamadım. Kişinin adını rehberdeki gibi yazmayı deneyebilirsin.",
+                                textCommand, "NO_CONTACT_MATCH; contactsPermission=" +
+                                    (androidx.core.content.ContextCompat.checkSelfPermission(
+                                        commandContext, android.Manifest.permission.READ_CONTACTS
+                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                            )
                         }
                         contacts.size > 1 -> {
                             val aliasSpec = contactAliasSpec(textCommand)
+                            val includesNaturalMessage = Regex(
+                                """(?iu)\s+diye\s+(?:(?:whatsapp)(?:['’]?(?:tan|ten|dan|den))?\s+)?mesaj\s+(?:at|gönder|gonder|yolla|yaz)\b"""
+                            ).containsMatchIn(textCommand)
                             val aliasLabel = aliasSpec?.second
-                                ?: contactLookupAlias(textCommand)
+                                ?: if (includesNaturalMessage) "bu isim" else contactLookupAlias(textCommand)
                                 ?: contacts.first().displayName
                             val aliasKey = aliasSpec?.first
                                 ?: ("contact_alias_name_" + normalizeContactText(aliasLabel).replace(" ", "_"))
@@ -1703,7 +1748,18 @@ private fun AssistantScreen(
                     }
                 }
             }
-            target == "PHONE" -> feedback = executeAndroidTextCommand(commandContext, textCommand)
+            target == "PHONE" -> {
+                val result = executeAndroidTextCommand(commandContext, textCommand)
+                feedback = if (result.contains("henüz desteklenmiyor", ignoreCase = true) ||
+                    result.contains("desteklenmiyor", ignoreCase = true)
+                ) {
+                    recordIssue(
+                        "MYN-CMD-1001", "Komut tanıma",
+                        "Bu komut henüz desteklenmiyor. Farklı bir ifade deneyebilir veya sorun kodunu paylaşabilirsin.",
+                        textCommand, "UNSUPPORTED_COMMAND; result=" + result
+                    )
+                } else result
+            }
             routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
             !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
             selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
@@ -1803,6 +1859,7 @@ private fun AssistantScreen(
                         Page.SETTINGS -> "Ayarlar"
                         Page.REMOTE -> "PC Kumandası"
                         Page.FILES -> "Bilgisayar Dosyaları"
+                        Page.DIAGNOSTICS -> "Sorun kayıtları"
                         else -> "Ana sayfa"
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
@@ -1927,6 +1984,59 @@ private fun AssistantScreen(
                                             Button(onClick = { selectedDeviceId = device.id; page = Page.REMOTE }, modifier = Modifier.fillMaxWidth()) {
                                                 Text("Bağlan")
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Page.DIAGNOSTICS -> {
+                            val entries = remember(diagnosticsRevision, page) {
+                                MynAssistantDiagnostics.read(commandContext)
+                            }
+                            Text(
+                                "Sorun kodları, nedenleri ve komut kayıtları yalnızca bu telefonda tutulur. İstersen kayıtları temizleyebilirsin.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                            )
+                            if (entries.isEmpty()) {
+                                Card(Modifier.fillMaxWidth()) {
+                                    Text("Henüz hata kaydı yok.", Modifier.padding(16.dp))
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = {
+                                        MynAssistantDiagnostics.clear(commandContext)
+                                        diagnosticsRevision += 1
+                                        feedback = "Sorun kayıtları temizlendi."
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Kayıtları temizle")
+                                }
+                                entries.forEach { entry ->
+                                    Card(
+                                        Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surface
+                                        )
+                                    ) {
+                                        Column(
+                                            Modifier.fillMaxWidth().padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Text(entry.id, fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary)
+                                            Text(entry.category, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                            Text(
+                                                java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
+                                                    .format(java.util.Date(entry.createdAt)),
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f)
+                                            )
+                                            if (entry.command.isNotBlank()) Text("Komut: " + entry.command, fontSize = 12.sp)
+                                            if (entry.details.isNotBlank()) Text("Ayrıntı: " + entry.details, fontSize = 12.sp)
                                         }
                                     }
                                 }
@@ -2200,13 +2310,22 @@ private fun AssistantScreen(
                     }
                 }
             }
+                if (page == Page.HOME && !feedback.isNullOrBlank()) {
+                    Text(
+                        feedback.orEmpty(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontSize = 12.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 if (page == Page.HOME) {
                     val keyboardController = LocalSoftwareKeyboardController.current
                     Surface(
                         modifier = Modifier.fillMaxWidth()
-                            .imePadding()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .then(if (keyboardVisible) Modifier.imePadding() else Modifier.navigationBarsPadding())
+                            .padding(horizontal = 12.dp, vertical = if (keyboardVisible) 0.dp else 8.dp),
                         shape = RoundedCornerShape(28.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         tonalElevation = 2.dp
@@ -2340,14 +2459,6 @@ private fun AssistantScreen(
                                         modifier = Modifier.size(21.dp)
                                     )
                                 }
-                            }
-                            feedback?.let {
-                                Text(
-                                    it,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    fontSize = 12.sp
-                                )
                             }
                         }
                     }
@@ -2575,6 +2686,7 @@ private fun AssistantScreen(
                         if (!signedIn) DrawerItem("Kayıt ol") { page = Page.REGISTER; drawer = false }
                         DrawerItem("Cihazlarım") { page = Page.DEVICES; drawer = false }
                         DrawerItem("Ayarlar") { page = Page.SETTINGS; drawer = false }
+                        DrawerItem("Sorun kayıtları") { page = Page.DIAGNOSTICS; drawer = false }
                         DrawerItem("PC Kumandası") { page = Page.REMOTE; drawer = false }
                         if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
