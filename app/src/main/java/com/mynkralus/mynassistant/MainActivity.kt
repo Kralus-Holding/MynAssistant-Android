@@ -744,25 +744,11 @@ private fun AssistantScreen(
                             if (!signedIn) {
                                 Button(onClick = { page = Page.LOGIN }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
                             } else {
-                                OutlinedButton(onClick = { page = Page.SETTINGS }, modifier = Modifier.fillMaxWidth()) {
-                                    Icon(Icons.Default.Settings, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Bilgisayar bağlantısını ayarla")
-                                }
-                                if (pcBridgeUrl.isNotBlank()) {
-                                    OutlinedButton(
-                                        onClick = testPcBridgeNow,
-                                        enabled = !pcBridgeBusy,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(if (pcBridgeBusy) "Bağlantı test ediliyor..." else "Bilgisayar bağlantısını test et")
-                                    }
-                                    Text(
-                                        pcBridgeStatus,
-                                        fontSize = 12.sp,
-                                        color = if (localPcConnected) Color(0xFF65D68B) else MaterialTheme.colorScheme.secondary
-                                    )
-                                }
+                                Text(
+                                    "Windows Agent bu hesaba bağlandığında bilgisayarın burada otomatik görünecek. IP adresi veya token girmen gerekmiyor.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                )
                                 if (devicesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                                 devicesError?.let { error ->
                                     Text("Cihazlar okunamadı: " + error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
@@ -776,7 +762,7 @@ private fun AssistantScreen(
                                             Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
                                             Text("Henüz bilgisayar bağlanmamış", fontWeight = FontWeight.SemiBold)
                                             Text(
-                                                "Ayarlar'da Windows MynAi köprü adresini kaydedip bağlantıyı test et. Telefon ve bilgisayar aynı Wi-Fi ağında olmalı.",
+                                                "Windows bilgisayarına MynAssistant Agent kurup aynı Google hesabıyla bir kez giriş yaptıktan sonra cihaz burada otomatik listelenir. Telefon ve bilgisayarın aynı Wi-Fi ağında olması gerekmeyecek.",
                                                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
                                             )
                                         }
@@ -809,7 +795,7 @@ private fun AssistantScreen(
                                             }
                                             Text("Cihaz kimliği: " + device.id, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                                             Button(onClick = { selectedDeviceId = device.id; page = Page.REMOTE }, modifier = Modifier.fillMaxWidth()) {
-                                                Text("PC Kumandasını aç")
+                                                Text("Bağlan")
                                             }
                                         }
                                     }
@@ -885,8 +871,7 @@ private fun AssistantScreen(
                                         when {
                                             !signedIn -> "Giriş yapılmamış"
                                             localBridgeSelected -> "Bağlı • Yerel MynAi köprüsü"
-                                            device == null && pcBridgeUrl.isBlank() -> "Bağlantı adresi ayarlanmamış"
-                                            device == null -> "Windows köprüsünü test et"
+                                            device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
                                             device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
                                             remoteOnline -> "Bağlı • " + device.platform
                                             else -> "Çevrimdışı • Windows Agent bekleniyor"
@@ -901,11 +886,10 @@ private fun AssistantScreen(
                             }
                             if (!remoteOnline) {
                                 OutlinedButton(
-                                    onClick = { if (pcBridgeUrl.isNotBlank()) testPcBridgeNow() else page = Page.SETTINGS },
-                                    enabled = !pcBridgeBusy,
+                                    onClick = { page = Page.DEVICES },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(if (pcBridgeUrl.isNotBlank()) "Bağlantıyı test et" else "Bilgisayar bağlantısını ayarla")
+                                    Text(if (device == null) "Cihaz listesine dön" else "Cihaz durumunu gör")
                                 }
                             }
                             TvRemotePanel(
@@ -926,7 +910,7 @@ private fun AssistantScreen(
                                             else -> feedback = "Bu kumanda işlemi bu bağlantı türünde desteklenmiyor."
                                         }
                                     } else if (device == null) {
-                                        feedback = "Önce Ayarlar'dan bilgisayar köprüsünü bağla veya Windows Agent cihazını kaydet."
+                                        feedback = "Bu bilgisayar henüz çevrimiçi değil. Windows Agent aynı hesapla bağlandığında otomatik kullanılabilir olacak."
                                     } else if (!remoteOnline) {
                                         feedback = "Bilgisayar çevrimdışı. Windows Agent çevrimiçi olduğunda komut gönderebilirsin."
                                     } else {
