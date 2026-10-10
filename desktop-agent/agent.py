@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import ctypes
+import io
 import json
 import os
 import platform
@@ -25,6 +27,10 @@ FIRESTORE = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/database
 SCOPES = ["openid", "email", "profile"]
 AGENT_VERSION = "0.1.0"
 POLL_SECONDS = 2.0
+COMMAND_POLL_SECONDS = 2.0
+SCREEN_CHECK_SECONDS = 8.0
+SCREEN_FRAME_SECONDS = 1.5
+SCREEN_REQUEST_MAX_AGE_SECONDS = 25.0
 HEARTBEAT_SECONDS = 25.0
 DPAPI_ENTROPY = b"MynAssistantDesktopAgent-v1"
 APP_DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "MynAssistant" / "DesktopAgent"
@@ -237,26 +243,91 @@ def firestore_patch(session: FirebaseSession, document_path: str, fields: dict, 
     return response.json()
 
 
-def register_or_heartbeat(session: FirebaseSession, device_id: str) -> None:
-    computer_name = platform.node().strip() or "Windows bilgisayarım"
-    fields = {
-        "ownerId": encode_string(session.uid),
-        "name": encode_string(computer_name),
-        "platform": encode_string("Windows"),
-        "type": encode_string("Windows"),
-        "status": encode_string("online"),
-        "connectionMode": encode_string("firebase-agent"),
-        "agentVersion": encode_string(AGENT_VERSION),
-        "lastSeenAt": encode_timestamp(),
-    }
-    response = requests.patch(
+def register_or_heartbeat(session: FirebaseSession, device_id: str, initial: bool = False) -> None:
+    if initial:
+        computer_name = platform.node().strip() or "Windows bilgisayarım"
+        fields = {
+            "ownerId": encode_string(session.uid),
+            "name": encode_string(computer_name),
+            "platform": encode_string("Windows"),
+            "type": encode_string("Windows"),
+            "status": encode_string("online"),
+            "connectionMode": encode_string("firebase-agent"),
+            "agentVersion": encode_string(AGENT_VERSION),
+            "lastSeenAt": encode_timestamp(),
+            "screenRequested": {"booleanValue": False},
+        }
+        response = requests.patch(
+            f"{FIRESTORE}/devices/{device_id}",
+            headers=session.headers(),
+            json={"fields": fields},
+            timeout=20,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError("Windows cihaz kaydı başarısız: " + response.text[:700])
+    else:
+        firestore_patch(
+            session,
+            f"devices/{device_id}",
+            {
+                "status": encode_string("online"),
+                "lastSeenAt": encode_timestamp(),
+            },
+            update_mask=["status", "lastSeenAt"],
+        )
+
+
+def read_device_state(session: FirebaseSession, device_id: str) -> dict:
+    response = requests.get(
         f"{FIRESTORE}/devices/{device_id}",
         headers=session.headers(),
-        json={"fields": fields},
-        timeout=20,
+        timeout=15,
     )
     if response.status_code >= 400:
-        raise RuntimeError("Windows cihaz kaydı başarısız: " + response.text[:700])
+        raise RuntimeError("Windows cihaz durumu okunamadı: " + response.text[:500])
+    return decode_document(response.json())
+
+
+def screen_request_is_active(fields: dict) -> bool:
+    if not fields.get("screenRequested"):
+        return False
+    value = fields.get("screenRequestedAt")
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        requested_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - requested_at).total_seconds()
+        return -5 <= age <= SCREEN_REQUEST_MAX_AGE_SECONDS
+    except Exception:
+        return False
+
+
+def capture_screen_base64() -> str:
+    image = pyautogui.screenshot()
+    image.thumbnail((1280, 720))
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=45, optimize=True)
+    payload = output.getvalue()
+    if len(payload) > 800_000:
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=30, optimize=True)
+        payload = output.getvalue()
+    if len(payload) > 900_000:
+        raise RuntimeError("Ekran görüntüsü Firestore belge sınırına sığmıyor.")
+    return base64.b64encode(payload).decode("ascii")
+
+
+def upload_screen_frame(session: FirebaseSession, device_id: str) -> None:
+    frame = capture_screen_base64()
+    firestore_patch(
+        session,
+        f"devices/{device_id}",
+        {
+            "screenJpegBase64": encode_string(frame),
+            "screenFrameAt": encode_timestamp(),
+        },
+        update_mask=["screenJpegBase64", "screenFrameAt"],
+    )
 
 
 def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
@@ -388,41 +459,75 @@ def run_agent() -> int:
         ask_install_startup()
 
     device_id = load_device_id(session.uid)
-    register_or_heartbeat(session, device_id)
+    register_or_heartbeat(session, device_id, initial=True)
     print(f"Cihaz çevrimiçi: {platform.node()} (ID: {device_id})")
     print("Android uygulamasında Cihazlarım bölümünde otomatik görünmesi gerekir.")
-    print("Durdurmak için Ctrl+C. Bu ilk sürümde canlı ekran akışı yok.")
+    print("PC Kumandası açıkken masaüstü önizlemesi yaklaşık saniyede bir güncellenir.")
+    print("Durdurmak için Ctrl+C.")
 
     last_heartbeat = time.monotonic()
+    last_screen_check = 0.0
+    last_screen_frame = 0.0
+    last_command_poll = 0.0
+    screen_active = False
     pyautogui.FAILSAFE = False
     try:
         while True:
             session.ensure_fresh()
             now = time.monotonic()
+
             if now - last_heartbeat >= HEARTBEAT_SECONDS:
                 register_or_heartbeat(session, device_id)
                 last_heartbeat = now
 
-            for document in fetch_owner_commands(session):
-                fields = decode_document(document)
-                if fields.get("deviceId") != device_id or fields.get("status") != "pending":
-                    continue
-                command = str(fields.get("command") or "")
-                if not command_is_supported(command):
-                    update_command(session, document, "failed", "Desteklenmeyen komut.")
-                    continue
-                update_command(session, document, "running", "Windows Agent komutu çalıştırıyor.")
-                try:
-                    result = execute_command(command, fields)
-                    status = "completed" if not result.startswith("Desteklenmeyen") else "failed"
-                    update_command(session, document, status, result)
-                    print(f"[Komut] {command}: {result}")
-                except Exception as exc:
+            screen_check_interval = 3.0 if screen_active else SCREEN_CHECK_SECONDS
+            if now - last_screen_check >= screen_check_interval:
+                device_state = read_device_state(session, device_id)
+                was_active = screen_active
+                screen_active = screen_request_is_active(device_state)
+                last_screen_check = now
+                if was_active and not screen_active:
                     try:
-                        update_command(session, document, "failed", str(exc))
-                    except Exception as update_exc:
-                        print(f"[Hata] Komut durumu güncellenemedi: {update_exc}")
-                    print(f"[Hata] {command}: {exc}")
+                        firestore_patch(
+                            session,
+                            f"devices/{device_id}",
+                            {"screenJpegBase64": encode_string(""), "screenFrameAt": encode_timestamp()},
+                            update_mask=["screenJpegBase64", "screenFrameAt"],
+                        )
+                    except Exception as exc:
+                        print(f"[Uyarı] Önizleme alanı temizlenemedi: {exc}")
+
+            if screen_active and now - last_screen_frame >= SCREEN_FRAME_SECONDS:
+                try:
+                    upload_screen_frame(session, device_id)
+                    last_screen_frame = now
+                except Exception as exc:
+                    print(f"[Önizleme] Ekran karesi gönderilemedi: {exc}")
+                    last_screen_frame = now
+
+            if screen_active and now - last_command_poll >= COMMAND_POLL_SECONDS:
+                for document in fetch_owner_commands(session):
+                    fields = decode_document(document)
+                    if fields.get("deviceId") != device_id or fields.get("status") != "pending":
+                        continue
+                    command = str(fields.get("command") or "")
+                    if not command_is_supported(command):
+                        update_command(session, document, "failed", "Desteklenmeyen komut.")
+                        continue
+                    update_command(session, document, "running", "Windows Agent komutu çalıştırıyor.")
+                    try:
+                        result = execute_command(command, fields)
+                        status = "completed" if not result.startswith("Desteklenmeyen") else "failed"
+                        update_command(session, document, status, result)
+                        print(f"[Komut] {command}: {result}")
+                    except Exception as exc:
+                        try:
+                            update_command(session, document, "failed", str(exc))
+                        except Exception as update_exc:
+                            print(f"[Hata] Komut durumu güncellenemedi: {update_exc}")
+                        print(f"[Hata] {command}: {exc}")
+                last_command_poll = now
+
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         print("\nAgent kapatılıyor...")
@@ -431,8 +536,13 @@ def run_agent() -> int:
             firestore_patch(
                 session,
                 f"devices/{device_id}",
-                {"status": encode_string("offline"), "lastSeenAt": encode_timestamp()},
-                update_mask=["status", "lastSeenAt"],
+                {
+                    "status": encode_string("offline"),
+                    "lastSeenAt": encode_timestamp(),
+                    "screenRequested": {"booleanValue": False},
+                    "screenJpegBase64": encode_string(""),
+                },
+                update_mask=["status", "lastSeenAt", "screenRequested", "screenJpegBase64"],
             )
         except Exception as exc:
             print(f"[Uyarı] Çevrimdışı durumu kaydedilemedi: {exc}")
