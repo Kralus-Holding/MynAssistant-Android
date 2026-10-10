@@ -45,6 +45,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
@@ -2272,7 +2273,7 @@ private fun AssistantScreen(
                         if (signedIn && devices.isNotEmpty()) DrawerItem("Bilgisayar Dosyaları") { page = Page.FILES; drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); page = Page.HOME; drawer = false }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.2.5", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.2.6", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
