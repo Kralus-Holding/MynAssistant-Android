@@ -948,24 +948,50 @@ private fun saveWindowsBridgeDevice(
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
 
+/**
+ * Returns true only when Android accepted the start request. Listening becomes active
+ * only after MynWakeWordService reports the LISTENING phase through shared preferences.
+ */
 private fun startMynWakeWordService(context: Context): Boolean {
-    androidx.core.content.ContextCompat.startForegroundService(
-        context, Intent(context, MynWakeWordService::class.java)
-    )
-    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    prefs.edit()
         .putBoolean("wake_word_enabled", true)
-        .putString("wake_word_status", "Çevrimdışı Türkçe modeli hazırlanıyor…")
+        .putString("wake_word_phase", MynWakeWordPhase.STARTING.persistedValue)
+        .putString("wake_word_status", "Servis başlatma isteği gönderildi…")
         .remove("wake_word_error_code")
+        .remove("wake_word_error_details")
+        .remove("wake_word_error_at")
+        .putInt("wake_word_retry_count", 0)
         .apply()
-    return true
+
+    return try {
+        androidx.core.content.ContextCompat.startForegroundService(
+            context, Intent(context, MynWakeWordService::class.java)
+        )
+        true
+    } catch (error: Exception) {
+        val code = "MYN-WAKE-8009"
+        val detail = error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+        prefs.edit()
+            .putBoolean("wake_word_enabled", false)
+            .putString("wake_word_phase", MynWakeWordPhase.ERROR.persistedValue)
+            .putString("wake_word_status", "Hata $code · Ön plan mikrofon servisi başlatılamadı. MynAssistant'ı açıp tekrar dene.")
+            .putString("wake_word_error_code", code)
+            .putString("wake_word_error_details", detail.take(1200))
+            .putLong("wake_word_error_at", System.currentTimeMillis())
+            .apply()
+        throw error
+    }
 }
 
 private fun stopMynWakeWordService(context: Context) {
-    context.stopService(Intent(context, MynWakeWordService::class.java))
-    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    prefs.edit()
         .putBoolean("wake_word_enabled", false)
+        .putString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue)
         .putString("wake_word_status", "Kapalı")
         .apply()
+    context.stopService(Intent(context, MynWakeWordService::class.java))
 }
 
 class MainActivity : ComponentActivity() {
@@ -1372,6 +1398,26 @@ private fun AssistantScreen(
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("wake_word_status", "Kapalı").orEmpty())
     }
+    var wakeWordPhase by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue).orEmpty())
+    }
+    var wakeWordErrorCode by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("wake_word_error_code", "").orEmpty())
+    }
+    var wakeWordErrorDetails by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("wake_word_error_details", "").orEmpty())
+    }
+    var wakeWordLastPhase by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("wake_word_last_phase", "").orEmpty())
+    }
+    var wakeWordRetryCount by remember {
+        mutableIntStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("wake_word_retry_count", 0))
+    }
     var wakeWordLastDetectedAt by remember {
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getLong("wake_word_last_detected_at", 0L))
@@ -1589,7 +1635,7 @@ private fun AssistantScreen(
                 try {
                     val started = startMynWakeWordService(commandContext)
                     wakeWordEnabled = started
-                    wakeWordStatus = if (started) "Mikrofon açık · Hey Meyene dinleniyor" else "Başlatılamadı"
+                    wakeWordStatus = if (started) "Servis isteği gönderildi; mikrofon akışı bekleniyor…" else "Başlatılamadı"
                 } catch (error: Exception) {
                     wakeWordEnabled = false
                     wakeWordStatus = "Başlatılamadı"
@@ -1710,11 +1756,19 @@ private fun AssistantScreen(
     DisposableEffect(commandContext) {
         val wakePrefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val wakeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
-            if (key == "wake_word_enabled" || key == "wake_word_status" ||
-                key == "wake_word_last_detected_at" || key == "wake_word_detection_count"
+            if (key in setOf(
+                    "wake_word_enabled", "wake_word_status", "wake_word_phase",
+                    "wake_word_error_code", "wake_word_error_details", "wake_word_last_phase",
+                    "wake_word_retry_count", "wake_word_last_detected_at", "wake_word_detection_count"
+                )
             ) {
                 wakeWordEnabled = shared?.getBoolean("wake_word_enabled", false) ?: false
                 wakeWordStatus = shared?.getString("wake_word_status", "Kapalı").orEmpty()
+                wakeWordPhase = shared?.getString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue).orEmpty()
+                wakeWordErrorCode = shared?.getString("wake_word_error_code", "").orEmpty()
+                wakeWordErrorDetails = shared?.getString("wake_word_error_details", "").orEmpty()
+                wakeWordLastPhase = shared?.getString("wake_word_last_phase", "").orEmpty()
+                wakeWordRetryCount = shared?.getInt("wake_word_retry_count", 0) ?: 0
                 wakeWordLastDetectedAt = shared?.getLong("wake_word_last_detected_at", 0L) ?: 0L
                 wakeWordDetectionCount = shared?.getInt("wake_word_detection_count", 0) ?: 0
             }
@@ -2466,9 +2520,32 @@ private fun AssistantScreen(
                                     Text(
                                         wakeWordStatus,
                                         fontSize = 12.sp,
-                                        color = if (wakeWordEnabled) Color(0xFF65D68B)
-                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                        color = when {
+                                            wakeWordPhase == MynWakeWordPhase.ERROR.persistedValue -> MaterialTheme.colorScheme.error
+                                            wakeWordPhase == MynWakeWordPhase.LISTENING.persistedValue -> Color(0xFF65D68B)
+                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                        }
                                     )
+                                    if (wakeWordErrorCode.isNotBlank() &&
+                                        wakeWordPhase == MynWakeWordPhase.ERROR.persistedValue
+                                    ) {
+                                        Text(
+                                            "Hata kodu: $wakeWordErrorCode · Son aşama: " +
+                                                wakeWordLastPhase.ifBlank { "bilinmiyor" } +
+                                                " · yeniden deneme: $wakeWordRetryCount",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        if (wakeWordErrorDetails.isNotBlank()) {
+                                            Text(
+                                                wakeWordErrorDetails,
+                                                fontSize = 11.sp,
+                                                maxLines = 4,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                            )
+                                        }
+                                    }
                                     Row(
                                         Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
