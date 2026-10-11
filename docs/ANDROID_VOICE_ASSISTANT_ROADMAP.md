@@ -2,6 +2,15 @@
 
 Status: implementation notes for the 0.4.4 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
 
+## 0.4.5 follow-up — capture readiness and artifact integrity
+
+- The Settings toggle is a user opt-in/request state; the helper only sends a foreground-service start request and does not return a listening-success boolean.
+- Before publishing `LISTENING`, the service probes the actual Android microphone capture format, starts an `AudioRecord`, and requires a positive PCM sample read. The probe is released before Vosk opens its stream. A failure remains a microphone-start error (currently `MYN-WAKE-8024`) with its exception/stage preserved in preferences and Logcat.
+- This is an early capture-readiness check, not proof of multi-hour audio continuity. The Vosk stream may still fail after the probe; such failures must move the status to retry/error and be confirmed on the affected device.
+- Unit tests cover the rule that a loaded model, a scheduled worker, a zero-sample read, or a negative read cannot be reported as listening. Existing model installer reuse/partial-archive/low-storage/path-traversal tests remain mandatory.
+- CI now records the SHA-256 of the built debug APK in the Actions job summary after the signature verification step. The hash establishes artifact integrity, not publisher provenance for the separately downloaded model archive.
+- Candidate version: **0.4.5 / versionCode 22**. Do not treat the candidate as release-ready until the latest Actions run passes all gates and physical-device checks below are recorded.
+
 ## 0.4.4 candidate: reliability fixes
 
 Implemented on `feature/android-command-status-tracking`:
@@ -10,7 +19,7 @@ Implemented on `feature/android-command-status-tracking`:
 - Settings now links to overlay permission and app battery/background settings.
 - Successful wake detections store only the canonical wake-phrase label, a timestamp, and a count in local app preferences. No raw microphone audio is written to this telemetry.
 - Transcript matching is isolated in `MynWakeWordMatcher` and has unit tests for exact phrases, common transcript variants, punctuation, Turkish characters, aliases, and non-wake speech.
-- App version is bumped to 0.4.4 / versionCode 20.
+- The initial 0.4.4 baseline used versionCode 21 on the current PR branch; the follow-up candidate below advances to 0.4.5 / versionCode 22.
 
 Not yet proven: keyboard placement across different OEM keyboards, wake-word hit-rate in noisy rooms, long-duration background survival, battery impact, and post-reboot behavior. CI and physical-device results must be reported separately.
 
