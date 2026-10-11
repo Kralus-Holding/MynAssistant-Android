@@ -11,6 +11,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.text.InputType
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -22,8 +23,12 @@ import android.speech.SpeechRecognizer
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.WindowManager
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
@@ -39,7 +44,9 @@ class MynWakeWordService : Service() {
     private var recognizer: SpeechRecognizer? = null
     private var overlayView: LinearLayout? = null
     private var overlayStatus: TextView? = null
-    private var overlayCommand: TextView? = null
+    private var overlayCommand: EditText? = null
+    private var userRequestedStop = false
+    private var serviceFailed = false
     private var primaryButton: TextView? = null
     private var secondaryButton: TextView? = null
     private var isListening = false
@@ -59,6 +66,7 @@ class MynWakeWordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            userRequestedStop = true
             stopSelf()
             return START_NOT_STICKY
         }
@@ -161,12 +169,18 @@ class MynWakeWordService : Service() {
                 stopSelf()
                 return
             }
-            if (
-                error == SpeechRecognizer.ERROR_NO_MATCH ||
+            if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+            ) {
+                fail("MYN-WAKE-8012", "Cihazda çevrimdışı Türkçe konuşma modeli kullanılamıyor.")
+                stopSelf()
+                return
+            }
+            if (error == SpeechRecognizer.ERROR_NO_MATCH ||
                 error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
             ) {
-                // Silence is expected while waiting for the wake phrase; keep standby armed.
-                startListeningSoon(300)
+                consecutiveErrors = 0
+                startListeningSoon(250)
                 return
             }
             consecutiveErrors += 1
@@ -178,12 +192,14 @@ class MynWakeWordService : Service() {
                 stopSelf()
                 return
             }
-            // Back off after recognizer errors instead of rapidly cycling the microphone.
-            val backoff = (350L * (1 shl consecutiveErrors.coerceAtMost(3))).coerceAtMost(3000L)
+            // Retry a one-shot Android recognition session; keep the service enabled between sessions.
+            val backoff = (200L * (1 shl consecutiveErrors.coerceAtMost(3))).coerceAtMost(1600L)
             startListeningSoon(
-                maxOf(backoff, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1600L else 0L)
+                maxOf(backoff, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200L else 0L)
             )
         }
+
+
 
         override fun onResults(results: android.os.Bundle?) {
             isListening = false
@@ -289,7 +305,7 @@ class MynWakeWordService : Service() {
         } catch (error: Exception) {
             isListening = false
             fail("MYN-WAKE-8006", "Ses dinlemesi devam ettirilemedi: " + error.javaClass.simpleName)
-            startListeningSoon(1500)
+            stopSelf()
         }
     }
 
@@ -297,43 +313,55 @@ class MynWakeWordService : Service() {
         if (closed || !Settings.canDrawOverlays(this)) return
         if (overlayView == null) createOverlay()
         overlayStatus?.text = status
-        overlayCommand?.text = if (recognizedCommand.isBlank()) {
-            "“Hey Meyene” diyerek istediğin zaman yeniden seslenebilirsin."
-        } else {
-            "“$recognizedCommand”"
+        if (recognizedCommand.isNotBlank()) {
+            overlayCommand?.setText(recognizedCommand)
+            overlayCommand?.setSelection(recognizedCommand.length)
         }
-        overlayCommand?.visibility = if (recognizedCommand.isBlank()) android.view.View.GONE else android.view.View.VISIBLE
-        primaryButton?.visibility = if (ready) android.view.View.VISIBLE else android.view.View.GONE
-        primaryButton?.text = if (ready) "Komutu aç" else ""
+        val hasCommand = !overlayCommand?.text.isNullOrBlank()
+        primaryButton?.text = if (ready) "MynAssistant'ta aç" else "Komutu hazırla"
+        primaryButton?.isEnabled = hasCommand
+        primaryButton?.alpha = if (hasCommand) 1f else .58f
         secondaryButton?.text = if (ready) "Tekrar dinle" else "Gizle"
         if (overlayView?.parent == null) {
-            val width = (resources.displayMetrics.widthPixels - dp(32)).coerceAtLeast(dp(260))
+            val width = (resources.displayMetrics.widthPixels - dp(32)).coerceAtLeast(dp(280))
             val params = WindowManager.LayoutParams(
                 width,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                y = dp(54)
+                y = dp(52)
+                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             }
             try {
                 windowManager.addView(overlayView ?: return, params)
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 fail("MYN-WAKE-8007", "Mikrofon paneli ekranın üzerine açılamadı.")
+                stopSelf()
             }
         }
     }
 
+
+
     private fun createOverlay() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            background = roundedBackground(Color.rgb(22, 27, 42), dp(28), Color.rgb(139, 156, 255), dp(1))
-            elevation = dp(16).toFloat()
+            setPadding(dp(16), dp(10), dp(16), dp(16))
+            background = roundedBackground(Color.rgb(10, 13, 21), dp(28), Color.rgb(139, 156, 255), dp(1))
+            elevation = dp(20).toFloat()
         }
+        root.addView(TextView(this).apply {
+            text = "━━━━"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(97, 106, 127))
+            setPadding(0, 0, 0, dp(10))
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -356,7 +384,7 @@ class MynWakeWordService : Service() {
             setTextColor(Color.WHITE)
         })
         labels.addView(TextView(this).apply {
-            text = "HEY MEYENE  •  ÇEVRİMDIŞI"
+            text = "HEY MEYENE  •  MİKROFON ASİSTANI"
             textSize = 10f
             setTextColor(Color.rgb(169, 181, 224))
         })
@@ -367,58 +395,118 @@ class MynWakeWordService : Service() {
             setTextColor(Color.rgb(202, 207, 226))
             gravity = Gravity.CENTER
             setPadding(dp(8), 0, dp(4), 0)
-            setOnClickListener { hideOverlay(); awaitingCommand = false; commandReady = false; startListeningSoon(150) }
+            setOnClickListener {
+                hideOverlay()
+                awaitingCommand = false
+                commandReady = false
+                startListeningSoon(120)
+            }
         })
         root.addView(heading)
+
+        val statusCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = roundedBackground(Color.rgb(17, 23, 36), dp(16), Color.rgb(36, 47, 68), dp(1))
+        }
+        statusCard.addView(View(this).apply {
+            background = roundedBackground(Color.rgb(70, 214, 151), dp(50))
+        }, LinearLayout.LayoutParams(dp(8), dp(8)))
         overlayStatus = TextView(this).apply {
-            textSize = 15f
+            text = "“Hey Meyene” diye seslenebilirsin."
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
-            setPadding(0, dp(15), 0, dp(6))
+            setPadding(dp(9), 0, 0, 0)
         }
-        root.addView(overlayStatus)
-        overlayCommand = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Color.rgb(197, 205, 236))
-            setPadding(0, dp(4), 0, dp(12))
-            visibility = android.view.View.GONE
+        statusCard.addView(overlayStatus, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(statusCard, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(14) })
+
+        overlayCommand = EditText(this).apply {
+            hint = "Komutunu söyle veya yaz…"
+            textSize = 15f
+            maxLines = 3
+            minLines = 1
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setTextColor(Color.rgb(241, 243, 250))
+            setHintTextColor(Color.rgb(137, 145, 164))
+            setPadding(dp(13), dp(12), dp(13), dp(12))
+            background = roundedBackground(Color.rgb(17, 21, 31), dp(17), Color.rgb(44, 55, 81), dp(1))
+            isFocusableInTouchMode = true
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEND) {
+                    openRecognizedCommand()
+                    true
+                } else false
+            }
         }
-        root.addView(overlayCommand)
+        root.addView(overlayCommand, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(12) })
+
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        primaryButton = styledButton("Komutu aç", primary = true).apply {
-            visibility = android.view.View.GONE
+        primaryButton = styledButton("MynAssistant'ta aç", primary = true).apply {
+            isEnabled = false
+            alpha = .58f
             setOnClickListener { openRecognizedCommand() }
         }
-        actions.addView(primaryButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
-            marginEnd = dp(8)
-        })
+        actions.addView(primaryButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(8) })
         secondaryButton = styledButton("Gizle", primary = false).apply {
             setOnClickListener {
                 if (commandReady) {
                     commandReady = false
                     lastCommand = ""
                     awaitingCommand = true
+                    overlayCommand?.setText("")
                     showOverlay("Tekrar dinliyorum. Komutunu söyle.", "", ready = false)
                     startListeningSoon(100)
                 } else {
                     hideOverlay()
+                    awaitingCommand = false
+                    startListeningSoon(120)
                 }
             }
         }
         actions.addView(secondaryButton, LinearLayout.LayoutParams(0, dp(46), 1f))
-        root.addView(actions)
+        root.addView(actions, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(10) })
+
+        overlayCommand?.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
+                val hasText = !text.isNullOrBlank()
+                primaryButton?.isEnabled = hasText
+                primaryButton?.alpha = if (hasText) 1f else .58f
+                if (hasText) lastCommand = text.toString().trim()
+            }
+            override fun afterTextChanged(editable: android.text.Editable?) = Unit
+        })
         overlayView = root
     }
 
     private fun openRecognizedCommand() {
-        if (!commandReady || lastCommand.isBlank()) return
-        val command = lastCommand
+        val typedCommand = overlayCommand?.text?.toString()?.trim().orEmpty()
+        val command = typedCommand.ifBlank { lastCommand }.trim()
+        if (command.isBlank()) {
+            overlayStatus?.text = "Önce komutunu söyle veya yaz."
+            overlayCommand?.requestFocus()
+            val input = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            input.showSoftInput(overlayCommand, InputMethodManager.SHOW_IMPLICIT)
+            return
+        }
+        lastCommand = command
         commandReady = false
         awaitingCommand = false
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putString(KEY_PENDING_COMMAND, command)
             .apply()
         hideOverlay()
@@ -429,11 +517,14 @@ class MynWakeWordService : Service() {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 }
             )
-        } catch (error: Exception) {
+        } catch (_: Exception) {
             fail("MYN-WAKE-8008", "Komut MynAssistant içinde açılamadı.")
+            stopSelf()
         }
-        startListeningSoon(1200)
+        startListeningSoon(180)
     }
+
+
 
     private fun hideOverlay() {
         val view = overlayView ?: return
@@ -507,6 +598,7 @@ class MynWakeWordService : Service() {
     }
 
     private fun fail(code: String, detail: String) {
+        serviceFailed = true
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         prefs.edit()
             .putBoolean(KEY_ENABLED, false)
@@ -540,10 +632,12 @@ class MynWakeWordService : Service() {
         runCatching { recognizer?.destroy() }
         recognizer = null
         hideOverlay()
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-            .putBoolean(KEY_ENABLED, false)
-            .putString(KEY_STATUS, "Kapalı")
-            .apply()
+        if (userRequestedStop || serviceFailed) {
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putBoolean(KEY_ENABLED, false)
+                .putString(KEY_STATUS, "Kapalı")
+                .apply()
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else stopForeground(true)
         super.onDestroy()
     }
