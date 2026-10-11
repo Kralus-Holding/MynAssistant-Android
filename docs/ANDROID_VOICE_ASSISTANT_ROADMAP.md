@@ -1,8 +1,8 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: implementation notes for the 0.4.3 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: implementation notes for the 0.4.4 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
 
-## 0.4.3 candidate: reliability fixes
+## 0.4.4 candidate: reliability fixes
 
 Implemented on `feature/android-command-status-tracking`:
 - The command composer uses a single root-level insets path for status bars, navigation bars, and the IME. The composer no longer adds a second conditional navigation-bar inset.
@@ -10,9 +10,16 @@ Implemented on `feature/android-command-status-tracking`:
 - Settings now links to overlay permission and app battery/background settings.
 - Successful wake detections store only the canonical wake-phrase label, a timestamp, and a count in local app preferences. No raw microphone audio is written to this telemetry.
 - Transcript matching is isolated in `MynWakeWordMatcher` and has unit tests for exact phrases, common transcript variants, punctuation, Turkish characters, aliases, and non-wake speech.
-- App version is bumped to 0.4.3 / versionCode 20.
+- App version is bumped to 0.4.4 / versionCode 20.
 
 Not yet proven: keyboard placement across different OEM keyboards, wake-word hit-rate in noisy rooms, long-duration background survival, battery impact, and post-reboot behavior. CI and physical-device results must be reported separately.
+
+## 0.4.4 — stale-service detection
+
+- The microphone service updates a small heartbeat timestamp every 10 seconds while its persisted phase is `LISTENING`.
+- The main Activity and visible settings screen check that timestamp. If a service process was killed without a reliable `onDestroy()` callback, an expired heartbeat becomes an actionable error instead of leaving an old green “listening” state on screen.
+- Active startup/install phases have a 15-minute stale threshold to avoid falsely failing a slow first model install. Listening heartbeat expiration has a 45-second threshold. Both decisions are isolated in `MynWakeWordLivenessPolicy` and covered by unit tests.
+- This detects stale persisted state; it does not prevent Android or an OEM from killing the service, and it is not a substitute for real-device testing. `force-stop` is still not guaranteed to restart itself.
 
 ## Current voice pipeline and its limits
 
@@ -53,7 +60,7 @@ The current matcher is a transcript-matching layer, **not a custom acoustic wake
 
 ## Recommended phased architecture
 
-### Phase A — stabilize existing behavior (0.4.3)
+### Phase A — stabilize existing behavior (0.4.4)
 Keep the current single service and local Vosk model. Fix user-visible layout and settings, expose last successful wake timestamp/count, add matcher unit tests, and collect reproducible device results before tuning recognition logic further.
 
 ### Phase B — separate responsibilities (0.5)
@@ -103,3 +110,15 @@ Keep the codes stable and user actionable:
 ## Definition of done
 
 A release is ready only when automated build/tests pass, the resulting APK artifact is verified, the physical-device matrix is completed, and all limitations are documented. A successful compilation alone is not a release sign-off.
+
+
+## Diagnostic capture on a real phone
+
+When the error screen appears, connect the phone with USB debugging enabled and run:
+
+```sh
+adb logcat -c
+adb logcat -v time -s MynWakeWordService
+```
+
+Then attempt one activation. Save the lines beginning with `MYN-WAKE-` and `phase=`. Do not send a full device log if it includes other apps' private data. Share only the relevant MynAssistant lines and the exact error code shown in Settings.
