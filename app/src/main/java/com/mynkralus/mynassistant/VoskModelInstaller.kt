@@ -128,7 +128,8 @@ internal class VoskModelInstaller(
     private val cacheDir: File,
     private val modelDirectoryName: String,
     private val modelArchiveUrl: String,
-    private val downloader: ModelArchiveDownloader = HttpModelArchiveDownloader
+    private val downloader: ModelArchiveDownloader = HttpModelArchiveDownloader,
+    private val availableSpaceBytes: (File) -> Long = { it.usableSpace }
 ) {
     fun ensureInstalled(
         isCancelled: () -> Boolean = { false },
@@ -149,7 +150,7 @@ internal class VoskModelInstaller(
         if (!cacheDir.exists() && !cacheDir.mkdirs()) {
             throw VoskModelInstallException(VoskModelInstallStage.DOWNLOADING, "Geçici indirme klasörü oluşturulamadı.")
         }
-        val usableSpace = minOf(filesDir.usableSpace, cacheDir.usableSpace)
+        val usableSpace = minOf(availableSpaceBytes(filesDir), availableSpaceBytes(cacheDir))
         if (usableSpace > 0L && usableSpace < MIN_VOSK_MODEL_INSTALL_FREE_SPACE_BYTES) {
             throw VoskModelInstallException(
                 VoskModelInstallStage.DOWNLOADING,
