@@ -1520,6 +1520,18 @@ private fun AssistantScreen(
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getInt("wake_word_detection_count", 0))
     }
+    var wakeWordDebugEnabled by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean("wake_word_debug_transcripts", false))
+    }
+    var wakeWordLastTranscript by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("wake_word_last_transcript", "").orEmpty())
+    }
+    var wakeWordLastTranscriptFinal by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean("wake_word_last_transcript_final", false))
+    }
     var wakeWordActivationPending by remember { mutableStateOf(false) }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val navigateToPage: (Page) -> Unit = { targetPage ->
@@ -1565,6 +1577,9 @@ private fun AssistantScreen(
         wakeWordRetryCount = wakePrefs.getInt("wake_word_retry_count", 0)
         wakeWordLastDetectedAt = wakePrefs.getLong("wake_word_last_detected_at", 0L)
         wakeWordDetectionCount = wakePrefs.getInt("wake_word_detection_count", 0)
+        wakeWordDebugEnabled = wakePrefs.getBoolean("wake_word_debug_transcripts", false)
+        wakeWordLastTranscript = wakePrefs.getString("wake_word_last_transcript", "").orEmpty()
+        wakeWordLastTranscriptFinal = wakePrefs.getBoolean("wake_word_last_transcript_final", false)
     }
     var pendingCommandAfterPermission by remember { mutableStateOf<String?>(null) }
     var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
@@ -1889,7 +1904,9 @@ private fun AssistantScreen(
             if (key in setOf(
                     "wake_word_enabled", "wake_word_status", "wake_word_phase",
                     "wake_word_error_code", "wake_word_error_details", "wake_word_error_at", "wake_word_last_phase",
-                    "wake_word_retry_count", "wake_word_last_detected_at", "wake_word_detection_count"
+                    "wake_word_retry_count", "wake_word_last_detected_at", "wake_word_detection_count",
+                    "wake_word_debug_transcripts", "wake_word_last_transcript",
+                    "wake_word_last_transcript_final", "wake_word_last_transcript_at"
                 )
             ) {
                 wakeWordEnabled = shared?.getBoolean("wake_word_enabled", false) ?: false
@@ -1902,6 +1919,9 @@ private fun AssistantScreen(
                 wakeWordRetryCount = shared?.getInt("wake_word_retry_count", 0) ?: 0
                 wakeWordLastDetectedAt = shared?.getLong("wake_word_last_detected_at", 0L) ?: 0L
                 wakeWordDetectionCount = shared?.getInt("wake_word_detection_count", 0) ?: 0
+                wakeWordDebugEnabled = shared?.getBoolean("wake_word_debug_transcripts", false) ?: false
+                wakeWordLastTranscript = shared?.getString("wake_word_last_transcript", "").orEmpty()
+                wakeWordLastTranscriptFinal = shared?.getBoolean("wake_word_last_transcript_final", false) ?: false
             }
         }
         wakePrefs.registerOnSharedPreferenceChangeListener(wakeListener)
@@ -2736,6 +2756,48 @@ private fun AssistantScreen(
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .74f)
                                     )
+                                    HorizontalDivider()
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text("Uyandırma tanılama metni", fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                "Açarsan Vosk'un uyandırma kelimesini beklerken çıkardığı son yazı bu telefonda görünür. Ses kaydı tutulmaz; konuşma metni yerel olarak saklanır.",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = wakeWordDebugEnabled,
+                                            onCheckedChange = { enabled ->
+                                                val prefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                                                wakeWordDebugEnabled = enabled
+                                                val editor = prefs.edit().putBoolean("wake_word_debug_transcripts", enabled)
+                                                if (!enabled) {
+                                                    editor.remove("wake_word_last_transcript")
+                                                        .remove("wake_word_last_transcript_final")
+                                                        .remove("wake_word_last_transcript_at")
+                                                    wakeWordLastTranscript = ""
+                                                    wakeWordLastTranscriptFinal = false
+                                                }
+                                                editor.apply()
+                                            }
+                                        )
+                                    }
+                                    if (wakeWordDebugEnabled) {
+                                        Text(
+                                            "Vosk son duyduğu metin" +
+                                                (if (wakeWordLastTranscriptFinal) " (sonuç)" else " (ara sonuç)") +
+                                                ": " + wakeWordLastTranscript.ifBlank {
+                                                    "Henüz metin gelmedi. Telefonu normal sesle yakınından kullanarak “Hey Meyene” de."
+                                                },
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
                                     OutlinedButton(
                                         onClick = {
                                             try {
