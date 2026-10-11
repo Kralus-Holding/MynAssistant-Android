@@ -50,6 +50,65 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
+      - name: Verify built APK manifest
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK_ANALYZER="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          if [ ! -x "$APK_ANALYZER" ]; then
+            echo "::error::apkanalyzer is missing; cannot verify the built APK manifest."
+            exit 1
+          fi
+          "$APK_ANALYZER" manifest print "$APK" > "$RUNNER_TEMP/AndroidManifest.xml"
+          python3 - "$RUNNER_TEMP/AndroidManifest.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          path = sys.argv[1]
+          android_ns = "http://schemas.android.com/apk/res/android"
+          attr = lambda name: "{" + android_ns + "}" + name
+          root = ET.parse(path).getroot()
+
+          permissions = {
+              item.get(attr("name"), "")
+              for item in root.findall("uses-permission")
+          }
+          required = {
+              "android.permission.RECORD_AUDIO",
+              "android.permission.FOREGROUND_SERVICE",
+              "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+              "android.permission.SYSTEM_ALERT_WINDOW",
+              "android.permission.POST_NOTIFICATIONS",
+          }
+          missing = sorted(required - permissions)
+          if missing:
+              raise SystemExit("Missing APK permissions: " + ", ".join(missing))
+
+          application = root.find("application")
+          if application is None:
+              raise SystemExit("APK manifest has no application element.")
+          service = next((
+              item for item in application.findall("service")
+              if item.get(attr("name")) in {
+                  ".MynWakeWordService",
+                  "com.mynkralus.mynassistant.MynWakeWordService",
+              }
+          ), None)
+          if service is None:
+              raise SystemExit("MynWakeWordService is missing from the built APK manifest.")
+          if service.get(attr("foregroundServiceType")) != "microphone":
+              raise SystemExit("MynWakeWordService must declare foregroundServiceType=\"microphone\".")
+          if service.get(attr("exported")) != "false":
+              raise SystemExit("MynWakeWordService must not be exported.")
+
+          uses_sdk = root.find("uses-sdk")
+          target_sdk = uses_sdk.get(attr("targetSdkVersion")) if uses_sdk is not None else None
+          if target_sdk != "36":
+              raise SystemExit("Expected targetSdkVersion 36, got " + str(target_sdk))
+
+          print("APK manifest verified: required permissions, microphone FGS type, non-exported service, targetSdk=36.")
+          PY
+
       - name: Verify APK signing SHA-1
         shell: bash
         run: |
