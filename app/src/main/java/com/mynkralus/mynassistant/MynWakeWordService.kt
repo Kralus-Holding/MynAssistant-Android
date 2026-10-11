@@ -262,7 +262,7 @@ class MynWakeWordService : Service() {
 
     private fun processTranscript(transcript: String, isFinal: Boolean) {
         if (closed || commandReady) return
-        val match = MynWakeWordMatcher.findMatch(transcript)
+        val match = MynWakeWordMatcher.findMatch(transcript, allowObservedAsrFallback = isFinal)
         val isWakeOnly = match != null && match.trailingText.isBlank()
         if (!awaitingCommand) {
             if (match == null) return
