@@ -1,6 +1,16 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: 0.4.6 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: 0.4.7 diagnostics candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+
+## 0.4.7 follow-up — measure wake phrase recognition before retuning
+
+- Added an opt-in setting, **Uyandırma tanılama metni**, to show the latest Vosk text while the service is still waiting for the wake phrase. It is off by default and stores no audio. When enabled, only the first two recognized words are retained locally so following command text is not persisted; turning the setting off clears the saved phrase text.
+- Added policy tests for opt-in behavior, not retaining text after wake/command state, blank text, and the two-word limit.
+- The green `LISTENING` state means the service passed a short `AudioRecord` sample-read preflight and scheduled Vosk. It does **not** prove Vosk is transcribing speech accurately or recognizing the custom phrase. Use the opt-in text to separate microphone/ASR callback problems from wake-phrase matching problems.
+- The current engine is still full Turkish ASR plus transcript matching. This is not a dedicated wake-word classifier and will consume more power than a hardware DSP trigger or a compact KWS engine in typical use. Do not claim zero battery cost.
+- Google Voice Match is voice identity/personalization, not a general facility that trains arbitrary wake phrases. Android's selected `VoiceInteractionService` can be kept alive by the system for hotword interaction, but low-power DSP access, enrollment and custom-keyword support depend on system/OEM support; adding a default-assistant role alone does not guarantee a custom `Hey Meyene` trigger on every phone.
+- The current sherpa-onnx pre-trained KWS catalogue lists English and Chinese models, not a verified Turkish model. An English open-vocabulary model can be benchmarked for the phonetic phrase “Hey Meyene”, but must not replace the Turkish pipeline before false-accept/false-reject and battery tests on the target device. A genuine user-specific acoustic enrollment flow requires a detector/model designed to use positive and negative audio examples; merely saving repeated text transcripts is not voice training.
+- Candidate version: **0.4.7 / versionCode 24**. Physical-device testing and a wake-word model decision remain release gates.
 
 ## 0.4.6 follow-up — support the official legacy Turkish Vosk model
 
