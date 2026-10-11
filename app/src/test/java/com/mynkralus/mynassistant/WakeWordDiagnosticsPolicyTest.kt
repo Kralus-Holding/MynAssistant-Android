@@ -59,5 +59,14 @@ class WakeWordDiagnosticsPolicyTest {
             transcript = longTranscript
         )
         assertEquals(WakeWordDiagnosticsPolicy.MAX_TRANSCRIPT_LENGTH, result?.length)
+
+        val phrasePrefix = WakeWordDiagnosticsPolicy.transcriptToDisplay(
+            enabled = true,
+            awaitingCommand = false,
+            commandReady = false,
+            transcript = "Hey maybe open WhatsApp and send a message"
+        )
+        assertEquals("Hey maybe open", phrasePrefix)
+        assertEquals(WakeWordDiagnosticsPolicy.MAX_TRANSCRIPT_WORDS, phrasePrefix?.split(" ")?.size)
     }
 }
