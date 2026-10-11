@@ -268,6 +268,11 @@ internal class VoskModelInstaller(
 
     private fun isValidModelDirectory(directory: File): Boolean {
         if (!directory.isDirectory) return false
+
+        // Current Vosk models use am/, conf/ and graph/. The official Turkish
+        // small model (vosk-model-small-tr-0.3) is an older, flat-layout model.
+        // Vosk supports both layouts, so validate the archive's real structure
+        // instead of rejecting a good Turkish model and downloading it forever.
         val acousticModel = File(directory, "am/final.mdl")
         val hasConfig = File(directory, "conf/model.conf").isFile ||
             File(directory, "conf/mfcc.conf").isFile
@@ -276,8 +281,22 @@ internal class VoskModelInstaller(
             graphDirectory.walkTopDown().any {
                 it.isFile && it.extension.equals("fst", ignoreCase = true) && it.length() > 0L
             }
-        return acousticModel.isFile && acousticModel.length() > 0L &&
+        val standardLayout = acousticModel.isFile && acousticModel.length() > 0L &&
             hasConfig && hasNonEmptyGraph
+
+        // Legacy flat layout: final.mdl, mfcc.conf, word_boundary.int,
+        // Gr.fst and HCLr.fst are stored directly in the model root.
+        val legacyAcousticModel = File(directory, "final.mdl")
+        val legacyConfig = File(directory, "mfcc.conf")
+        val legacyWordBoundary = File(directory, "word_boundary.int")
+        val legacyGr = File(directory, "Gr.fst")
+        val legacyHcl = File(directory, "HCLr.fst")
+        val legacyFlatLayout = legacyAcousticModel.isFile && legacyAcousticModel.length() > 0L &&
+            legacyConfig.isFile && legacyWordBoundary.isFile && legacyWordBoundary.length() > 0L &&
+            legacyGr.isFile && legacyGr.length() > 0L &&
+            legacyHcl.isFile && legacyHcl.length() > 0L
+
+        return standardLayout || legacyFlatLayout
     }
 
     private fun extractZipSafely(archive: File, destination: File, isCancelled: () -> Boolean) {
