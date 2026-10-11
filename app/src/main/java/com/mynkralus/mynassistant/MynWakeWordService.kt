@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import org.json.JSONObject
 import org.vosk.LibVosk
 import org.vosk.LogLevel
@@ -181,6 +182,14 @@ class MynWakeWordService : Service() {
             }
             fail(code, message, "stage=${error.stage}; ${error.javaClass.name}: ${error.message}")
             stopSelf()
+        } catch (error: LinkageError) {
+            if (closed || userRequestedStop) return
+            fail(
+                "MYN-WAKE-8025",
+                "Cihazın yerel ses kitaplığı yüklenemedi. Uygulama/cihaz mimarisi uyumluluğu incelenmeli.",
+                "phase=${phase.persistedValue}; ${error.javaClass.name}: ${error.message}"
+            )
+            stopSelf()
         } catch (error: Exception) {
             if (closed || userRequestedStop) return
             val code = if (phase == MynWakeWordPhase.STARTING_MICROPHONE) {
@@ -332,7 +341,11 @@ class MynWakeWordService : Service() {
             filesDir = filesDir,
             cacheDir = cacheDir,
             modelDirectoryName = MODEL_DIRECTORY,
-            modelArchiveUrl = MODEL_DOWNLOAD_URL
+            modelArchiveUrl = MODEL_DOWNLOAD_URL,
+            validateNativeModel = { candidate ->
+                val probeModel = Model(candidate.absolutePath)
+                probeModel.close()
+            }
         )
         var lastPublishedPercent = -5
         var lastPublishedMegabytes = -1L
@@ -421,6 +434,9 @@ class MynWakeWordService : Service() {
         }
         if (phase == MynWakeWordPhase.LISTENING) {
             editor.putLong(KEY_LAST_LISTENING_AT, System.currentTimeMillis())
+                .remove(KEY_ERROR)
+                .remove(KEY_ERROR_DETAILS)
+                .remove(KEY_ERROR_AT)
         }
         editor.apply()
         runCatching {
@@ -822,6 +838,7 @@ class MynWakeWordService : Service() {
 
     private fun fail(code: String, userMessage: String, technicalDetails: String = userMessage) {
         serviceFailed = true
+        Log.e(LOG_TAG, "$code: $userMessage; $technicalDetails")
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val previousPhase = prefs.getString(KEY_PHASE, MynWakeWordPhase.STARTING.persistedValue)
             ?: MynWakeWordPhase.STARTING.persistedValue
@@ -896,6 +913,7 @@ class MynWakeWordService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private const val LOG_TAG = "MynWakeWordService"
         private const val PREFS_NAME = "mynassistant_prefs"
         private const val KEY_ENABLED = "wake_word_enabled"
         private const val KEY_STATUS = "wake_word_status"
