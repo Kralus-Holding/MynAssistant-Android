@@ -1372,6 +1372,14 @@ private fun AssistantScreen(
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("wake_word_status", "Kapalı").orEmpty())
     }
+    var wakeWordLastDetectedAt by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong("wake_word_last_detected_at", 0L))
+    }
+    var wakeWordDetectionCount by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("wake_word_detection_count", 0))
+    }
     var wakeWordActivationPending by remember { mutableStateOf(false) }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val navigateToPage: (Page) -> Unit = { targetPage ->
@@ -1702,9 +1710,13 @@ private fun AssistantScreen(
     DisposableEffect(commandContext) {
         val wakePrefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val wakeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
-            if (key == "wake_word_enabled" || key == "wake_word_status") {
+            if (key == "wake_word_enabled" || key == "wake_word_status" ||
+                key == "wake_word_last_detected_at" || key == "wake_word_detection_count"
+            ) {
                 wakeWordEnabled = shared?.getBoolean("wake_word_enabled", false) ?: false
                 wakeWordStatus = shared?.getString("wake_word_status", "Kapalı").orEmpty()
+                wakeWordLastDetectedAt = shared?.getLong("wake_word_last_detected_at", 0L) ?: 0L
+                wakeWordDetectionCount = shared?.getInt("wake_word_detection_count", 0) ?: 0
             }
         }
         wakePrefs.registerOnSharedPreferenceChangeListener(wakeListener)
@@ -2094,7 +2106,7 @@ private fun AssistantScreen(
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
                 // This toolbar stays fixed while the page content below it scrolls.
                 Row(
                     Modifier.fillMaxWidth().padding(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 8.dp)
@@ -2105,24 +2117,6 @@ private fun AssistantScreen(
                 ) {
                     IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, contentDescription = "Menüyü aç", modifier = Modifier.size(30.dp)) }
                     Spacer(Modifier.weight(1f))
-                    Box(
-                        Modifier.size(42.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (wakeWordEnabled) Color(0xFF1C7C59).copy(alpha = .22f)
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .clickable { requestWakeWordActivation() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Mic,
-                            contentDescription = if (wakeWordEnabled) "Hey Meyene dinlemesini durdur" else "Hey Meyene mikrofonunu başlat",
-                            tint = if (wakeWordEnabled) Color(0xFF64DBA0) else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(25.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(6.dp))
                     Box(
                         Modifier.size(42.dp).clickable { navigateToPage(Page.REMOTE) },
                         contentAlignment = Alignment.Center
@@ -2475,16 +2469,89 @@ private fun AssistantScreen(
                                         color = if (wakeWordEnabled) Color(0xFF65D68B)
                                             else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )
-                                    Button(onClick = requestWakeWordActivation, modifier = Modifier.fillMaxWidth()) {
-                                        Icon(Icons.Default.Mic, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(if (wakeWordEnabled) "Dinlemeyi durdur" else "Hey Meyene'yi etkinleştir")
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text("Arka planda dinle", fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                "Açıkken kalıcı bildirim ve mikrofon gizlilik göstergesi görünür. İstediğinde buradan kapatabilirsin.",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = wakeWordEnabled,
+                                            onCheckedChange = { requestWakeWordActivation() }
+                                        )
                                     }
                                     Text(
                                         "İlk kullanımda yaklaşık 35 MB Türkçe ses modeli bir kez indirilir. Kurulduktan sonra uyandırma ve komut tanıma cihaz üzerinde çevrimdışı çalışır. Dinleme etkin olduğu sürece mikrofon gizlilik göstergesi ve kalıcı bildirim açık kalır.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
                                     )
+                                    Text(
+                                        "Son algılama: " +
+                                            (wakeWordLastDetectedAt.takeIf { it > 0L }?.let {
+                                                android.text.format.DateFormat.format("dd.MM.yyyy HH:mm", it).toString()
+                                            } ?: "Henüz algılanmadı") +
+                                            " · toplam $wakeWordDetectionCount",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .74f)
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                commandContext.startActivity(
+                                                    Intent(
+                                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                        Uri.parse("package:" + commandContext.packageName)
+                                                    )
+                                                )
+                                            } catch (error: Exception) {
+                                                feedback = recordIssue(
+                                                    "MYN-PERM-4002", "Ekran üstü izin",
+                                                    "Ekran üstü izin ayarları açılamadı.", "",
+                                                    error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Settings, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            if (Settings.canDrawOverlays(commandContext))
+                                                "Ekran üstü iznini yönet"
+                                            else
+                                                "Ekran üstü iznini ver"
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                commandContext.startActivity(
+                                                    Intent(
+                                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                        Uri.parse("package:" + commandContext.packageName)
+                                                    )
+                                                )
+                                            } catch (error: Exception) {
+                                                feedback = recordIssue(
+                                                    "MYN-PERM-4003", "Pil ve arka plan",
+                                                    "Uygulama pil ayarları açılamadı.", "",
+                                                    error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Settings, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Pil ve arka plan ayarları")
+                                    }
                                 }
                             }
                             OutlinedButton(
@@ -2712,7 +2779,6 @@ private fun AssistantScreen(
                     val keyboardController = LocalSoftwareKeyboardController.current
                     Surface(
                         modifier = Modifier.fillMaxWidth()
-                            .then(if (keyboardVisible) Modifier else Modifier.navigationBarsPadding())
                             .padding(horizontal = 12.dp, vertical = if (keyboardVisible) 0.dp else 8.dp),
                         shape = RoundedCornerShape(28.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -3098,7 +3164,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.4.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.4.2", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
