@@ -84,6 +84,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Send
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
@@ -1358,6 +1359,7 @@ private fun AssistantScreen(
             onWakeCommandConsumed()
         }
     }
+
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
@@ -1384,7 +1386,7 @@ private fun AssistantScreen(
         }
         drawer = false
     }
-    BackHandler(enabled = drawer || (page != Page.HOME && !keyboardVisible)) {
+    BackHandler(enabled = drawer || (!keyboardVisible && (page != Page.HOME || pageHistory.isNotEmpty()))) {
         if (drawer) {
             drawer = false
         } else if (pageHistory.isNotEmpty()) {
@@ -2723,9 +2725,7 @@ private fun AssistantScreen(
                                     ) {
                                         Icon(
                                             when (commandTarget) {
-                                                "PHONE" -> Icons.Default.Devices
-                                                "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.Mic
+                                                else -> Icons.Default.GraphicEq
                                             },
                                             contentDescription = when (commandTarget) {
                                                 "PHONE" -> "Hedef: bu Android telefonu"
