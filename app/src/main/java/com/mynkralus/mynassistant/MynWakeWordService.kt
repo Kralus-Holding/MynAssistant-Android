@@ -168,7 +168,6 @@ class MynWakeWordService : Service() {
     }
 
     private fun processTranscript(transcript: String, isFinal: Boolean) {
-    private fun processTranscript(transcript: String, isFinal: Boolean) {
         if (closed || commandReady) return
         val match = MynWakeWordMatcher.findMatch(transcript)
         val isWakeOnly = match != null && match.trailingText.isBlank()
