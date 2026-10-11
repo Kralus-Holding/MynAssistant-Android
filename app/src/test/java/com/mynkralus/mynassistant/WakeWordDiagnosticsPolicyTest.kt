@@ -66,7 +66,7 @@ class WakeWordDiagnosticsPolicyTest {
             commandReady = false,
             transcript = "Hey maybe open WhatsApp and send a message"
         )
-        assertEquals("Hey maybe open", phrasePrefix)
+        assertEquals("Hey maybe", phrasePrefix)
         assertEquals(WakeWordDiagnosticsPolicy.MAX_TRANSCRIPT_WORDS, phrasePrefix?.split(" ")?.size)
     }
 }
