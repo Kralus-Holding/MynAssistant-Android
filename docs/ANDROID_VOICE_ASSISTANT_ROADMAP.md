@@ -1,8 +1,8 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: implementation notes for the 0.4.2 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: implementation notes for the 0.4.3 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
 
-## 0.4.2 candidate: reliability fixes
+## 0.4.3 candidate: reliability fixes
 
 Implemented on `feature/android-command-status-tracking`:
 - The command composer uses a single root-level insets path for status bars, navigation bars, and the IME. The composer no longer adds a second conditional navigation-bar inset.
@@ -10,7 +10,7 @@ Implemented on `feature/android-command-status-tracking`:
 - Settings now links to overlay permission and app battery/background settings.
 - Successful wake detections store only the canonical wake-phrase label, a timestamp, and a count in local app preferences. No raw microphone audio is written to this telemetry.
 - Transcript matching is isolated in `MynWakeWordMatcher` and has unit tests for exact phrases, common transcript variants, punctuation, Turkish characters, aliases, and non-wake speech.
-- App version is bumped to 0.4.2 / versionCode 19.
+- App version is bumped to 0.4.3 / versionCode 20.
 
 Not yet proven: keyboard placement across different OEM keyboards, wake-word hit-rate in noisy rooms, long-duration background survival, battery impact, and post-reboot behavior. CI and physical-device results must be reported separately.
 
@@ -53,7 +53,7 @@ The current matcher is a transcript-matching layer, **not a custom acoustic wake
 
 ## Recommended phased architecture
 
-### Phase A — stabilize existing behavior (0.4.2)
+### Phase A — stabilize existing behavior (0.4.3)
 Keep the current single service and local Vosk model. Fix user-visible layout and settings, expose last successful wake timestamp/count, add matcher unit tests, and collect reproducible device results before tuning recognition logic further.
 
 ### Phase B — separate responsibilities (0.5)
