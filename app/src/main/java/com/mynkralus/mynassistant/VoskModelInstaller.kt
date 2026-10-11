@@ -11,6 +11,10 @@ import java.net.URL
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
+internal const val MAX_VOSK_MODEL_ARCHIVE_BYTES = 128L * 1024L * 1024L
+internal const val MIN_VOSK_MODEL_INSTALL_FREE_SPACE_BYTES = 128L * 1024L * 1024L
+private const val MAX_VOSK_MODEL_ARCHIVE_ENTRIES = 50_000
+
 internal enum class VoskModelInstallStage {
     CACHED,
     DOWNLOADING,
@@ -65,6 +69,9 @@ internal object HttpModelArchiveDownloader : ModelArchiveDownloader {
             }
 
             val totalBytes = connection.contentLengthLong
+            if (totalBytes > MAX_VOSK_MODEL_ARCHIVE_BYTES) {
+                throw IOException("İndirilecek model arşivi izin verilen boyuttan büyük.")
+            }
             val parent = target.parentFile
             if (totalBytes > 0L && parent != null &&
                 parent.usableSpace > 0L &&
@@ -89,8 +96,11 @@ internal object HttpModelArchiveDownloader : ModelArchiveDownloader {
                             }
                             val read = input.read(buffer)
                             if (read < 0) break
-                            output.write(buffer, 0, read)
                             downloaded += read
+                            if (downloaded > MAX_VOSK_MODEL_ARCHIVE_BYTES) {
+                                throw IOException("Model arşivi indirme boyutu güvenlik sınırını aşıyor.")
+                            }
+                            output.write(buffer, 0, read)
                             onProgress(downloaded, totalBytes)
                         }
                         output.flush()
@@ -138,6 +148,13 @@ internal class VoskModelInstaller(
         }
         if (!cacheDir.exists() && !cacheDir.mkdirs()) {
             throw VoskModelInstallException(VoskModelInstallStage.DOWNLOADING, "Geçici indirme klasörü oluşturulamadı.")
+        }
+        val usableSpace = minOf(filesDir.usableSpace, cacheDir.usableSpace)
+        if (usableSpace > 0L && usableSpace < MIN_VOSK_MODEL_INSTALL_FREE_SPACE_BYTES) {
+            throw VoskModelInstallException(
+                VoskModelInstallStage.DOWNLOADING,
+                "Türkçe modeli kurmak için yeterli boş alan yok. En az 128 MB boş alan açıp tekrar dene."
+            )
         }
 
         val stagingRoot = File(filesDir, ".$modelDirectoryName.staging")
@@ -262,11 +279,16 @@ internal class VoskModelInstaller(
     private fun extractZipSafely(archive: File, destination: File, isCancelled: () -> Boolean) {
         val rootPath = destination.canonicalPath + File.separator
         var expandedBytes = 0L
+        var entryCount = 0
         val maxExpandedBytes = 512L * 1024L * 1024L
         ZipInputStream(BufferedInputStream(archive.inputStream())).use { zip ->
             while (true) {
                 checkCancellation(isCancelled)
                 val entry: ZipEntry = zip.nextEntry ?: break
+                entryCount += 1
+                if (entryCount > MAX_VOSK_MODEL_ARCHIVE_ENTRIES) {
+                    throw IOException("Model arşivinde izin verilen dosya sayısından fazlası var.")
+                }
                 val normalizedName = entry.name.replace('\\', '/')
                 val output = File(destination, normalizedName).canonicalFile
                 if (!output.path.startsWith(rootPath)) {
