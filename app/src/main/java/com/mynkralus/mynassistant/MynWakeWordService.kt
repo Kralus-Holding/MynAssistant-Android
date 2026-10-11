@@ -119,7 +119,7 @@ class MynWakeWordService : Service() {
         try {
             val modelDirectory = ensureOfflineModel()
             if (closed || userRequestedStop) return
-            LibVosk.setLogLevel(LogLevel.WARN)
+            LibVosk.setLogLevel(LogLevel.WARNINGS)
             val loadedModel = Model(modelDirectory.absolutePath)
             val loadedRecognizer = Recognizer(loadedModel, SAMPLE_RATE.toFloat())
             val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
