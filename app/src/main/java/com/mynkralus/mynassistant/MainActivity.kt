@@ -958,6 +958,7 @@ private fun startMynWakeWordService(context: Context): Boolean {
         .putBoolean("wake_word_enabled", true)
         .putString("wake_word_phase", MynWakeWordPhase.STARTING.persistedValue)
         .putString("wake_word_status", "Servis başlatma isteği gönderildi…")
+        .putLong("wake_word_status_updated_at", System.currentTimeMillis())
         .remove("wake_word_error_code")
         .remove("wake_word_error_details")
         .remove("wake_word_error_at")
@@ -990,8 +991,56 @@ private fun stopMynWakeWordService(context: Context) {
         .putBoolean("wake_word_enabled", false)
         .putString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue)
         .putString("wake_word_status", "Kapalı")
+        .putLong("wake_word_status_updated_at", System.currentTimeMillis())
+        .remove("wake_word_heartbeat_at")
         .apply()
     context.stopService(Intent(context, MynWakeWordService::class.java))
+}
+
+/**
+ * A service process can be killed without a reliable onDestroy callback. Reconcile the
+ * persisted status when the UI returns so old "Listening" state is not shown as live.
+ */
+private fun reconcileStaleWakeWordState(context: Context) {
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (!prefs.getBoolean("wake_word_enabled", false)) return
+
+    val phase = MynWakeWordPhase.fromPersisted(prefs.getString("wake_word_phase", null))
+    val now = System.currentTimeMillis()
+    val heartbeatAt = prefs.getLong("wake_word_heartbeat_at", 0L)
+    val statusUpdatedAt = prefs.getLong("wake_word_status_updated_at", 0L)
+    if (!MynWakeWordLivenessPolicy.isStale(
+            enabled = true,
+            phase = phase,
+            lastHeartbeatAt = heartbeatAt,
+            lastStatusUpdatedAt = statusUpdatedAt,
+            now = now
+        )
+    ) return
+
+    val listeningWasExpected = phase == MynWakeWordPhase.LISTENING
+    val code = if (listeningWasExpected) "MYN-WAKE-8030" else "MYN-WAKE-8031"
+    val userMessage = if (listeningWasExpected) {
+        "Dinleme servisi canlılık sinyalini kaybetti. Sesli asistan durmuş olabilir; dinlemeyi kapatıp tekrar etkinleştir."
+    } else {
+        "Ses sistemi hazırlama aşamasında uzun süre yanıt vermedi. Hata ayrıntılarını kontrol edip tekrar dene."
+    }
+    val details = "Persisted phase=" + phase.persistedValue + "; heartbeatAt=" + heartbeatAt +
+        "; statusUpdatedAt=" + statusUpdatedAt + "; detectedAt=" + now
+
+    prefs.edit()
+        .putBoolean("wake_word_enabled", false)
+        .putString("wake_word_last_phase", phase.persistedValue)
+        .putString("wake_word_phase", MynWakeWordPhase.ERROR.persistedValue)
+        .putString("wake_word_status", "Hata " + code + " · " + userMessage)
+        .putString("wake_word_error_code", code)
+        .putString("wake_word_error_details", details)
+        .putLong("wake_word_error_at", now)
+        .putLong("wake_word_status_updated_at", now)
+        .apply()
+
+    android.util.Log.w("MynWakeWordService", code + ": " + details)
+    MynAssistantDiagnostics.record(context, code, "Hey Meyene", "", userMessage + "; " + details)
 }
 
 class MainActivity : ComponentActivity() {
@@ -1011,6 +1060,7 @@ class MainActivity : ComponentActivity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        reconcileStaleWakeWordState(this)
         // Remove old local-only demo account data. Firebase now owns auth sessions.
         prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider")
             .remove("name").remove("email").remove("phone").apply()
@@ -1315,6 +1365,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        reconcileStaleWakeWordState(this)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (!prefs.getBoolean("pending_whatsapp_waiting_accessibility", false)) return
         val requestedAt = prefs.getLong("pending_whatsapp_action_at", 0L)
@@ -1793,6 +1844,13 @@ private fun AssistantScreen(
         }
         wakePrefs.registerOnSharedPreferenceChangeListener(wakeListener)
         onDispose { wakePrefs.unregisterOnSharedPreferenceChangeListener(wakeListener) }
+    }
+    LaunchedEffect(commandContext) {
+        while (true) {
+            kotlinx.coroutines.delay(15_000L)
+            reconcileStaleWakeWordState(commandContext)
+            refreshWakeWordUi()
+        }
     }
     DisposableEffect(commandContext) {
         val prefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -3274,7 +3332,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.4.3", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.4.4", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
