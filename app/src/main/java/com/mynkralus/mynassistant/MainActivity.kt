@@ -1006,6 +1006,8 @@ private fun persistWakeWordPermissionState(
 ) {
     val now = System.currentTimeMillis()
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val previousPhase = prefs.getString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue)
+        ?: MynWakeWordPhase.OFF.persistedValue
     val editor = prefs.edit()
         .putBoolean("wake_word_enabled", false)
         .putString("wake_word_phase", phase.persistedValue)
@@ -1013,6 +1015,11 @@ private fun persistWakeWordPermissionState(
         .putLong("wake_word_status_updated_at", now)
 
     if (phase == MynWakeWordPhase.ERROR && !errorCode.isNullOrBlank()) {
+        editor.putString(
+            "wake_word_last_phase",
+            previousPhase.takeUnless { it == MynWakeWordPhase.ERROR.persistedValue }
+                ?: prefs.getString("wake_word_last_phase", "UNKNOWN")
+        )
         editor.putString("wake_word_error_code", errorCode)
             .putString("wake_word_error_details", details.take(1200))
             .putLong("wake_word_error_at", now)
