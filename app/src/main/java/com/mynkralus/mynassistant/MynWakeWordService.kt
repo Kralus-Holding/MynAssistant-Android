@@ -46,6 +46,8 @@ class MynWakeWordService : Service() {
     private var awaitingCommand = false
     private var commandReady = false
     private var lastCommand = ""
+    private var wakeDetectedInCurrentSession = false
+    private var consecutiveErrors = 0
     private var closed = false
     private lateinit var windowManager: WindowManager
 
@@ -118,7 +120,37 @@ class MynWakeWordService : Service() {
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
         override fun onEndOfSpeech() = Unit
-        override fun onPartialResults(partialResults: android.os.Bundle?) = Unit
+        override fun onPartialResults(partialResults: android.os.Bundle?) {
+            if (closed || commandReady) return
+            val heard = partialResults
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+                .orEmpty()
+                .trim()
+            if (heard.isBlank()) return
+
+            val matchedWake = findWakePhraseAndTrailingText(heard)
+            if (!awaitingCommand && matchedWake != null) {
+                // Open the mini-panel on the partial hypothesis, without waiting for end-of-speech.
+                wakeDetectedInCurrentSession = true
+                awaitingCommand = true
+                commandReady = false
+                lastCommand = ""
+                showOverlay(
+                    if (matchedWake.second.isBlank()) "Seni dinliyorum. Komutunu söyle."
+                    else "Komutunu dinliyorum.",
+                    matchedWake.second,
+                    ready = false
+                )
+            } else if (awaitingCommand) {
+                val partialCommand = if (wakeDetectedInCurrentSession) {
+                    matchedWake?.second.orEmpty()
+                } else heard
+                if (partialCommand.isNotBlank() && normalize(partialCommand) !in wakePhrases()) {
+                    showOverlay("Komutunu dinliyorum.", partialCommand, ready = false)
+                }
+            }
+        }
         override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
 
         override fun onError(error: Int) {
@@ -129,8 +161,20 @@ class MynWakeWordService : Service() {
                 stopSelf()
                 return
             }
-            // SpeechRecognizer ends an utterance after a pause; restart to keep the wake phrase available.
-            startListeningSoon(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200 else 550)
+            consecutiveErrors += 1
+            if (consecutiveErrors >= 12) {
+                fail(
+                    "MYN-WAKE-8010",
+                    "Ses tanıma art arda başarısız oldu. Telefonun çevrimdışı Türkçe konuşma hizmetini kontrol edip dinlemeyi yeniden başlat."
+                )
+                stopSelf()
+                return
+            }
+            // Back off after recognizer errors instead of rapidly cycling the microphone.
+            val backoff = (350L * (1 shl consecutiveErrors.coerceAtMost(3))).coerceAtMost(3000L)
+            startListeningSoon(
+                maxOf(backoff, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1600L else 0L)
+            )
         }
 
         override fun onResults(results: android.os.Bundle?) {
@@ -142,7 +186,25 @@ class MynWakeWordService : Service() {
                 .orEmpty()
                 .trim()
             if (heard.isBlank()) {
-                startListeningSoon(350)
+                startListeningSoon(500)
+                return
+            }
+            consecutiveErrors = 0
+            if (wakeDetectedInCurrentSession) {
+                wakeDetectedInCurrentSession = false
+                val trailing = findWakePhraseAndTrailingText(heard)?.second.orEmpty()
+                if (trailing.isNotBlank()) {
+                    lastCommand = trailing
+                    commandReady = true
+                    awaitingCommand = false
+                    showOverlay("Komutunu algıladım.", trailing, ready = true)
+                } else {
+                    awaitingCommand = true
+                    commandReady = false
+                    lastCommand = ""
+                    showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
+                    startListeningSoon(300)
+                }
                 return
             }
             consumeSpeech(heard)
@@ -151,7 +213,7 @@ class MynWakeWordService : Service() {
 
     private fun consumeSpeech(heard: String) {
         val normalized = normalize(heard)
-        val wakePhrases = listOf("hey meyene", "hey mayene", "hey meyene ai", "hey myassistant")
+        val wakePhrases = wakePhrases()
         if (!awaitingCommand) {
             val wake = wakePhrases.firstOrNull { normalized.contains(it) } ?: run {
                 startListeningSoon(250)
@@ -181,6 +243,19 @@ class MynWakeWordService : Service() {
         }
     }
 
+    private fun wakePhrases(): List<String> =
+        listOf("hey meyene", "hey mayene", "hey meyene ai", "hey myassistant")
+
+    private fun findWakePhraseAndTrailingText(heard: String): Pair<String, String>? {
+        val normalized = normalize(heard)
+        val wake = wakePhrases().firstOrNull { normalized.contains(it) } ?: return null
+        val start = normalized.indexOf(wake)
+        if (start < 0) return null
+        val end = (start + wake.length).coerceAtMost(heard.length)
+        val trailing = heard.drop(end).trim().trim(',', '.', '!', ':', ';', '-')
+        return wake to trailing
+    }
+
     private fun startListeningSoon(delayMs: Long) {
         if (closed || commandReady || isListening) return
         mainHandler.removeCallbacks(startListeningRunnable)
@@ -196,10 +271,11 @@ class MynWakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "tr-TR")
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             }
+            wakeDetectedInCurrentSession = false
             isListening = true
             activeRecognizer.startListening(intent)
         } catch (error: Exception) {
