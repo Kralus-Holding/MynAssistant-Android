@@ -486,6 +486,7 @@ class MynWakeWordService : Service() {
                 val hasText = !text.isNullOrBlank()
                 primaryButton?.isEnabled = hasText
                 primaryButton?.alpha = if (hasText) 1f else .58f
+                primaryButton?.text = if (hasText) "MynAssistant'ta aç" else "Komut bekleniyor"
                 if (hasText) lastCommand = text.toString().trim()
             }
             override fun afterTextChanged(editable: android.text.Editable?) = Unit
