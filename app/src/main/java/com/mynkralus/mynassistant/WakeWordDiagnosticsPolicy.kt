@@ -6,6 +6,7 @@ package com.mynkralus.mynassistant
  */
 internal object WakeWordDiagnosticsPolicy {
     const val MAX_TRANSCRIPT_LENGTH = 120
+    const val MAX_TRANSCRIPT_WORDS = 3
 
     fun transcriptToDisplay(
         enabled: Boolean,
@@ -14,6 +15,13 @@ internal object WakeWordDiagnosticsPolicy {
         transcript: String
     ): String? {
         if (!enabled || awaitingCommand || commandReady || transcript.isBlank()) return null
-        return transcript.take(MAX_TRANSCRIPT_LENGTH)
+        // The wake phrase is expected at the beginning of the utterance. Keep only its
+        // first few ASR words so the following command isn't retained in diagnostics.
+        return transcript.trim()
+            .split(Regex("\\s+"))
+            .take(MAX_TRANSCRIPT_WORDS)
+            .joinToString(" ")
+            .take(MAX_TRANSCRIPT_LENGTH)
+            .takeIf { it.isNotBlank() }
     }
 }
