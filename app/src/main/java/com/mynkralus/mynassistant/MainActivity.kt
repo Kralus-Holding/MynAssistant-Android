@@ -2094,7 +2094,7 @@ private fun AssistantScreen(
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
                 // This toolbar stays fixed while the page content below it scrolls.
                 Row(
                     Modifier.fillMaxWidth().padding(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 8.dp)
