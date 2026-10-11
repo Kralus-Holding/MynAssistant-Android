@@ -997,6 +997,39 @@ private fun stopMynWakeWordService(context: Context) {
     context.stopService(Intent(context, MynWakeWordService::class.java))
 }
 
+private fun persistWakeWordPermissionState(
+    context: Context,
+    phase: MynWakeWordPhase,
+    status: String,
+    errorCode: String? = null,
+    details: String = ""
+) {
+    val now = System.currentTimeMillis()
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val editor = prefs.edit()
+        .putBoolean("wake_word_enabled", false)
+        .putString("wake_word_phase", phase.persistedValue)
+        .putString("wake_word_status", status)
+        .putLong("wake_word_status_updated_at", now)
+
+    if (phase == MynWakeWordPhase.ERROR && !errorCode.isNullOrBlank()) {
+        editor.putString("wake_word_error_code", errorCode)
+            .putString("wake_word_error_details", details.take(1200))
+            .putLong("wake_word_error_at", now)
+    } else {
+        editor.remove("wake_word_error_code")
+            .remove("wake_word_error_details")
+            .remove("wake_word_error_at")
+    }
+    editor.apply()
+
+    if (phase == MynWakeWordPhase.ERROR && !errorCode.isNullOrBlank()) {
+        MynAssistantDiagnostics.record(
+            context, errorCode, "Hey Meyene", "", "USER_MESSAGE=$status; DETAILS=$details"
+        )
+    }
+}
+
 /**
  * A service process can be killed without a reliable onDestroy callback. Reconcile the
  * persisted status when the UI returns so old "Listening" state is not shown as live.
@@ -1594,7 +1627,12 @@ private fun AssistantScreen(
             }
         } else {
             wakeWordActivationPending = false
-            wakeWordStatus = "Ekran üstü izni gerekli."
+            persistWakeWordPermissionState(
+                commandContext,
+                MynWakeWordPhase.WAITING_FOR_PERMISSION,
+                "Ekran üstü izni verilmedi. Yüzen panel için bu izni açmalısın."
+            )
+            refreshWakeWordUi()
             feedback = "Hey Meyene paneli için ekran üstünde gösterme izni gerekli."
         }
     }
@@ -1634,44 +1672,67 @@ private fun AssistantScreen(
             }
         }
         if (wakeWordActivationPending) {
-            if (androidx.core.content.ContextCompat.checkSelfPermission(
-                    commandContext, android.Manifest.permission.RECORD_AUDIO
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                if (!Settings.canDrawOverlays(commandContext)) {
-                    overlayPermissionLauncher.launch(
-                        Intent(
-                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:" + commandContext.packageName)
-                        )
-                    )
+            val requiredWakePermissions = listOf(
+                android.Manifest.permission.RECORD_AUDIO,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            )
+            val missingWakePermissions = requiredWakePermissions.filter { permission ->
+                androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+            if (missingWakePermissions.isNotEmpty()) {
+                wakeWordActivationPending = false
+                val microphoneMissing = android.Manifest.permission.RECORD_AUDIO in missingWakePermissions
+                val code = if (microphoneMissing) "MYN-PERM-4004" else "MYN-PERM-4006"
+                val userMessage = if (microphoneMissing) {
+                    "Hey Meyene için mikrofon izni gerekiyor. Uygulama izinlerinden mikrofon erişimini aç."
                 } else {
-                    wakeWordActivationPending = false
-                    try {
-                        val started = startMynWakeWordService(commandContext)
-                        wakeWordEnabled = started
-                        refreshWakeWordUi()
-                        if (!started) {
-                            feedback = recordIssue(
-                                "MYN-WAKE-8001", "Hey Meyene",
-                                "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı.",
-                                "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
-                            )
-                        }
-                    } catch (error: Exception) {
-                        wakeWordEnabled = false
-                        refreshWakeWordUi()
-                        feedback = recordIssue(
-                            "MYN-WAKE-8009", "Hey Meyene",
-                            "Uyandırma dinlemesi başlatılamadı. Telefon ayarlarını kontrol et.",
-                            "", error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
-                        )
-                    }
+                    "Arka planda dinlemenin görünür servis bildirimi için bildirim iznini aç."
                 }
+                persistWakeWordPermissionState(
+                    commandContext,
+                    MynWakeWordPhase.ERROR,
+                    "Hata $code · $userMessage",
+                    code,
+                    "Denied required wake permissions: " + missingWakePermissions.joinToString(",")
+                )
+                refreshWakeWordUi()
+                feedback = userMessage
+            } else if (!Settings.canDrawOverlays(commandContext)) {
+                persistWakeWordPermissionState(
+                    commandContext,
+                    MynWakeWordPhase.WAITING_FOR_PERMISSION,
+                    "Ekran üstü izni bekleniyor…"
+                )
+                refreshWakeWordUi()
+                overlayPermissionLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + commandContext.packageName)
+                    )
+                )
             } else {
                 wakeWordActivationPending = false
-                wakeWordStatus = "Mikrofon izni gerekli."
-                feedback = "Hey Meyene için mikrofon izni vermelisin."
+                try {
+                    val started = startMynWakeWordService(commandContext)
+                    wakeWordEnabled = started
+                    refreshWakeWordUi()
+                    if (!started) {
+                        feedback = recordIssue(
+                            "MYN-WAKE-8001", "Hey Meyene",
+                            "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı.",
+                            "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
+                        )
+                    }
+                } catch (error: Exception) {
+                    wakeWordEnabled = false
+                    refreshWakeWordUi()
+                    feedback = recordIssue(
+                        "MYN-WAKE-8009", "Hey Meyene",
+                        "Uyandırma dinlemesi başlatılamadı. Telefon ayarlarını kontrol et.",
+                        "", error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                    )
+                }
             }
         }
     }
@@ -1690,9 +1751,21 @@ private fun AssistantScreen(
             }
             if (missing.isNotEmpty()) {
                 wakeWordActivationPending = true
+                persistWakeWordPermissionState(
+                    commandContext,
+                    MynWakeWordPhase.WAITING_FOR_PERMISSION,
+                    "Mikrofon ve bildirim izinleri bekleniyor…"
+                )
+                refreshWakeWordUi()
                 permissionLauncher.launch(missing.toTypedArray())
             } else if (!Settings.canDrawOverlays(commandContext)) {
                 wakeWordActivationPending = true
+                persistWakeWordPermissionState(
+                    commandContext,
+                    MynWakeWordPhase.WAITING_FOR_PERMISSION,
+                    "Ekran üstü izni bekleniyor…"
+                )
+                refreshWakeWordUi()
                 overlayPermissionLauncher.launch(
                     Intent(
                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
