@@ -152,6 +152,9 @@ internal class VoskModelInstaller(
         }
         val usableSpace = minOf(availableSpaceBytes(filesDir), availableSpaceBytes(cacheDir))
         if (usableSpace > 0L && usableSpace < MIN_VOSK_MODEL_INSTALL_FREE_SPACE_BYTES) {
+            // Remove leftovers from an interrupted previous attempt, without touching the last valid model.
+            File(cacheDir, ".$modelDirectoryName.zip.part").delete()
+            File(filesDir, ".$modelDirectoryName.staging").deleteRecursively()
             throw VoskModelInstallException(
                 VoskModelInstallStage.DOWNLOADING,
                 "Türkçe modeli kurmak için yeterli boş alan yok. En az 128 MB boş alan açıp tekrar dene."
