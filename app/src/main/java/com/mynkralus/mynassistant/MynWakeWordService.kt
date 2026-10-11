@@ -63,7 +63,7 @@ class MynWakeWordService : Service() {
     private var overlayMic: ImageView? = null
     private var overlayMicAnimator: ValueAnimator? = null
     private var overlayDragHandle: View? = null
-    private var userRequestedStop = false
+    @Volatile private var userRequestedStop = false
     @Volatile private var serviceFailed = false
     private var primaryButton: TextView? = null
     private var secondaryButton: TextView? = null
@@ -71,7 +71,7 @@ class MynWakeWordService : Service() {
     private var commandReady = false
     private var lastCommand = ""
     private var lastRecoverableIssueAt = 0L
-    private var closed = false
+    @Volatile private var closed = false
     private lateinit var windowManager: WindowManager
 
     override fun onCreate() {
