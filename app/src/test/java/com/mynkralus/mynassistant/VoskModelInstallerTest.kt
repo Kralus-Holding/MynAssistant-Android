@@ -60,6 +60,23 @@ class VoskModelInstallerTest {
     }
 
     @Test
+    fun validBackupIsRestoredWithoutRedownloading() {
+        val backup = File(filesDir, ".$MODEL_NAME.backup")
+        File(backup, "am").mkdirs()
+        File(backup, "am/final.mdl").writeText("previous-valid-model")
+        File(backup, "conf").mkdirs()
+        File(backup, "conf/model.conf").writeText("model-config")
+        File(backup, "graph").mkdirs()
+        File(backup, "graph/HCLG.fst").writeText("graph")
+
+        val restored = installer.ensureInstalled()
+
+        assertTrue(File(restored, "am/final.mdl").readText().contains("previous-valid-model"))
+        assertFalse(backup.exists())
+        assertEquals("valid backup is reused", 0, downloadCount)
+    }
+
+    @Test
     fun malformedArchiveDoesNotCreateFinalModelAndLeavesRetryPossible() {
         val badArchive = File(root, "bad.zip").apply { writeText("this is not a ZIP archive") }
         val badInstaller = VoskModelInstaller(
