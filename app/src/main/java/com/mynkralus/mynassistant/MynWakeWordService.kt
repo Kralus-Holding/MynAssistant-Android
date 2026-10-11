@@ -1,5 +1,6 @@
 package com.mynkralus.mynassistant
 
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -34,6 +35,8 @@ import java.net.URL
 import java.util.zip.ZipInputStream
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.WindowManager
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -60,9 +63,13 @@ class MynWakeWordService : Service() {
     @Volatile private var notificationStatus = "Çevrimdışı Türkçe modeli hazırlanıyor…"
     private var recoveryAttempts = 0
     private var recoveringSpeechService = false
+    private var recoveryStableReset: Runnable? = null
     private var overlayView: LinearLayout? = null
     private var overlayStatus: TextView? = null
     private var overlayCommand: EditText? = null
+    private var overlayMic: ImageView? = null
+    private var overlayMicAnimator: ValueAnimator? = null
+    private var overlayDragHandle: View? = null
     private var userRequestedStop = false
     private var serviceFailed = false
     private var primaryButton: TextView? = null
@@ -127,8 +134,10 @@ class MynWakeWordService : Service() {
             recognizer = loadedRecognizer
             speechService = streamingService
             if (closed || userRequestedStop) { releaseSpeechEngine(); return }
-            updateServiceStatus("Hey Meyene dinliyor · çevrimdışı", enabled = true)
             if (!streamingService.startListening(voskListener)) throw IOException("Vosk ses akışı başlatılamadı.")
+            recoveringSpeechService = false
+            updateServiceStatus("Hey Meyene dinliyor · çevrimdışı", enabled = true)
+            scheduleRecoveryCounterReset(streamingService)
         } catch (error: Exception) {
             if (closed || userRequestedStop) return
             fail(
@@ -237,14 +246,27 @@ class MynWakeWordService : Service() {
                 speechService = nextService
                 if (!nextService.startListening(voskListener)) throw IOException("Ses akışı yeniden başlatılamadı.")
                 recoveringSpeechService = false
-                recoveryAttempts = 0
                 updateServiceStatus("Hey Meyene dinliyor · çevrimdışı", enabled = true)
+                scheduleRecoveryCounterReset(nextService)
             } catch (error: Exception) {
                 recoveringSpeechService = false
                 retrying("MYN-WAKE-8010", "Ses akışı yeniden başlatılamadı: " + error.javaClass.simpleName)
                 if (!closed && !userRequestedStop && !serviceFailed) mainHandler.postDelayed({ recoverSpeechEngine(error) }, 1800)
             }
         }, 1200)
+    }
+
+    private fun scheduleRecoveryCounterReset(activeService: SpeechService) {
+        recoveryStableReset?.let(mainHandler::removeCallbacks)
+        val reset = Runnable {
+            if (!closed && !userRequestedStop && !serviceFailed &&
+                speechService === activeService && !recoveringSpeechService
+            ) {
+                recoveryAttempts = 0
+            }
+        }
+        recoveryStableReset = reset
+        mainHandler.postDelayed(reset, 30_000L)
     }
 
     private fun releaseSpeechStreamOnly() {
@@ -374,6 +396,7 @@ class MynWakeWordService : Service() {
         if (closed || !Settings.canDrawOverlays(this)) return
         if (overlayView == null) createOverlay()
         overlayStatus?.text = status
+        updateOverlayMicPulse(commandIsReady = ready)
         if (recognizedCommand.isNotBlank()) {
             overlayCommand?.setText(recognizedCommand)
             overlayCommand?.setSelection(recognizedCommand.length)
@@ -396,7 +419,7 @@ class MynWakeWordService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                y = dp(88)
+                y = dp(72)
                 softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             }
             try {
@@ -410,20 +433,85 @@ class MynWakeWordService : Service() {
 
 
 
+    private fun updateOverlayMicPulse(commandIsReady: Boolean) {
+        val mic = overlayMic ?: return
+        if (commandIsReady) {
+            overlayMicAnimator?.cancel()
+            overlayMicAnimator = null
+            mic.scaleX = 1f
+            mic.scaleY = 1f
+            mic.background = roundedBackground(Color.rgb(39, 48, 79), dp(18))
+            mic.setColorFilter(Color.rgb(139, 156, 255))
+            return
+        }
+        mic.background = roundedBackground(
+            Color.rgb(20, 65, 58), dp(18), Color.rgb(70, 214, 151), dp(1)
+        )
+        mic.setColorFilter(Color.rgb(70, 214, 151))
+        if (overlayMicAnimator?.isRunning == true) return
+        overlayMicAnimator = ValueAnimator.ofFloat(1f, 1.10f).apply {
+            duration = 680L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { animator ->
+                val scale = animator.animatedValue as? Float ?: 1f
+                mic.scaleX = scale
+                mic.scaleY = scale
+            }
+            start()
+        }
+    }
+
+    private fun installOverlayDrag(handle: View) {
+        var downRawX = 0f
+        var downRawY = 0f
+        var startX = 0
+        var startY = 0
+        handle.setOnTouchListener { _, event ->
+            val view = overlayView ?: return@setOnTouchListener false
+            val params = view.layoutParams as? WindowManager.LayoutParams
+                ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    startX = params.x
+                    startY = params.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val maxX = ((resources.displayMetrics.widthPixels - params.width) / 2)
+                        .coerceAtLeast(0)
+                    val maxY = (resources.displayMetrics.heightPixels - dp(180))
+                        .coerceAtLeast(dp(16))
+                    params.x = (startX + (event.rawX - downRawX).toInt()).coerceIn(-maxX, maxX)
+                    params.y = (startY - (event.rawY - downRawY).toInt()).coerceIn(dp(16), maxY)
+                    runCatching { windowManager.updateViewLayout(view, params) }.isSuccess
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+                else -> false
+            }
+        }
+    }
+
     private fun createOverlay() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(8), dp(14), dp(11))
+            setPadding(dp(12), dp(6), dp(12), dp(9))
             background = roundedBackground(Color.rgb(10, 13, 21), dp(28), Color.rgb(139, 156, 255), dp(1))
             elevation = dp(20).toFloat()
         }
-        root.addView(TextView(this).apply {
-            text = "━━━━"
-            textSize = 11f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(97, 106, 127))
-            setPadding(0, 0, 0, dp(10))
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        val dragHandle = View(this).apply {
+            background = roundedBackground(Color.rgb(88, 98, 122), dp(12))
+            contentDescription = "Mikrofon panelini taşı"
+        }
+        overlayDragHandle = dragHandle
+        installOverlayDrag(dragHandle)
+        root.addView(dragHandle, LinearLayout.LayoutParams(dp(38), dp(4)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(8)
+        })
 
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -432,10 +520,11 @@ class MynWakeWordService : Service() {
         val mic = ImageView(this).apply {
             setImageResource(R.drawable.ic_myn_microphone)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(dp(11), dp(11), dp(11), dp(11))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             background = roundedBackground(Color.rgb(39, 48, 79), dp(18))
+            overlayMic = this
         }
-        heading.addView(mic, LinearLayout.LayoutParams(dp(44), dp(44)))
+        heading.addView(mic, LinearLayout.LayoutParams(dp(42), dp(42)))
         val labels = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
@@ -471,7 +560,7 @@ class MynWakeWordService : Service() {
         val statusCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setPadding(dp(10), dp(7), dp(10), dp(7))
             background = roundedBackground(Color.rgb(17, 23, 36), dp(16), Color.rgb(36, 47, 68), dp(1))
         }
         statusCard.addView(View(this).apply {
@@ -491,15 +580,15 @@ class MynWakeWordService : Service() {
 
         overlayCommand = EditText(this).apply {
             hint = "Komutunu söyle veya yaz…"
-            textSize = 15f
-            maxLines = 3
+            textSize = 14f
+            maxLines = 2
             minLines = 1
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_MULTI_LINE
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             setTextColor(Color.rgb(241, 243, 250))
             setHintTextColor(Color.rgb(137, 145, 164))
-            setPadding(dp(13), dp(12), dp(13), dp(12))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             background = roundedBackground(Color.rgb(17, 21, 31), dp(17), Color.rgb(44, 55, 81), dp(1))
             isFocusableInTouchMode = true
             setOnFocusChangeListener { _, hasFocus ->
@@ -526,7 +615,7 @@ class MynWakeWordService : Service() {
             alpha = .58f
             setOnClickListener { openRecognizedCommand() }
         }
-        actions.addView(primaryButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(8) })
+        actions.addView(primaryButton, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginEnd = dp(8) })
         secondaryButton = styledButton("Gizle", primary = false).apply {
             setOnClickListener {
                 if (commandReady) {
@@ -544,7 +633,7 @@ class MynWakeWordService : Service() {
                 }
             }
         }
-        actions.addView(secondaryButton, LinearLayout.LayoutParams(0, dp(42), 1f))
+        actions.addView(secondaryButton, LinearLayout.LayoutParams(0, dp(38), 1f))
         root.addView(actions, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(10) })
@@ -597,6 +686,10 @@ class MynWakeWordService : Service() {
 
 
     private fun hideOverlay() {
+        overlayMicAnimator?.cancel()
+        overlayMicAnimator = null
+        overlayMic?.scaleX = 1f
+        overlayMic?.scaleY = 1f
         val view = overlayView ?: return
         try {
             if (view.parent != null) windowManager.removeView(view)
@@ -606,6 +699,8 @@ class MynWakeWordService : Service() {
         overlayView = null
         overlayStatus = null
         overlayCommand = null
+        overlayMic = null
+        overlayDragHandle = null
         primaryButton = null
         secondaryButton = null
     }
@@ -703,6 +798,9 @@ class MynWakeWordService : Service() {
     override fun onDestroy() {
         closed = true
         mainHandler.removeCallbacksAndMessages(null)
+        recoveryStableReset = null
+        overlayMicAnimator?.cancel()
+        overlayMicAnimator = null
         modelInitThread?.interrupt()
         hideOverlay()
         releaseSpeechEngine()
