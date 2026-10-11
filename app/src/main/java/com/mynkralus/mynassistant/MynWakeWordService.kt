@@ -12,6 +12,9 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.text.InputType
 import android.os.Build
 import android.os.Handler
@@ -158,8 +161,6 @@ class MynWakeWordService : Service() {
             speechModel = loadedModel
             val loadedRecognizer = Recognizer(loadedModel, SAMPLE_RATE.toFloat())
             recognizer = loadedRecognizer
-            val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
-            speechService = streamingService
             if (closed || userRequestedStop) {
                 releaseSpeechEngine()
                 return
@@ -167,6 +168,20 @@ class MynWakeWordService : Service() {
 
             phase = MynWakeWordPhase.STARTING_MICROPHONE
             updateServiceStatus("Mikrofon akışı başlatılıyor…", enabled = true, phase = phase)
+
+            // SpeechService.startListening() only schedules the capture worker. Probe the
+            // actual microphone once so we do not publish LISTENING based on that return value.
+            val capturedSamples = verifyMicrophoneCapture()
+            if (!MynWakeWordStartupReadiness.canReportListening(phase, capturedSamples)) {
+                throw IOException("Mikrofon yakalama doğrulanamadı; okunan örnek sayısı=$capturedSamples.")
+            }
+
+            val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
+            speechService = streamingService
+            if (closed || userRequestedStop) {
+                releaseSpeechEngine()
+                return
+            }
             if (!streamingService.startListening(voskListener)) {
                 throw IOException("Vosk SpeechService.startListening(false) döndürdü.")
             }
@@ -344,6 +359,61 @@ class MynWakeWordService : Service() {
         releaseSpeechStreamOnly()
         runCatching { speechModel?.close() }
         speechModel = null
+    }
+
+    /**
+     * Opens the same Android capture format used by the Vosk stream, reads real PCM samples,
+     * and releases the probe before SpeechService acquires the microphone.
+     */
+    private fun verifyMicrophoneCapture(): Int {
+        val minBufferBytes = AudioRecord.getMinBufferSize(
+            SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+        if (minBufferBytes <= 0) {
+            throw IOException("AudioRecord.getMinBufferSize returned $minBufferBytes.")
+        }
+
+        var recorder: AudioRecord? = null
+        try {
+            recorder = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBufferBytes, 4096)
+            )
+            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                throw IOException("AudioRecord did not initialize; state=${recorder.state}.")
+            }
+            recorder.startRecording()
+            if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IOException("AudioRecord did not enter RECORDING state; state=${recorder.recordingState}.")
+            }
+
+            val sampleBuffer = ShortArray(
+                maxOf(512, minOf(4096, maxOf(minBufferBytes, 4096) / 2))
+            )
+            val samplesRead = recorder.read(sampleBuffer, 0, sampleBuffer.size)
+            if (!MynWakeWordStartupReadiness.hasCapturedAudioSamples(samplesRead)) {
+                throw IOException("AudioRecord.read returned $samplesRead; no microphone samples captured.")
+            }
+            Log.i(LOG_TAG, "Microphone capture preflight passed; samplesRead=$samplesRead")
+            return samplesRead
+        } catch (error: SecurityException) {
+            Log.e(LOG_TAG, "MYN-WAKE-8024: microphone permission/security check failed", error)
+            throw error
+        } finally {
+            recorder?.let { activeRecorder ->
+                runCatching {
+                    if (activeRecorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        activeRecorder.stop()
+                    }
+                }
+                runCatching { activeRecorder.release() }
+            }
+        }
     }
 
     private fun ensureOfflineModel(): File {
