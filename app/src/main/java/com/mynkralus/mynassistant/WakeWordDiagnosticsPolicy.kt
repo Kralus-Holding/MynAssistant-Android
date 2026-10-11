@@ -6,7 +6,7 @@ package com.mynkralus.mynassistant
  */
 internal object WakeWordDiagnosticsPolicy {
     const val MAX_TRANSCRIPT_LENGTH = 120
-    const val MAX_TRANSCRIPT_WORDS = 3
+    const val MAX_TRANSCRIPT_WORDS = 2
 
     fun transcriptToDisplay(
         enabled: Boolean,
