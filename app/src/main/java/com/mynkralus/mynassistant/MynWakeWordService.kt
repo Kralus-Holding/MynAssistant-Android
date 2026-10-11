@@ -160,6 +160,19 @@ class MynWakeWordService : Service() {
         override fun onTimeout() = Unit
     }
 
+    private fun wakePhrases(): List<String> =
+        listOf("hey meyene", "hey mayene", "hey meyene ai", "hey myassistant")
+
+    private fun findWakePhraseAndTrailingText(heard: String): Pair<String, String>? {
+        val normalized = normalize(heard)
+        val wake = wakePhrases().firstOrNull { normalized.contains(it) } ?: return null
+        val start = normalized.indexOf(wake)
+        if (start < 0) return null
+        val end = (start + wake.length).coerceAtMost(heard.length)
+        val trailing = heard.drop(end).trim().trim(',', '.', '!', ':', ';', '-')
+        return wake to trailing
+    }
+
     private fun processTranscript(transcript: String, isFinal: Boolean) {
         if (closed || commandReady) return
         val normalized = normalize(transcript).trim(' ', ',', '.', '!', ':', ';', '-')
