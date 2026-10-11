@@ -96,8 +96,19 @@ jobs:
           ), None)
           if service is None:
               raise SystemExit("MynWakeWordService is missing from the built APK manifest.")
-          if service.get(attr("foregroundServiceType")) != "microphone":
-              raise SystemExit("MynWakeWordService must declare foregroundServiceType=\"microphone\".")
+          foreground_type = service.get(attr("foregroundServiceType"), "")
+          # Android's binary manifest decoder may render this flag symbolically or numerically.
+          is_microphone_type = foreground_type == "microphone"
+          if not is_microphone_type:
+              try:
+                  is_microphone_type = int(foreground_type, 0) == 0x80
+              except ValueError:
+                  is_microphone_type = False
+          if not is_microphone_type:
+              raise SystemExit(
+                  "MynWakeWordService must declare microphone foregroundServiceType; got "
+                  + repr(foreground_type)
+              )
           if service.get(attr("exported")) != "false":
               raise SystemExit("MynWakeWordService must not be exported.")
 
