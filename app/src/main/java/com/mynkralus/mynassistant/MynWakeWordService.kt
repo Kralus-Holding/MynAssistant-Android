@@ -161,6 +161,14 @@ class MynWakeWordService : Service() {
                 stopSelf()
                 return
             }
+            if (
+                error == SpeechRecognizer.ERROR_NO_MATCH ||
+                error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+            ) {
+                // Silence is expected while waiting for the wake phrase; keep standby armed.
+                startListeningSoon(300)
+                return
+            }
             consecutiveErrors += 1
             if (consecutiveErrors >= 12) {
                 fail(
