@@ -118,8 +118,7 @@ internal class VoskModelInstaller(
     private val cacheDir: File,
     private val modelDirectoryName: String,
     private val modelArchiveUrl: String,
-    private val downloader: ModelArchiveDownloader = HttpModelArchiveDownloader,
-    private val validateNativeModel: (File) -> Unit = {}
+    private val downloader: ModelArchiveDownloader = HttpModelArchiveDownloader
 ) {
     fun ensureInstalled(
         isCancelled: () -> Boolean = { false },
@@ -177,9 +176,6 @@ internal class VoskModelInstaller(
                 preparedModel.deleteRecursively()
                 throw IOException("Hazırlanan Türkçe modelin dosya yapısı doğrulanamadı.")
             }
-            // Validate that Vosk's native model loader can actually open the staged files
-            // before the previous install is moved aside.
-            validateNativeModel(preparedModel)
             checkCancellation(isCancelled)
 
             // Recover an interrupted prior swap before touching the existing directory.
