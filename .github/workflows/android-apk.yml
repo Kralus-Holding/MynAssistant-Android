@@ -62,6 +62,19 @@ jobs:
             exit 1
           fi
 
+      - name: Calculate APK SHA-256
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SHA256=$(sha256sum "$APK" | awk '{print $1}')
+          echo "APK SHA-256: $SHA256"
+          {
+            echo "### APK integrity"
+            echo
+            echo "- File: `$APK`"
+            echo "- SHA-256: `$SHA256`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
