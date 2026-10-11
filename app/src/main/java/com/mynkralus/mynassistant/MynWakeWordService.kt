@@ -74,6 +74,16 @@ class MynWakeWordService : Service() {
     @Volatile private var closed = false
     private lateinit var windowManager: WindowManager
 
+    private val livenessHeartbeat = object : Runnable {
+        override fun run() {
+            if (closed || userRequestedStop || serviceFailed || speechService == null) return
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            if (prefs.getString(KEY_PHASE, "") != MynWakeWordPhase.LISTENING.persistedValue) return
+            prefs.edit().putLong(KEY_HEARTBEAT_AT, System.currentTimeMillis()).apply()
+            mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -416,6 +426,7 @@ class MynWakeWordService : Service() {
         val editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putBoolean(KEY_ENABLED, enabled)
             .putString(KEY_STATUS, status)
+            .putLong(KEY_STATUS_UPDATED_AT, System.currentTimeMillis())
 
         if (phase != null) {
             editor.putString(KEY_PHASE, phase.persistedValue)
@@ -429,10 +440,19 @@ class MynWakeWordService : Service() {
                 .putLong(KEY_ERROR_AT, System.currentTimeMillis())
         }
         if (phase == MynWakeWordPhase.LISTENING) {
-            editor.putLong(KEY_LAST_LISTENING_AT, System.currentTimeMillis())
+            val listeningAt = System.currentTimeMillis()
+            editor.putLong(KEY_LAST_LISTENING_AT, listeningAt)
+                .putLong(KEY_HEARTBEAT_AT, listeningAt)
                 .remove(KEY_ERROR)
                 .remove(KEY_ERROR_DETAILS)
                 .remove(KEY_ERROR_AT)
+            mainHandler.removeCallbacks(livenessHeartbeat)
+            mainHandler.postDelayed(livenessHeartbeat, HEARTBEAT_INTERVAL_MS)
+        } else if (phase == MynWakeWordPhase.RETRYING ||
+            phase == MynWakeWordPhase.ERROR ||
+            phase == MynWakeWordPhase.OFF
+        ) {
+            mainHandler.removeCallbacks(livenessHeartbeat)
         }
         editor.apply()
         // Keep a stage trail in Logcat without recording raw audio or command contents.
@@ -908,6 +928,7 @@ class MynWakeWordService : Service() {
             }
         }
 
+        prefs.edit().putLong(KEY_STATUS_UPDATED_AT, System.currentTimeMillis()).apply()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else stopForeground(true)
         super.onDestroy()
     }
@@ -925,6 +946,9 @@ class MynWakeWordService : Service() {
         private const val KEY_PHASE = "wake_word_phase"
         private const val KEY_LAST_PHASE = "wake_word_last_phase"
         private const val KEY_LAST_LISTENING_AT = "wake_word_last_listening_at"
+        private const val KEY_STATUS_UPDATED_AT = "wake_word_status_updated_at"
+        private const val KEY_HEARTBEAT_AT = "wake_word_heartbeat_at"
+        private const val HEARTBEAT_INTERVAL_MS = 10_000L
         private const val KEY_RETRY_COUNT = "wake_word_retry_count"
         private const val KEY_PENDING_COMMAND = "wake_pending_command"
         private const val KEY_WAKE_LAST_AT = "wake_word_last_detected_at"
