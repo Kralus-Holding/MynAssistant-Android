@@ -1349,6 +1349,7 @@ private fun AssistantScreen(
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var command by remember { mutableStateOf("") }
+    var feedback by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(wakeCommandFromOverlay) {
         val incoming = wakeCommandFromOverlay?.trim().orEmpty()
         if (incoming.isNotBlank()) {
@@ -1359,7 +1360,6 @@ private fun AssistantScreen(
     }
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
-    var feedback by remember { mutableStateOf<String?>(null) }
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
@@ -2725,7 +2725,7 @@ private fun AssistantScreen(
                                             when (commandTarget) {
                                                 "PHONE" -> Icons.Default.Devices
                                                 "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.Tune
+                                                else -> Icons.Default.Mic
                                             },
                                             contentDescription = when (commandTarget) {
                                                 "PHONE" -> "Hedef: bu Android telefonu"
