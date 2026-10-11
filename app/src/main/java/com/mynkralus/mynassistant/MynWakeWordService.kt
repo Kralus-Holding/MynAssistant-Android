@@ -341,11 +341,7 @@ class MynWakeWordService : Service() {
             filesDir = filesDir,
             cacheDir = cacheDir,
             modelDirectoryName = MODEL_DIRECTORY,
-            modelArchiveUrl = MODEL_DOWNLOAD_URL,
-            validateNativeModel = { candidate ->
-                val probeModel = Model(candidate.absolutePath)
-                probeModel.close()
-            }
+            modelArchiveUrl = MODEL_DOWNLOAD_URL
         )
         var lastPublishedPercent = -5
         var lastPublishedMegabytes = -1L
