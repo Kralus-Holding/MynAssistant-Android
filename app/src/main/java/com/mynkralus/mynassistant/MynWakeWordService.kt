@@ -55,6 +55,7 @@ class MynWakeWordService : Service() {
     private var lastCommand = ""
     private var wakeDetectedInCurrentSession = false
     private var consecutiveErrors = 0
+    private var lastRecoverableIssueAt = 0L
     private var closed = false
     private lateinit var windowManager: WindowManager
 
@@ -151,10 +152,14 @@ class MynWakeWordService : Service() {
                     ready = false
                 )
             } else if (awaitingCommand) {
-                val partialCommand = if (wakeDetectedInCurrentSession) {
-                    matchedWake?.second.orEmpty()
-                } else heard
-                if (partialCommand.isNotBlank() && normalize(partialCommand) !in wakePhrases()) {
+                val normalizedHeard = normalize(heard).trim(' ', ',', '.', '!', ':', ';', '-')
+                val isWakeOnly = wakePhrases().any { normalizedHeard == it }
+                val partialCommand = when {
+                    matchedWake != null -> matchedWake.second
+                    !isWakeOnly -> heard
+                    else -> ""
+                }
+                if (partialCommand.isNotBlank()) {
                     showOverlay("Komutunu dinliyorum.", partialCommand, ready = false)
                 }
             }
@@ -185,17 +190,18 @@ class MynWakeWordService : Service() {
             }
             consecutiveErrors += 1
             if (consecutiveErrors >= 12) {
-                fail(
+                retrying(
                     "MYN-WAKE-8010",
-                    "Ses tanıma art arda başarısız oldu. Telefonun çevrimdışı Türkçe konuşma hizmetini kontrol edip dinlemeyi yeniden başlat."
+                    "Ses tanıma sık sık kesildi. Hey Meyene dinlemesini kapatmadan yeniden bağlanmayı deniyorum."
                 )
-                stopSelf()
+                consecutiveErrors = 0
+                startListeningSoon(2200)
                 return
             }
-            // Retry a one-shot Android recognition session; keep the service enabled between sessions.
-            val backoff = (200L * (1 shl consecutiveErrors.coerceAtMost(3))).coerceAtMost(1600L)
+            // Keep the explicit foreground session enabled during transient recognizer restarts.
+            val backoff = (350L * (1 shl consecutiveErrors.coerceAtMost(3))).coerceAtMost(2800L)
             startListeningSoon(
-                maxOf(backoff, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200L else 0L)
+                maxOf(backoff, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1600L else 0L)
             )
         }
 
@@ -216,7 +222,11 @@ class MynWakeWordService : Service() {
             consecutiveErrors = 0
             if (wakeDetectedInCurrentSession) {
                 wakeDetectedInCurrentSession = false
-                val trailing = findWakePhraseAndTrailingText(heard)?.second.orEmpty()
+                val normalizedFinal = normalize(heard).trim(' ', ',', '.', '!', ':', ';', '-')
+                val isWakeOnly = wakePhrases().any { normalizedFinal == it }
+                val trailing = findWakePhraseAndTrailingText(heard)?.second
+                    ?.takeIf { it.isNotBlank() }
+                    ?: heard.takeIf { !isWakeOnly }.orEmpty()
                 if (trailing.isNotBlank()) {
                     lastCommand = trailing
                     commandReady = true
@@ -296,6 +306,9 @@ class MynWakeWordService : Service() {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "tr-TR")
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 6500L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4500L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             }
@@ -304,8 +317,11 @@ class MynWakeWordService : Service() {
             activeRecognizer.startListening(intent)
         } catch (error: Exception) {
             isListening = false
-            fail("MYN-WAKE-8006", "Ses dinlemesi devam ettirilemedi: " + error.javaClass.simpleName)
-            stopSelf()
+            retrying(
+                "MYN-WAKE-8006",
+                "Ses dinlemesi yenileniyor: " + error.javaClass.simpleName
+            )
+            startListeningSoon(1800)
         }
     }
 
@@ -323,7 +339,9 @@ class MynWakeWordService : Service() {
         primaryButton?.alpha = if (hasCommand) 1f else .58f
         secondaryButton?.text = if (ready) "Tekrar dinle" else "Gizle"
         if (overlayView?.parent == null) {
-            val width = (resources.displayMetrics.widthPixels - dp(32)).coerceAtLeast(dp(280))
+            val width = (resources.displayMetrics.widthPixels - dp(40))
+                .coerceAtLeast(dp(220))
+                .coerceAtMost(dp(320))
             val params = WindowManager.LayoutParams(
                 width,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -332,8 +350,8 @@ class MynWakeWordService : Service() {
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                y = dp(52)
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                y = dp(88)
                 softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             }
             try {
@@ -350,7 +368,7 @@ class MynWakeWordService : Service() {
     private fun createOverlay() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(10), dp(16), dp(16))
+            setPadding(dp(14), dp(8), dp(14), dp(11))
             background = roundedBackground(Color.rgb(10, 13, 21), dp(28), Color.rgb(139, 156, 255), dp(1))
             elevation = dp(20).toFloat()
         }
@@ -423,7 +441,7 @@ class MynWakeWordService : Service() {
         statusCard.addView(overlayStatus, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(statusCard, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(14) })
+        ).apply { topMargin = dp(8) })
 
         overlayCommand = EditText(this).apply {
             hint = "Komutunu söyle veya yaz…"
@@ -447,7 +465,7 @@ class MynWakeWordService : Service() {
         }
         root.addView(overlayCommand, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(12) })
+        ).apply { topMargin = dp(8) })
 
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -458,7 +476,7 @@ class MynWakeWordService : Service() {
             alpha = .58f
             setOnClickListener { openRecognizedCommand() }
         }
-        actions.addView(primaryButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(8) })
+        actions.addView(primaryButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(8) })
         secondaryButton = styledButton("Gizle", primary = false).apply {
             setOnClickListener {
                 if (commandReady) {
@@ -475,7 +493,7 @@ class MynWakeWordService : Service() {
                 }
             }
         }
-        actions.addView(secondaryButton, LinearLayout.LayoutParams(0, dp(46), 1f))
+        actions.addView(secondaryButton, LinearLayout.LayoutParams(0, dp(42), 1f))
         root.addView(actions, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(10) })
@@ -595,6 +613,22 @@ class MynWakeWordService : Service() {
                     description = "Çevrimdışı uyandırma dinlemesi durum bildirimi"
                 }
             )
+        }
+    }
+
+    private fun retrying(code: String, detail: String) {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(KEY_ENABLED, true)
+            .putString(KEY_STATUS, "Dinleme bağlantısı yenileniyor…")
+            .putString(KEY_ERROR, code)
+            .apply()
+        val now = System.currentTimeMillis()
+        if (now - lastRecoverableIssueAt >= 60_000L) {
+            MynAssistantDiagnostics.record(
+                this, code, "Hey Meyene", "", detail
+            )
+            lastRecoverableIssueAt = now
         }
     }
 
