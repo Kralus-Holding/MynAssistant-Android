@@ -285,7 +285,7 @@ class MynWakeWordService : Service() {
                             }
                         } else if (downloaded / (1024 * 1024) > lastPublishedProgress) {
                             lastPublishedProgress = (downloaded / (1024 * 1024)).toInt()
-                            updateServiceStatus("Türkçe model indiriliyor · \${lastPublishedProgress} MB", enabled = true)
+                            updateServiceStatus("Türkçe model indiriliyor · $lastPublishedProgress MB", enabled = true)
                         }
                     }
                 }
