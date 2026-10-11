@@ -986,6 +986,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         // Remove old local-only demo account data. Firebase now owns auth sessions.
