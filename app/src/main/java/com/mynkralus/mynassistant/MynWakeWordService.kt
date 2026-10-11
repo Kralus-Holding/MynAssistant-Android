@@ -483,7 +483,7 @@ class MynWakeWordService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val maxX = ((resources.displayMetrics.widthPixels - params.width) / 2)
                         .coerceAtLeast(0)
-                    val maxY = (resources.displayMetrics.heightPixels - dp(180))
+                    val maxY = (resources.displayMetrics.heightPixels - view.height - dp(16))
                         .coerceAtLeast(dp(16))
                     params.x = (startX + (event.rawX - downRawX).toInt()).coerceIn(-maxX, maxX)
                     params.y = (startY - (event.rawY - downRawY).toInt()).coerceIn(dp(16), maxY)
