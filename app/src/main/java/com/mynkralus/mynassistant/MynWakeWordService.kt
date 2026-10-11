@@ -235,15 +235,24 @@ class MynWakeWordService : Service() {
     private val voskListener = object : RecognitionListener {
         override fun onPartialResult(hypothesis: String?) {
             val transcript = parseVoskText(hypothesis, "partial")
-            if (transcript.isNotBlank()) mainHandler.post { processTranscript(transcript, isFinal = false) }
+            if (transcript.isNotBlank()) mainHandler.post {
+                publishWakeTranscriptForDiagnostics(transcript, isFinal = false)
+                processTranscript(transcript, isFinal = false)
+            }
         }
         override fun onResult(hypothesis: String?) {
             val transcript = parseVoskText(hypothesis, "text")
-            if (transcript.isNotBlank()) mainHandler.post { processTranscript(transcript, isFinal = true) }
+            if (transcript.isNotBlank()) mainHandler.post {
+                publishWakeTranscriptForDiagnostics(transcript, isFinal = true)
+                processTranscript(transcript, isFinal = true)
+            }
         }
         override fun onFinalResult(hypothesis: String?) {
             val transcript = parseVoskText(hypothesis, "text")
-            if (transcript.isNotBlank()) mainHandler.post { processTranscript(transcript, isFinal = true) }
+            if (transcript.isNotBlank()) mainHandler.post {
+                publishWakeTranscriptForDiagnostics(transcript, isFinal = true)
+                processTranscript(transcript, isFinal = true)
+            }
         }
         override fun onError(exception: Exception?) {
             mainHandler.post { recoverSpeechEngine(exception) }
@@ -297,6 +306,22 @@ class MynWakeWordService : Service() {
         if (payload.isNullOrBlank()) return ""
         return try { JSONObject(payload).optString(key, "").trim() } catch (_: Exception) { "" }
     }
+
+    private fun publishWakeTranscriptForDiagnostics(transcript: String, isFinal: Boolean) {
+        if (closed || awaitingCommand || commandReady || transcript.isBlank()) return
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_WAKE_DEBUG_TRANSCRIPTS, false)) return
+
+        // Opt-in diagnostics only: keep the most recent short ASR text while waiting for
+        // the wake phrase. Do not save PCM/audio and do not capture command speech.
+        prefs.edit()
+            .putString(KEY_WAKE_LAST_TRANSCRIPT, transcript.take(120))
+            .putBoolean(KEY_WAKE_LAST_TRANSCRIPT_FINAL, isFinal)
+            .putLong(KEY_WAKE_LAST_TRANSCRIPT_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+
 
     private fun recoverSpeechEngine(exception: Exception?) {
         if (closed || userRequestedStop || serviceFailed || recoveringSpeechService) return
@@ -1024,6 +1049,10 @@ class MynWakeWordService : Service() {
         private const val KEY_WAKE_LAST_AT = "wake_word_last_detected_at"
         private const val KEY_WAKE_COUNT = "wake_word_detection_count"
         private const val KEY_WAKE_LAST_PHRASE = "wake_word_last_phrase"
+        private const val KEY_WAKE_DEBUG_TRANSCRIPTS = "wake_word_debug_transcripts"
+        private const val KEY_WAKE_LAST_TRANSCRIPT = "wake_word_last_transcript"
+        private const val KEY_WAKE_LAST_TRANSCRIPT_FINAL = "wake_word_last_transcript_final"
+        private const val KEY_WAKE_LAST_TRANSCRIPT_AT = "wake_word_last_transcript_at"
         private const val CHANNEL_ID = "mynassistant_wake_word"
         private const val NOTIFICATION_ID = 4127
         private const val ACTION_STOP = "com.mynkralus.mynassistant.STOP_WAKE_WORD"
