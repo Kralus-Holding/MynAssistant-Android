@@ -1,6 +1,13 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: 0.4.4 baseline notes, extended for candidate 0.4.5. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: 0.4.6 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+
+## 0.4.6 follow-up — support the official legacy Turkish Vosk model
+
+- The official `vosk-model-small-tr-0.3` uses Vosk's older flat layout: `final.mdl`, `mfcc.conf`, `word_boundary.int`, `Gr.fst`, and `HCLr.fst` are stored at the model root, unlike newer models under `am/`, `conf/`, and `graph/`.
+- The installer now validates both layouts. Previously, the strict newer-layout check rejected a correctly downloaded Turkish archive during `VALIDATING_MODEL`, surfaced `MYN-WAKE-8022`, and caused the next start attempt to download it again.
+- The model is kept in its original layout because Vosk supports that legacy format. A regression test confirms the required legacy files are accepted and a second installer instance reuses the model without another download.
+- Candidate version: **0.4.6 / versionCode 23**. CI success and real-device validation are tracked separately; install and test the built APK on the affected phone before considering the issue closed.
 
 ## 0.4.5 follow-up — capture readiness and artifact integrity
 
