@@ -36,6 +36,44 @@ class MynWakeWordMatcherTest {
     }
 
     @Test
+    fun observedHeyNeAsrVariantIsAcceptedOnlyWhenFallbackIsEnabled() {
+        val match = MynWakeWordMatcher.findMatch("hey ne")
+        assertNotNull(match)
+        assertEquals("", match?.trailingText)
+
+        assertNull(
+            MynWakeWordMatcher.findMatch(
+                "hey ne",
+                allowObservedAsrFallback = false
+            )
+        )
+    }
+
+    @Test
+    fun observedTegmenYeniAsrVariantExtractsTrailingCommand() {
+        val match = MynWakeWordMatcher.findMatch("teğmen yeni, hava nasıl?")
+        assertNotNull(match)
+        assertEquals("Hey Meyene", match?.matchedPhrase)
+        assertEquals("hava nasıl?", match?.trailingText)
+    }
+
+    @Test
+    fun observedAsrAliasesOnlyMatchAtTheBeginning() {
+        assertNull(
+            MynWakeWordMatcher.findMatch(
+                "bugün teğmen yeni geldi",
+                allowObservedAsrFallback = true
+            )
+        )
+        assertNull(
+            MynWakeWordMatcher.findMatch(
+                "bugün hey ne oldu",
+                allowObservedAsrFallback = true
+            )
+        )
+    }
+
+    @Test
     fun unrelatedSpeechDoesNotWakeAssistant() {
         assertNull(MynWakeWordMatcher.findMatch("Meyene'nin havası nasıl?"))
         assertNull(MynWakeWordMatcher.findMatch("hey meh"))
