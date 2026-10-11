@@ -2646,7 +2646,7 @@ private fun AssistantScreen(
                                         }
                                         Surface(
                                             shape = CircleShape,
-                                            color = if (wakeWordEnabled) Color(0xFF49B86E) else MaterialTheme.colorScheme.outline.copy(alpha = .5f)
+                                            color = if (wakeWordPhase == MynWakeWordPhase.LISTENING.persistedValue) Color(0xFF49B86E) else MaterialTheme.colorScheme.outline.copy(alpha = .5f)
                                         ) { Box(Modifier.size(10.dp)) }
                                     }
                                     Text(
