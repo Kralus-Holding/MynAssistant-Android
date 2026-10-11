@@ -449,7 +449,8 @@ class MynWakeWordService : Service() {
                 hideOverlay()
                 awaitingCommand = false
                 commandReady = false
-                startListeningSoon(120)
+                lastCommand = ""
+                speechService?.setPause(false)
             }
         })
         root.addView(heading)
@@ -488,6 +489,10 @@ class MynWakeWordService : Service() {
             setPadding(dp(13), dp(12), dp(13), dp(12))
             background = roundedBackground(Color.rgb(17, 21, 31), dp(17), Color.rgb(44, 55, 81), dp(1))
             isFocusableInTouchMode = true
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) speechService?.setPause(true)
+                else if (!commandReady) speechService?.setPause(false)
+            }
             setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == EditorInfo.IME_ACTION_SEND) {
                     openRecognizedCommand()
@@ -517,11 +522,12 @@ class MynWakeWordService : Service() {
                     awaitingCommand = true
                     overlayCommand?.setText("")
                     showOverlay("Tekrar dinliyorum. Komutunu söyle.", "", ready = false)
-                    startListeningSoon(100)
+                    speechService?.setPause(false)
                 } else {
                     hideOverlay()
                     awaitingCommand = false
-                    startListeningSoon(120)
+                    lastCommand = ""
+                    speechService?.setPause(false)
                 }
             }
         }
@@ -572,7 +578,7 @@ class MynWakeWordService : Service() {
             fail("MYN-WAKE-8008", "Komut MynAssistant içinde açılamadı.")
             stopSelf()
         }
-        startListeningSoon(180)
+        speechService?.setPause(false)
     }
 
 
@@ -629,7 +635,7 @@ class MynWakeWordService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Hey Meyene etkin")
-            .setContentText("Çevrimdışı uyandırma dinlemesi açık")
+            .setContentText(notificationStatus)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Durdur", stopIntent)
@@ -649,12 +655,7 @@ class MynWakeWordService : Service() {
     }
 
     private fun retrying(code: String, detail: String) {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean(KEY_ENABLED, true)
-            .putString(KEY_STATUS, "Dinleme bağlantısı yenileniyor…")
-            .putString(KEY_ERROR, code)
-            .apply()
+        updateServiceStatus("Ses akışı yenileniyor…", enabled = true, errorCode = code)
         val now = System.currentTimeMillis()
         if (now - lastRecoverableIssueAt >= 60_000L) {
             MynAssistantDiagnostics.record(
@@ -666,12 +667,7 @@ class MynWakeWordService : Service() {
 
     private fun fail(code: String, detail: String) {
         serviceFailed = true
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean(KEY_ENABLED, false)
-            .putString(KEY_STATUS, "Kapalı · " + detail)
-            .putString(KEY_ERROR, code)
-            .apply()
+        updateServiceStatus("Kapalı · " + detail, enabled = false, errorCode = code)
         MynAssistantDiagnostics.record(
             this, code, "Hey Meyene", "", detail
         )
@@ -694,11 +690,9 @@ class MynWakeWordService : Service() {
     override fun onDestroy() {
         closed = true
         mainHandler.removeCallbacksAndMessages(null)
-        isListening = false
-        runCatching { recognizer?.cancel() }
-        runCatching { recognizer?.destroy() }
-        recognizer = null
+        modelInitThread?.interrupt()
         hideOverlay()
+        releaseSpeechEngine()
         if (userRequestedStop || serviceFailed) {
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(KEY_ENABLED, false)
@@ -720,5 +714,9 @@ class MynWakeWordService : Service() {
         private const val CHANNEL_ID = "mynassistant_wake_word"
         private const val NOTIFICATION_ID = 4127
         private const val ACTION_STOP = "com.mynkralus.mynassistant.STOP_WAKE_WORD"
+        private const val SAMPLE_RATE = 16_000
+        private const val MODEL_DIRECTORY = "vosk-model-small-tr-0.3"
+        private const val MODEL_ARCHIVE_NAME = "vosk-model-small-tr-0.3.zip"
+        private const val MODEL_DOWNLOAD_URL = "https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip"
     }
 }
