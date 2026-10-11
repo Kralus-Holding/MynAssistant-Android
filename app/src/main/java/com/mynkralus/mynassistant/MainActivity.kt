@@ -12,7 +12,6 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.ContactsContract
 import android.provider.Settings
-import android.speech.SpeechRecognizer
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -949,18 +948,13 @@ private fun saveWindowsBridgeDevice(
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
 
-private fun isOfflineWakeWordAvailable(context: Context): Boolean =
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-        SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-
 private fun startMynWakeWordService(context: Context): Boolean {
-    if (!isOfflineWakeWordAvailable(context)) return false
     androidx.core.content.ContextCompat.startForegroundService(
         context, Intent(context, MynWakeWordService::class.java)
     )
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
         .putBoolean("wake_word_enabled", true)
-        .putString("wake_word_status", "Mikrofon açık · Hey Meyene dinleniyor")
+        .putString("wake_word_status", "Çevrimdışı Türkçe modeli hazırlanıyor…")
         .remove("wake_word_error_code")
         .apply()
     return true
@@ -1459,8 +1453,7 @@ private fun AssistantScreen(
             try {
                 val started = startMynWakeWordService(commandContext)
                 wakeWordEnabled = started
-                wakeWordStatus = if (started) "Mikrofon açık · Hey Meyene dinleniyor"
-                    else "Yerleşik çevrimdışı ses tanıma kullanılamıyor."
+                wakeWordStatus = if (started) "Çevrimdışı Türkçe modeli hazırlanıyor…" else "Başlatılamadı"
                 if (!started) {
                     feedback = recordIssue(
                         "MYN-WAKE-8001", "Hey Meyene",
@@ -1535,8 +1528,7 @@ private fun AssistantScreen(
                     try {
                         val started = startMynWakeWordService(commandContext)
                         wakeWordEnabled = started
-                        wakeWordStatus = if (started) "Mikrofon açık · Hey Meyene dinleniyor"
-                            else "Yerleşik çevrimdışı ses tanıma kullanılamıyor."
+                        wakeWordStatus = if (started) "Çevrimdışı Türkçe modeli hazırlanıyor…" else "Başlatılamadı"
                         if (!started) {
                             feedback = recordIssue(
                                 "MYN-WAKE-8001", "Hey Meyene",
@@ -1566,13 +1558,6 @@ private fun AssistantScreen(
             stopMynWakeWordService(commandContext)
             wakeWordEnabled = false
             wakeWordStatus = "Kapalı"
-        } else if (!isOfflineWakeWordAvailable(commandContext)) {
-            wakeWordStatus = "Yerleşik çevrimdışı ses tanıma kullanılamıyor."
-            feedback = recordIssue(
-                "MYN-WAKE-8001", "Hey Meyene",
-                "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı. Android'in çevrimdışı Türkçe konuşma hizmetini etkinleştir.",
-                "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
-            )
         } else {
             val missing = listOf(
                 android.Manifest.permission.RECORD_AUDIO,
@@ -2496,7 +2481,7 @@ private fun AssistantScreen(
                                         Text(if (wakeWordEnabled) "Dinlemeyi durdur" else "Hey Meyene'yi etkinleştir")
                                     }
                                     Text(
-                                        "Çevrimdışı çalışma için yerleşik konuşma tanıma hizmetinde Türkçe dil verisi bulunmalı. İlk etkinleştirmede mikrofon, bildirim ve ekran üstünde gösterme izinleri istenir. Dinleme açıkken kalıcı bildirim görünür.",
+                                        "İlk kullanımda yaklaşık 35 MB Türkçe ses modeli bir kez indirilir. Kurulduktan sonra uyandırma ve komut tanıma cihaz üzerinde çevrimdışı çalışır. Dinleme etkin olduğu sürece mikrofon gizlilik göstergesi ve kalıcı bildirim açık kalır.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
                                     )
@@ -3113,7 +3098,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.3.5", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.4.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
