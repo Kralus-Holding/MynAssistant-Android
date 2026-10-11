@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Login
@@ -2108,7 +2109,7 @@ private fun AssistantScreen(
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
                 // This toolbar stays fixed while the page content below it scrolls.
                 Row(
                     Modifier.fillMaxWidth().padding(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 8.dp)
@@ -2753,7 +2754,7 @@ private fun AssistantScreen(
                                             when (commandTarget) {
                                                 "PHONE" -> Icons.Default.Devices
                                                 "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.Tune
+                                                else -> Icons.Default.SmartToy
                                             },
                                             contentDescription = when (commandTarget) {
                                                 "PHONE" -> "Hedef: bu Android telefonu"
@@ -3112,7 +3113,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.3.4", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.3.5", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
