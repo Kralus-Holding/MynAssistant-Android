@@ -60,6 +60,50 @@ class VoskModelInstallerTest {
     }
 
     @Test
+    fun lowStorageFailsBeforeAttemptingDownload() {
+        val lowStorageInstaller = VoskModelInstaller(
+            filesDir = filesDir,
+            cacheDir = cacheDir,
+            modelDirectoryName = MODEL_NAME,
+            modelArchiveUrl = MODEL_URL,
+            downloader = archiveDownloader(sourceArchive),
+            availableSpaceBytes = { 64L * 1024L * 1024L }
+        )
+
+        val error = assertThrows(VoskModelInstallException::class.java) {
+            lowStorageInstaller.ensureInstalled()
+        }
+
+        assertEquals(VoskModelInstallStage.DOWNLOADING, error.stage)
+        assertEquals("no download is started with insufficient space", 0, downloadCount)
+        assertFalse(File(cacheDir, ".$MODEL_NAME.zip.part").exists())
+    }
+
+    @Test
+    fun downloadFailureIsReportedAndLaterAttemptCanRecover() {
+        val failingInstaller = VoskModelInstaller(
+            filesDir = filesDir,
+            cacheDir = cacheDir,
+            modelDirectoryName = MODEL_NAME,
+            modelArchiveUrl = MODEL_URL,
+            downloader = ModelArchiveDownloader { _, _, _, _ ->
+                throw java.io.IOException("HTTP 503")
+            }
+        )
+
+        val error = assertThrows(VoskModelInstallException::class.java) {
+            failingInstaller.ensureInstalled()
+        }
+
+        assertEquals(VoskModelInstallStage.DOWNLOADING, error.stage)
+        assertFalse(File(cacheDir, ".$MODEL_NAME.zip.part").exists())
+
+        val installed = makeInstaller().ensureInstalled()
+        assertTrue(File(installed, "graph/HCLG.fst").isFile)
+        assertEquals(1, downloadCount)
+    }
+
+    @Test
     fun validBackupIsRestoredWithoutRedownloading() {
         val backup = File(filesDir, ".$MODEL_NAME.backup")
         File(backup, "am").mkdirs()
