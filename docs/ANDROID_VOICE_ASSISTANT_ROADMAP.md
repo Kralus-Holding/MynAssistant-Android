@@ -1,6 +1,6 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: implementation notes for the 0.4.4 candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: 0.4.4 baseline notes, extended for candidate 0.4.5. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
 
 ## 0.4.5 follow-up — capture readiness and artifact integrity
 
@@ -70,8 +70,8 @@ The current matcher is a transcript-matching layer, **not a custom acoustic wake
 
 ## Recommended phased architecture
 
-### Phase A — stabilize existing behavior (0.4.4)
-Keep the current single service and local Vosk model. Fix user-visible layout and settings, expose last successful wake timestamp/count, add matcher unit tests, and collect reproducible device results before tuning recognition logic further.
+### Phase A — stabilize existing behavior (0.4.5)
+Keep the current single service and local Vosk model. Keep the Settings-only opt-in, expose wake/error telemetry, require a positive PCM capture preflight before reporting `LISTENING`, add matcher/startup-state tests, and collect reproducible device results before tuning recognition logic further.
 
 ### Phase B — separate responsibilities (0.5)
 Introduce narrow interfaces so the speech backend can change without rewriting the UI:
