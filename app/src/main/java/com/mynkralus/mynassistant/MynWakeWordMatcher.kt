@@ -22,11 +22,34 @@ internal object MynWakeWordMatcher {
     private val heyTokens = setOf("hey", "hay")
     private val assistantWords = setOf("assistant", "assistent")
 
-    fun findMatch(heard: String): MynWakeWordMatch? {
+    fun findMatch(
+        heard: String,
+        allowObservedAsrFallback: Boolean = true
+    ): MynWakeWordMatch? {
         if (heard.isBlank()) return null
 
         val words = heard.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
         if (words.size < 2) return null
+
+        // These are the two exact ASR variants observed by the user on the target phone.
+        // Accept them only at the beginning of a final result (the service controls this
+        // flag), never as fuzzy substring matches in ordinary speech.
+        if (allowObservedAsrFallback) {
+            val first = cleanToken(words[0])
+            val second = cleanToken(words[1])
+            val isObservedAlias =
+                (first == "hey" && second == "ne") ||
+                    (first == "tegmen" && second == "yeni")
+            if (isObservedAlias) {
+                return MynWakeWordMatch(
+                    matchedPhrase = "Hey Meyene",
+                    trailingText = words.drop(2)
+                        .joinToString(" ")
+                        .trim()
+                        .trimStart(',', '.', '!', ':', ';', '-')
+                )
+            }
+        }
 
         for (index in 0 until words.lastIndex) {
             val first = cleanToken(words[index])
