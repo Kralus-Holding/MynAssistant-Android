@@ -49,8 +49,6 @@ import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import android.content.pm.ServiceInfo
-import java.text.Normalizer
-import java.util.Locale
 
 const val EXTRA_MYN_WAKE_COMMAND = "com.mynkralus.mynassistant.EXTRA_WAKE_COMMAND"
 
@@ -169,34 +167,22 @@ class MynWakeWordService : Service() {
         override fun onTimeout() = Unit
     }
 
-    private fun wakePhrases(): List<String> =
-        listOf("hey meyene", "hey mayene", "hey meyene ai", "hey myassistant")
-
-    private fun findWakePhraseAndTrailingText(heard: String): Pair<String, String>? {
-        val normalized = normalize(heard)
-        val wake = wakePhrases().firstOrNull { normalized.contains(it) } ?: return null
-        val start = normalized.indexOf(wake)
-        if (start < 0) return null
-        val end = (start + wake.length).coerceAtMost(heard.length)
-        val trailing = heard.drop(end).trim().trim(',', '.', '!', ':', ';', '-')
-        return wake to trailing
-    }
-
+    private fun processTranscript(transcript: String, isFinal: Boolean) {
     private fun processTranscript(transcript: String, isFinal: Boolean) {
         if (closed || commandReady) return
-        val normalized = normalize(transcript).trim(' ', ',', '.', '!', ':', ';', '-')
-        val match = findWakePhraseAndTrailingText(transcript)
-        val isWakeOnly = wakePhrases().any { normalized == it }
+        val match = MynWakeWordMatcher.findMatch(transcript)
+        val isWakeOnly = match != null && match.trailingText.isBlank()
         if (!awaitingCommand) {
             if (match == null) return
+            recordWakeDetection(match.matchedPhrase)
             awaitingCommand = true
-            val trailing = match.second.trim()
+            val trailing = match.trailingText.trim()
             if (trailing.isBlank()) showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
             else if (isFinal) acceptRecognizedCommand(trailing)
             else showOverlay("Komutunu dinliyorum.", trailing, ready = false)
             return
         }
-        val candidate = match?.second?.takeIf { it.isNotBlank() } ?: transcript.takeIf { !isWakeOnly }.orEmpty()
+        val candidate = match?.trailingText?.takeIf { it.isNotBlank() } ?: transcript.takeIf { !isWakeOnly }.orEmpty()
         if (candidate.isBlank()) {
             if (isFinal) showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
             return
@@ -213,6 +199,15 @@ class MynWakeWordService : Service() {
         awaitingCommand = false
         speechService?.setPause(true)
         showOverlay("Komutunu algıladım.", clean, ready = true)
+    }
+
+    private fun recordWakeDetection(phrase: String) {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        prefs.edit()
+            .putLong(KEY_WAKE_LAST_AT, System.currentTimeMillis())
+            .putInt(KEY_WAKE_COUNT, prefs.getInt(KEY_WAKE_COUNT, 0) + 1)
+            .putString(KEY_WAKE_LAST_PHRASE, phrase)
+            .apply()
     }
 
     private fun parseVoskText(payload: String?, key: String): String {
@@ -781,13 +776,6 @@ class MynWakeWordService : Service() {
         )
     }
 
-    private fun normalize(text: String): String =
-        Normalizer.normalize(text.lowercase(Locale("tr", "TR")), Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
-            .replace('ı', 'i')
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
     private fun dp(value: Int): Int =
         TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP,
@@ -822,6 +810,9 @@ class MynWakeWordService : Service() {
         private const val KEY_STATUS = "wake_word_status"
         private const val KEY_ERROR = "wake_word_error_code"
         private const val KEY_PENDING_COMMAND = "wake_pending_command"
+        private const val KEY_WAKE_LAST_AT = "wake_word_last_detected_at"
+        private const val KEY_WAKE_COUNT = "wake_word_detection_count"
+        private const val KEY_WAKE_LAST_PHRASE = "wake_word_last_phrase"
         private const val CHANNEL_ID = "mynassistant_wake_word"
         private const val NOTIFICATION_ID = 4127
         private const val ACTION_STOP = "com.mynkralus.mynassistant.STOP_WAKE_WORD"
