@@ -2723,6 +2723,11 @@ private fun AssistantScreen(
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
                                     )
                                     Text(
+                                        "Önemli: Dinlemeyi MynAssistant açıkken Ayarlar'dan başlat. Android 14 ve üzeri, uygulama arka plandayken mikrofonlu ön plan servisi başlatılmasını genellikle engeller. Zorla durdurma veya telefonun pil yönetimi dinlemeyi kesebilir; böyle bir durumda uygulamayı açıp yeniden etkinleştir.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
+                                    )
+                                    Text(
                                         "Son algılama: " +
                                             (wakeWordLastDetectedAt.takeIf { it > 0L }?.let {
                                                 android.text.format.DateFormat.format("dd.MM.yyyy HH:mm", it).toString()
