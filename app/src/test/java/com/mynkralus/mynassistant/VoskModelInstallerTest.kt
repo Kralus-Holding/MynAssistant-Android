@@ -184,6 +184,36 @@ class VoskModelInstallerTest {
     }
 
     @Test
+    fun officialLegacyFlatTurkishModelIsAcceptedAndReusedWithoutRedownloading() {
+        val legacyArchive = File(root, "legacy-turkish-model.zip")
+        ZipOutputStream(FileOutputStream(legacyArchive)).use { zip ->
+            addEntry(zip, "$MODEL_NAME/final.mdl", "legacy-flat-model")
+            addEntry(zip, "$MODEL_NAME/mfcc.conf", "legacy-mfcc-config")
+            addEntry(zip, "$MODEL_NAME/word_boundary.int", "legacy-word-boundary")
+            addEntry(zip, "$MODEL_NAME/Gr.fst", "legacy-grammar-graph")
+            addEntry(zip, "$MODEL_NAME/HCLr.fst", "legacy-acoustic-graph")
+        }
+        val legacyInstaller = VoskModelInstaller(
+            filesDir = filesDir,
+            cacheDir = cacheDir,
+            modelDirectoryName = MODEL_NAME,
+            modelArchiveUrl = MODEL_URL,
+            downloader = archiveDownloader(legacyArchive)
+        )
+
+        val installed = legacyInstaller.ensureInstalled()
+        assertTrue(File(installed, "final.mdl").isFile)
+        assertTrue(File(installed, "mfcc.conf").isFile)
+        assertTrue(File(installed, "word_boundary.int").isFile)
+        assertTrue(File(installed, "Gr.fst").isFile)
+        assertTrue(File(installed, "HCLr.fst").isFile)
+
+        val reused = makeInstaller().ensureInstalled()
+        assertEquals(installed.canonicalPath, reused.canonicalPath)
+        assertEquals("legacy Turkish layout is downloaded only once", 1, downloadCount)
+    }
+
+    @Test
     fun modelWithoutGraphFstIsRejected() {
         val incompleteArchive = File(root, "incomplete.zip")
         ZipOutputStream(FileOutputStream(incompleteArchive)).use { zip ->
