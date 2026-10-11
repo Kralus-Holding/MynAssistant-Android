@@ -1459,6 +1459,18 @@ private fun AssistantScreen(
         diagnosticsRevision += 1
         userMessage + "\nSorun kodu: " + issueId
     }
+    val refreshWakeWordUi: () -> Unit = {
+        val wakePrefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        wakeWordEnabled = wakePrefs.getBoolean("wake_word_enabled", false)
+        wakeWordStatus = wakePrefs.getString("wake_word_status", "Kapalı").orEmpty()
+        wakeWordPhase = wakePrefs.getString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue).orEmpty()
+        wakeWordErrorCode = wakePrefs.getString("wake_word_error_code", "").orEmpty()
+        wakeWordErrorDetails = wakePrefs.getString("wake_word_error_details", "").orEmpty()
+        wakeWordLastPhase = wakePrefs.getString("wake_word_last_phase", "").orEmpty()
+        wakeWordRetryCount = wakePrefs.getInt("wake_word_retry_count", 0)
+        wakeWordLastDetectedAt = wakePrefs.getLong("wake_word_last_detected_at", 0L)
+        wakeWordDetectionCount = wakePrefs.getInt("wake_word_detection_count", 0)
+    }
     var pendingCommandAfterPermission by remember { mutableStateOf<String?>(null) }
     var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
     var permissionResultTick by remember { mutableIntStateOf(0) }
@@ -1507,7 +1519,7 @@ private fun AssistantScreen(
             try {
                 val started = startMynWakeWordService(commandContext)
                 wakeWordEnabled = started
-                wakeWordStatus = if (started) "Çevrimdışı Türkçe modeli hazırlanıyor…" else "Başlatılamadı"
+                refreshWakeWordUi()
                 if (!started) {
                     feedback = recordIssue(
                         "MYN-WAKE-8001", "Hey Meyene",
@@ -1517,7 +1529,7 @@ private fun AssistantScreen(
                 }
             } catch (error: Exception) {
                 wakeWordEnabled = false
-                wakeWordStatus = "Başlatılamadı"
+                refreshWakeWordUi()
                 feedback = recordIssue(
                     "MYN-WAKE-8009", "Hey Meyene",
                     "Uyandırma dinlemesi başlatılamadı. Telefon ayarlarını kontrol et.",
@@ -1635,7 +1647,7 @@ private fun AssistantScreen(
                 try {
                     val started = startMynWakeWordService(commandContext)
                     wakeWordEnabled = started
-                    wakeWordStatus = if (started) "Servis isteği gönderildi; mikrofon akışı bekleniyor…" else "Başlatılamadı"
+                    refreshWakeWordUi()
                 } catch (error: Exception) {
                     wakeWordEnabled = false
                     wakeWordStatus = "Başlatılamadı"
