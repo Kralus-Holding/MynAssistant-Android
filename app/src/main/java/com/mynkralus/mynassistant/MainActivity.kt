@@ -2753,7 +2753,7 @@ private fun AssistantScreen(
                                             when (commandTarget) {
                                                 "PHONE" -> Icons.Default.Devices
                                                 "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.SettingsRemote
+                                                else -> Icons.Default.Tune
                                             },
                                             contentDescription = when (commandTarget) {
                                                 "PHONE" -> "Hedef: bu Android telefonu"
@@ -3112,7 +3112,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.3.3", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.3.4", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
