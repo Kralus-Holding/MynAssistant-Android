@@ -308,14 +308,18 @@ class MynWakeWordService : Service() {
     }
 
     private fun publishWakeTranscriptForDiagnostics(transcript: String, isFinal: Boolean) {
-        if (closed || awaitingCommand || commandReady || transcript.isBlank()) return
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        if (!prefs.getBoolean(KEY_WAKE_DEBUG_TRANSCRIPTS, false)) return
+        val displayText = WakeWordDiagnosticsPolicy.transcriptToDisplay(
+            enabled = prefs.getBoolean(KEY_WAKE_DEBUG_TRANSCRIPTS, false),
+            awaitingCommand = awaitingCommand,
+            commandReady = commandReady,
+            transcript = transcript
+        ) ?: return
 
         // Opt-in diagnostics only: keep the most recent short ASR text while waiting for
         // the wake phrase. Do not save PCM/audio and do not capture command speech.
         prefs.edit()
-            .putString(KEY_WAKE_LAST_TRANSCRIPT, transcript.take(120))
+            .putString(KEY_WAKE_LAST_TRANSCRIPT, displayText)
             .putBoolean(KEY_WAKE_LAST_TRANSCRIPT_FINAL, isFinal)
             .putLong(KEY_WAKE_LAST_TRANSCRIPT_AT, System.currentTimeMillis())
             .apply()
