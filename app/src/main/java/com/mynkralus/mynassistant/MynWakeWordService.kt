@@ -17,9 +17,21 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
+import org.json.JSONObject
+import org.vosk.LibVosk
+import org.vosk.LogLevel
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.RecognitionListener
+import org.vosk.android.SpeechService
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.ZipInputStream
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.WindowManager
@@ -41,7 +53,13 @@ const val EXTRA_MYN_WAKE_COMMAND = "com.mynkralus.mynassistant.EXTRA_WAKE_COMMAN
 
 class MynWakeWordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var recognizer: SpeechRecognizer? = null
+    @Volatile private var speechModel: Model? = null
+    @Volatile private var recognizer: Recognizer? = null
+    @Volatile private var speechService: SpeechService? = null
+    @Volatile private var modelInitThread: Thread? = null
+    @Volatile private var notificationStatus = "Çevrimdışı Türkçe modeli hazırlanıyor…"
+    private var recoveryAttempts = 0
+    private var recoveringSpeechService = false
     private var overlayView: LinearLayout? = null
     private var overlayStatus: TextView? = null
     private var overlayCommand: EditText? = null
@@ -49,12 +67,9 @@ class MynWakeWordService : Service() {
     private var serviceFailed = false
     private var primaryButton: TextView? = null
     private var secondaryButton: TextView? = null
-    private var isListening = false
     private var awaitingCommand = false
     private var commandReady = false
     private var lastCommand = ""
-    private var wakeDetectedInCurrentSession = false
-    private var consecutiveErrors = 0
     private var lastRecoverableIssueAt = 0L
     private var closed = false
     private lateinit var windowManager: WindowManager
@@ -68,6 +83,7 @@ class MynWakeWordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             userRequestedStop = true
+            modelInitThread?.interrupt()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -77,13 +93,10 @@ class MynWakeWordService : Service() {
             return START_NOT_STICKY
         }
         try {
+            notificationStatus = "Çevrimdışı Türkçe modeli hazırlanıyor…"
             val notification = buildNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
@@ -92,238 +105,257 @@ class MynWakeWordService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
-        ) {
-            fail(
-                "MYN-WAKE-8001",
-                "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı."
-            )
-            stopSelf()
-            return START_NOT_STICKY
+        if (speechService != null || modelInitThread?.isAlive == true) return START_STICKY
+        userRequestedStop = false
+        serviceFailed = false
+        updateServiceStatus("Çevrimdışı Türkçe modeli hazırlanıyor…", enabled = true)
+        modelInitThread = Thread({ initializeOfflineSpeech() }, "Myn-Vosk-Init").apply {
+            isDaemon = true
+            start()
         }
-        if (recognizer == null) {
-            recognizer = try {
-                SpeechRecognizer.createOnDeviceSpeechRecognizer(this).also {
-                    it.setRecognitionListener(listener)
-                }
-            } catch (error: Exception) {
-                fail("MYN-WAKE-8004", "Yerleşik ses tanıma başlatılamadı: " + error.javaClass.simpleName)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-        }
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-            .putBoolean(KEY_ENABLED, true)
-            .putString(KEY_STATUS, "Mikrofon açık · Hey Meyene dinleniyor")
-            .remove(KEY_ERROR)
-            .apply()
-        startListeningSoon(150)
         return START_STICKY
     }
-
-    private val listener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: android.os.Bundle?) = Unit
-        override fun onBeginningOfSpeech() = Unit
-        override fun onRmsChanged(rmsdB: Float) = Unit
-        override fun onBufferReceived(buffer: ByteArray?) = Unit
-        override fun onEndOfSpeech() = Unit
-        override fun onPartialResults(partialResults: android.os.Bundle?) {
-            if (closed || commandReady) return
-            val heard = partialResults
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-                .orEmpty()
-                .trim()
-            if (heard.isBlank()) return
-
-            val matchedWake = findWakePhraseAndTrailingText(heard)
-            if (!awaitingCommand && matchedWake != null) {
-                // Open the mini-panel on the partial hypothesis, without waiting for end-of-speech.
-                wakeDetectedInCurrentSession = true
-                awaitingCommand = true
-                commandReady = false
-                lastCommand = ""
-                showOverlay(
-                    if (matchedWake.second.isBlank()) "Seni dinliyorum. Komutunu söyle."
-                    else "Komutunu dinliyorum.",
-                    matchedWake.second,
-                    ready = false
-                )
-            } else if (awaitingCommand) {
-                val normalizedHeard = normalize(heard).trim(' ', ',', '.', '!', ':', ';', '-')
-                val isWakeOnly = wakePhrases().any { normalizedHeard == it }
-                val partialCommand = when {
-                    matchedWake != null -> matchedWake.second
-                    !isWakeOnly -> heard
-                    else -> ""
-                }
-                if (partialCommand.isNotBlank()) {
-                    showOverlay("Komutunu dinliyorum.", partialCommand, ready = false)
-                }
-            }
-        }
-        override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
-
-        override fun onError(error: Int) {
-            isListening = false
-            if (closed) return
-            if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                fail("MYN-WAKE-8005", "Mikrofon izni kaybedildi. Yeniden izin verip dinlemeyi başlat.")
-                stopSelf()
-                return
-            }
-            if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
-            ) {
-                fail("MYN-WAKE-8012", "Cihazda çevrimdışı Türkçe konuşma modeli kullanılamıyor.")
-                stopSelf()
-                return
-            }
-            if (error == SpeechRecognizer.ERROR_NO_MATCH ||
-                error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-            ) {
-                consecutiveErrors = 0
-                startListeningSoon(250)
-                return
-            }
-            consecutiveErrors += 1
-            if (consecutiveErrors >= 12) {
-                retrying(
-                    "MYN-WAKE-8010",
-                    "Ses tanıma sık sık kesildi. Hey Meyene dinlemesini kapatmadan yeniden bağlanmayı deniyorum."
-                )
-                consecutiveErrors = 0
-                startListeningSoon(2200)
-                return
-            }
-            // Keep the explicit foreground session enabled during transient recognizer restarts.
-            val backoff = (350L * (1 shl consecutiveErrors.coerceAtMost(3))).coerceAtMost(2800L)
-            startListeningSoon(
-                maxOf(backoff, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1600L else 0L)
-            )
-        }
-
-
-
-        override fun onResults(results: android.os.Bundle?) {
-            isListening = false
-            if (closed) return
-            val heard = results
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-                .orEmpty()
-                .trim()
-            if (heard.isBlank()) {
-                startListeningSoon(500)
-                return
-            }
-            consecutiveErrors = 0
-            if (wakeDetectedInCurrentSession) {
-                wakeDetectedInCurrentSession = false
-                val normalizedFinal = normalize(heard).trim(' ', ',', '.', '!', ':', ';', '-')
-                val isWakeOnly = wakePhrases().any { normalizedFinal == it }
-                val trailing = findWakePhraseAndTrailingText(heard)?.second
-                    ?.takeIf { it.isNotBlank() }
-                    ?: heard.takeIf { !isWakeOnly }.orEmpty()
-                if (trailing.isNotBlank()) {
-                    lastCommand = trailing
-                    commandReady = true
-                    awaitingCommand = false
-                    showOverlay("Komutunu algıladım.", trailing, ready = true)
-                } else {
-                    awaitingCommand = true
-                    commandReady = false
-                    lastCommand = ""
-                    showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
-                    startListeningSoon(300)
-                }
-                return
-            }
-            consumeSpeech(heard)
-        }
-    }
-
-    private fun consumeSpeech(heard: String) {
-        val normalized = normalize(heard)
-        val wakePhrases = wakePhrases()
-        if (!awaitingCommand) {
-            val wake = wakePhrases.firstOrNull { normalized.contains(it) } ?: run {
-                startListeningSoon(250)
-                return
-            }
-            val rawIndex = normalize(heard).indexOf(wake)
-            val trailing = if (rawIndex >= 0) heard.drop((rawIndex + wake.length).coerceAtMost(heard.length))
-                .trim().trim(',', '.', '!', ':', ';', '-')
-            else ""
-            if (trailing.isNotBlank()) {
-                lastCommand = trailing
-                commandReady = true
-                awaitingCommand = false
-                showOverlay("Komutunu algıladım.", trailing, ready = true)
-            } else {
-                awaitingCommand = true
-                commandReady = false
-                lastCommand = ""
-                showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
-                startListeningSoon(350)
-            }
-        } else {
-            lastCommand = heard
-            commandReady = true
-            awaitingCommand = false
-            showOverlay("Komutunu algıladım.", heard, ready = true)
-        }
-    }
-
-    private fun wakePhrases(): List<String> =
-        listOf("hey meyene", "hey mayene", "hey meyene ai", "hey myassistant")
-
-    private fun findWakePhraseAndTrailingText(heard: String): Pair<String, String>? {
-        val normalized = normalize(heard)
-        val wake = wakePhrases().firstOrNull { normalized.contains(it) } ?: return null
-        val start = normalized.indexOf(wake)
-        if (start < 0) return null
-        val end = (start + wake.length).coerceAtMost(heard.length)
-        val trailing = heard.drop(end).trim().trim(',', '.', '!', ':', ';', '-')
-        return wake to trailing
-    }
-
-    private fun startListeningSoon(delayMs: Long) {
-        if (closed || commandReady || isListening) return
-        mainHandler.removeCallbacks(startListeningRunnable)
-        mainHandler.postDelayed(startListeningRunnable, delayMs)
-    }
-
-    private val startListeningRunnable = Runnable {
-        if (closed || commandReady || isListening) return@Runnable
-        val activeRecognizer = recognizer ?: return@Runnable
+    private fun initializeOfflineSpeech() {
         try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "tr-TR")
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 6500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-            }
-            wakeDetectedInCurrentSession = false
-            isListening = true
-            activeRecognizer.startListening(intent)
+            val modelDirectory = ensureOfflineModel()
+            if (closed || userRequestedStop) return
+            LibVosk.setLogLevel(LogLevel.WARN)
+            val loadedModel = Model(modelDirectory.absolutePath)
+            val loadedRecognizer = Recognizer(loadedModel, SAMPLE_RATE.toFloat())
+            val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
+            speechModel = loadedModel
+            recognizer = loadedRecognizer
+            speechService = streamingService
+            if (closed || userRequestedStop) { releaseSpeechEngine(); return }
+            updateServiceStatus("Hey Meyene dinliyor · çevrimdışı", enabled = true)
+            if (!streamingService.startListening(voskListener)) throw IOException("Vosk ses akışı başlatılamadı.")
         } catch (error: Exception) {
-            isListening = false
-            retrying(
-                "MYN-WAKE-8006",
-                "Ses dinlemesi yenileniyor: " + error.javaClass.simpleName
+            if (closed || userRequestedStop) return
+            fail(
+                "MYN-WAKE-8013",
+                "Çevrimdışı Türkçe ses motoru başlatılamadı: " +
+                    (error.message ?: error.javaClass.simpleName) +
+                    ". İlk kurulumda internet bağlantısı gerekebilir."
             )
-            startListeningSoon(1800)
+            stopSelf()
         }
     }
+
+    private val voskListener = object : RecognitionListener {
+        override fun onPartialResult(hypothesis: String?) {
+            val transcript = parseVoskText(hypothesis, "partial")
+            if (transcript.isNotBlank()) mainHandler.post { processTranscript(transcript, isFinal = false) }
+        }
+        override fun onResult(hypothesis: String?) {
+            val transcript = parseVoskText(hypothesis, "text")
+            if (transcript.isNotBlank()) mainHandler.post { processTranscript(transcript, isFinal = true) }
+        }
+        override fun onFinalResult(hypothesis: String?) {
+            val transcript = parseVoskText(hypothesis, "text")
+            if (transcript.isNotBlank()) mainHandler.post { processTranscript(transcript, isFinal = true) }
+        }
+        override fun onError(exception: Exception?) {
+            mainHandler.post { recoverSpeechEngine(exception) }
+        }
+        override fun onTimeout() = Unit
+    }
+
+    private fun processTranscript(transcript: String, isFinal: Boolean) {
+        if (closed || commandReady) return
+        val normalized = normalize(transcript).trim(' ', ',', '.', '!', ':', ';', '-')
+        val match = findWakePhraseAndTrailingText(transcript)
+        val isWakeOnly = wakePhrases().any { normalized == it }
+        if (!awaitingCommand) {
+            if (match == null) return
+            awaitingCommand = true
+            val trailing = match.second.trim()
+            if (trailing.isBlank()) showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
+            else if (isFinal) acceptRecognizedCommand(trailing)
+            else showOverlay("Komutunu dinliyorum.", trailing, ready = false)
+            return
+        }
+        val candidate = match?.second?.takeIf { it.isNotBlank() } ?: transcript.takeIf { !isWakeOnly }.orEmpty()
+        if (candidate.isBlank()) {
+            if (isFinal) showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
+            return
+        }
+        if (isFinal) acceptRecognizedCommand(candidate)
+        else showOverlay("Komutunu dinliyorum.", candidate, ready = false)
+    }
+
+    private fun acceptRecognizedCommand(command: String) {
+        val clean = command.trim()
+        if (clean.isBlank()) return
+        lastCommand = clean
+        commandReady = true
+        awaitingCommand = false
+        speechService?.setPause(true)
+        showOverlay("Komutunu algıladım.", clean, ready = true)
+    }
+
+    private fun parseVoskText(payload: String?, key: String): String {
+        if (payload.isNullOrBlank()) return ""
+        return try { JSONObject(payload).optString(key, "").trim() } catch (_: Exception) { "" }
+    }
+
+    private fun recoverSpeechEngine(exception: Exception?) {
+        if (closed || userRequestedStop || serviceFailed || recoveringSpeechService) return
+        recoveringSpeechService = true
+        recoveryAttempts += 1
+        retrying("MYN-WAKE-8010", "Sürekli ses akışı yeniden kuruluyor: " +
+            (exception?.message ?: exception?.javaClass?.simpleName ?: "ses akışı kesildi"))
+        if (recoveryAttempts > 10) {
+            recoveringSpeechService = false
+            fail("MYN-WAKE-8011", "Mikrofon akışı çok kez kesildi. Pil kısıtlamalarını kapatıp Hey Meyene'yi yeniden başlat.")
+            stopSelf()
+            return
+        }
+        mainHandler.postDelayed({
+            try {
+                if (closed || userRequestedStop || serviceFailed) {
+                    recoveringSpeechService = false
+                    return@postDelayed
+                }
+                releaseSpeechStreamOnly()
+                val activeModel = speechModel ?: throw IOException("Türkçe model bellekte bulunamadı.")
+                val nextRecognizer = Recognizer(activeModel, SAMPLE_RATE.toFloat())
+                val nextService = SpeechService(nextRecognizer, SAMPLE_RATE.toFloat())
+                recognizer = nextRecognizer
+                speechService = nextService
+                if (!nextService.startListening(voskListener)) throw IOException("Ses akışı yeniden başlatılamadı.")
+                recoveringSpeechService = false
+                recoveryAttempts = 0
+                updateServiceStatus("Hey Meyene dinliyor · çevrimdışı", enabled = true)
+            } catch (error: Exception) {
+                recoveringSpeechService = false
+                retrying("MYN-WAKE-8010", "Ses akışı yeniden başlatılamadı: " + error.javaClass.simpleName)
+                if (!closed && !userRequestedStop && !serviceFailed) mainHandler.postDelayed({ recoverSpeechEngine(error) }, 1800)
+            }
+        }, 1200)
+    }
+
+    private fun releaseSpeechStreamOnly() {
+        runCatching { speechService?.cancel() }
+        runCatching { speechService?.shutdown() }
+        speechService = null
+        runCatching { recognizer?.close() }
+        recognizer = null
+    }
+
+    private fun releaseSpeechEngine() {
+        releaseSpeechStreamOnly()
+        runCatching { speechModel?.close() }
+        speechModel = null
+    }
+
+    private fun ensureOfflineModel(): File {
+        val modelDirectory = File(filesDir, MODEL_DIRECTORY)
+        if (isValidModelDirectory(modelDirectory)) return modelDirectory
+        if (modelDirectory.exists()) modelDirectory.deleteRecursively()
+        val archive = File(cacheDir, MODEL_ARCHIVE_NAME)
+        val partialArchive = File(cacheDir, "$MODEL_ARCHIVE_NAME.part")
+        val connection = (URL(MODEL_DOWNLOAD_URL).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 25_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+            requestMethod = "GET"
+        }
+        try {
+            updateServiceStatus("Türkçe çevrimdışı model indiriliyor…", enabled = true)
+            connection.connect()
+            val response = connection.responseCode
+            if (response !in 200..299) throw IOException("Model sunucusu HTTP $response döndürdü.")
+            val totalBytes = connection.contentLengthLong
+            var downloaded = 0L
+            var lastPublishedProgress = -1
+            BufferedInputStream(connection.inputStream).use { input ->
+                BufferedOutputStream(FileOutputStream(partialArchive)).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        if (Thread.currentThread().isInterrupted || userRequestedStop || closed) throw IOException("Model kurulumu iptal edildi.")
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (totalBytes > 0L) {
+                            val percent = ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                            if (percent >= lastPublishedProgress + 5 || percent == 100) {
+                                lastPublishedProgress = percent
+                                updateServiceStatus("Türkçe model indiriliyor · $percent%", enabled = true)
+                            }
+                        } else if (downloaded / (1024 * 1024) > lastPublishedProgress) {
+                            lastPublishedProgress = (downloaded / (1024 * 1024)).toInt()
+                            updateServiceStatus("Türkçe model indiriliyor · \${lastPublishedProgress} MB", enabled = true)
+                        }
+                    }
+                }
+            }
+            if (partialArchive.length() < 20L * 1024L * 1024L) throw IOException("İndirilen Türkçe model paketi eksik görünüyor.")
+            if (archive.exists()) archive.delete()
+            if (!partialArchive.renameTo(archive)) throw IOException("Model paketi kaydedilemedi.")
+            updateServiceStatus("Türkçe model açılıyor…", enabled = true)
+            val extractionRoot = File(cacheDir, "myn-vosk-extract")
+            extractionRoot.deleteRecursively()
+            if (!extractionRoot.mkdirs()) throw IOException("Model klasörü oluşturulamadı.")
+            unzipModelSafely(archive, extractionRoot)
+            val extracted = File(extractionRoot, MODEL_DIRECTORY).takeIf { isValidModelDirectory(it) }
+                ?: extractionRoot.listFiles()?.firstOrNull { isValidModelDirectory(it) }
+                ?: throw IOException("İndirilen pakette kullanılabilir Türkçe model bulunamadı.")
+            if (modelDirectory.exists()) modelDirectory.deleteRecursively()
+            if (!extracted.renameTo(modelDirectory)) extracted.copyRecursively(modelDirectory, overwrite = true)
+            extractionRoot.deleteRecursively()
+            archive.delete()
+            if (!isValidModelDirectory(modelDirectory)) {
+                modelDirectory.deleteRecursively()
+                throw IOException("Türkçe model doğrulaması başarısız.")
+            }
+            return modelDirectory
+        } finally {
+            connection.disconnect()
+            partialArchive.delete()
+        }
+    }
+
+    private fun unzipModelSafely(archive: File, destination: File) {
+        val rootPath = destination.canonicalPath + File.separator
+        ZipInputStream(BufferedInputStream(archive.inputStream())).use { zip ->
+            while (true) {
+                if (Thread.currentThread().isInterrupted || userRequestedStop || closed) throw IOException("Model kurulumu iptal edildi.")
+                val entry = zip.nextEntry ?: break
+                val output = File(destination, entry.name.replace('\\', '/')).canonicalFile
+                if (!output.path.startsWith(rootPath)) throw IOException("Model paketinde geçersiz dosya yolu var.")
+                if (entry.isDirectory) output.mkdirs()
+                else {
+                    output.parentFile?.mkdirs()
+                    BufferedOutputStream(FileOutputStream(output)).use { target ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = zip.read(buffer)
+                            if (read < 0) break
+                            target.write(buffer, 0, read)
+                        }
+                    }
+                }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private fun isValidModelDirectory(directory: File): Boolean =
+        File(directory, "am/final.mdl").isFile &&
+            (File(directory, "conf/model.conf").isFile || File(directory, "conf/mfcc.conf").isFile)
+
+    private fun updateServiceStatus(status: String, enabled: Boolean, errorCode: String? = null) {
+        notificationStatus = status
+        val editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putBoolean(KEY_ENABLED, enabled)
+            .putString(KEY_STATUS, status)
+        if (errorCode.isNullOrBlank()) editor.remove(KEY_ERROR) else editor.putString(KEY_ERROR, errorCode)
+        editor.apply()
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification()) }
+    }
+
+
 
     private fun showOverlay(status: String, recognizedCommand: String, ready: Boolean) {
         if (closed || !Settings.canDrawOverlays(this)) return
