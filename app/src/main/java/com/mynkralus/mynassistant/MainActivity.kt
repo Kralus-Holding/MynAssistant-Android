@@ -1343,6 +1343,7 @@ private fun AssistantScreen(
     var page by remember { mutableStateOf(Page.HOME) }
     val pageHistory = remember { mutableStateListOf<Page>() }
     var drawer by remember { mutableStateOf(false) }
+    var showExitConfirmation by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -1386,13 +1387,13 @@ private fun AssistantScreen(
         }
         drawer = false
     }
-    BackHandler(enabled = drawer || (!keyboardVisible && (page != Page.HOME || pageHistory.isNotEmpty()))) {
-        if (drawer) {
-            drawer = false
-        } else if (pageHistory.isNotEmpty()) {
-            page = pageHistory.removeAt(pageHistory.lastIndex)
-        } else {
-            page = Page.HOME
+    BackHandler(enabled = !keyboardVisible) {
+        when {
+            showExitConfirmation -> showExitConfirmation = false
+            drawer -> drawer = false
+            pageHistory.isNotEmpty() -> page = pageHistory.removeAt(pageHistory.lastIndex)
+            page != Page.HOME -> page = Page.HOME
+            else -> showExitConfirmation = true
         }
     }
     val recordIssue: (String, String, String, String, String) -> String = {
@@ -2116,8 +2117,31 @@ private fun AssistantScreen(
                 ) {
                     IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, contentDescription = "Menüyü aç", modifier = Modifier.size(30.dp)) }
                     Spacer(Modifier.weight(1f))
-                    Box(Modifier.size(42.dp).clickable { navigateToPage(Page.REMOTE) }, contentAlignment = Alignment.Center) { Icon(Icons.Default.SettingsRemote, contentDescription = "PC kumandası", modifier = Modifier.size(32.dp)) }
-                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        Modifier.size(42.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (wakeWordEnabled) Color(0xFF1C7C59).copy(alpha = .22f)
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            .clickable { requestWakeWordActivation() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = if (wakeWordEnabled) "Hey Meyene dinlemesini durdur" else "Hey Meyene mikrofonunu başlat",
+                            tint = if (wakeWordEnabled) Color(0xFF64DBA0) else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(25.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        Modifier.size(42.dp).clickable { navigateToPage(Page.REMOTE) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.SettingsRemote, contentDescription = "PC kumandası", modifier = Modifier.size(30.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
                     Button(onClick = toggleTheme, shape = RoundedCornerShape(18.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(18.dp)); Text(if (dark) "Açık" else "Koyu", fontSize = 14.sp) }
                     }
@@ -2725,6 +2749,8 @@ private fun AssistantScreen(
                                     ) {
                                         Icon(
                                             when (commandTarget) {
+                                                "PHONE" -> Icons.Default.Devices
+                                                "PC" -> Icons.Default.Computer
                                                 else -> Icons.Default.GraphicEq
                                             },
                                             contentDescription = when (commandTarget) {
@@ -2918,6 +2944,22 @@ private fun AssistantScreen(
                     }
                 )
             }
+            if (showExitConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { showExitConfirmation = false },
+                    title = { Text("MynAssistant açık kalsın mı?") },
+                    text = { Text("Geri tuşuna tekrar basarsan uygulamadan çıkabilirsin. Açık sayfalar arasında geri dönmek için geri tuşunu kullan.") },
+                    confirmButton = {
+                        TextButton(onClick = { showExitConfirmation = false }) { Text("Uygulamada kal") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            showExitConfirmation = false
+                            (commandContext as? ComponentActivity)?.finish()
+                        }) { Text("Çıkış yap") }
+                    }
+                )
+            }
             if (showAccessibilitySetupDialog) {
                 AlertDialog(
                     onDismissRequest = {
@@ -3068,7 +3110,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.3.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.3.2", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
