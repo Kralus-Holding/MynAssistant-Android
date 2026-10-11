@@ -1410,6 +1410,10 @@ private fun AssistantScreen(
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("wake_word_error_details", "").orEmpty())
     }
+    var wakeWordErrorAt by remember {
+        mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong("wake_word_error_at", 0L))
+    }
     var wakeWordLastPhase by remember {
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("wake_word_last_phase", "").orEmpty())
@@ -1466,6 +1470,7 @@ private fun AssistantScreen(
         wakeWordPhase = wakePrefs.getString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue).orEmpty()
         wakeWordErrorCode = wakePrefs.getString("wake_word_error_code", "").orEmpty()
         wakeWordErrorDetails = wakePrefs.getString("wake_word_error_details", "").orEmpty()
+        wakeWordErrorAt = wakePrefs.getLong("wake_word_error_at", 0L)
         wakeWordLastPhase = wakePrefs.getString("wake_word_last_phase", "").orEmpty()
         wakeWordRetryCount = wakePrefs.getInt("wake_word_retry_count", 0)
         wakeWordLastDetectedAt = wakePrefs.getLong("wake_word_last_detected_at", 0L)
@@ -1770,7 +1775,7 @@ private fun AssistantScreen(
         val wakeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
             if (key in setOf(
                     "wake_word_enabled", "wake_word_status", "wake_word_phase",
-                    "wake_word_error_code", "wake_word_error_details", "wake_word_last_phase",
+                    "wake_word_error_code", "wake_word_error_details", "wake_word_error_at", "wake_word_last_phase",
                     "wake_word_retry_count", "wake_word_last_detected_at", "wake_word_detection_count"
                 )
             ) {
@@ -1779,6 +1784,7 @@ private fun AssistantScreen(
                 wakeWordPhase = shared?.getString("wake_word_phase", MynWakeWordPhase.OFF.persistedValue).orEmpty()
                 wakeWordErrorCode = shared?.getString("wake_word_error_code", "").orEmpty()
                 wakeWordErrorDetails = shared?.getString("wake_word_error_details", "").orEmpty()
+                wakeWordErrorAt = shared?.getLong("wake_word_error_at", 0L) ?: 0L
                 wakeWordLastPhase = shared?.getString("wake_word_last_phase", "").orEmpty()
                 wakeWordRetryCount = shared?.getInt("wake_word_retry_count", 0) ?: 0
                 wakeWordLastDetectedAt = shared?.getLong("wake_word_last_detected_at", 0L) ?: 0L
@@ -2524,8 +2530,20 @@ private fun AssistantScreen(
                                         ) { Box(Modifier.size(10.dp)) }
                                     }
                                     Text(
-                                        if (wakeWordEnabled) "“Hey Meyene” dediğinde ekran üstü panel açılır."
-                                        else "Etkinleştirdikten sonra “Hey Meyene” diyerek diğer uygulamaların üzerinde yüzen mikrofon panelini çağırabilirsin.",
+                                        when (wakeWordPhase) {
+                                            MynWakeWordPhase.LISTENING.persistedValue ->
+                                                "“Hey Meyene” dediğinde ekran üstü komut paneli açılmalı."
+                                            MynWakeWordPhase.ERROR.persistedValue ->
+                                                "Dinleme başlatılamadı veya durdu. Hata ayrıntılarını aşağıdan kontrol edebilirsin."
+                                            MynWakeWordPhase.DOWNLOADING_MODEL.persistedValue,
+                                            MynWakeWordPhase.EXTRACTING_MODEL.persistedValue,
+                                            MynWakeWordPhase.VALIDATING_MODEL.persistedValue,
+                                            MynWakeWordPhase.LOADING_ENGINE.persistedValue,
+                                            MynWakeWordPhase.STARTING_MICROPHONE.persistedValue ->
+                                                "Ses sistemi hazırlanıyor. Gerçek dinleme durumu aşağıdaki aşamada gösterilir."
+                                            else ->
+                                                "Etkinleştirdikten sonra desteklenen koşullarda “Hey Meyene” diyerek diğer uygulamaların üzerinde yüzen paneli çağırabilirsin."
+                                        },
                                         fontSize = 13.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f)
                                     )
@@ -2544,7 +2562,10 @@ private fun AssistantScreen(
                                         Text(
                                             "Hata kodu: $wakeWordErrorCode · Son aşama: " +
                                                 wakeWordLastPhase.ifBlank { "bilinmiyor" } +
-                                                " · yeniden deneme: $wakeWordRetryCount",
+                                                " · yeniden deneme: $wakeWordRetryCount" +
+                                                (wakeWordErrorAt.takeIf { it > 0L }?.let {
+                                                    " · " + android.text.format.DateFormat.format("dd.MM HH:mm", it)
+                                                } ?: ""),
                                             fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.error
                                         )
