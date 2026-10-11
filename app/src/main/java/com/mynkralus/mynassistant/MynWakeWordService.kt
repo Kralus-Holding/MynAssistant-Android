@@ -435,6 +435,12 @@ class MynWakeWordService : Service() {
                 .remove(KEY_ERROR_AT)
         }
         editor.apply()
+        // Keep a stage trail in Logcat without recording raw audio or command contents.
+        Log.i(
+            LOG_TAG,
+            "phase=${phase?.persistedValue ?: "UNCHANGED"}; enabled=$enabled; " +
+                "errorCode=${errorCode ?: "none"}; status=$status"
+        )
         runCatching {
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
         }
