@@ -1,6 +1,14 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: 0.4.7 diagnostics candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: 0.4.8 wake-transcript fallback candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+
+## 0.4.8 follow-up — recognize observed Turkish ASR variants narrowly
+
+- The target phone's opt-in diagnostic displayed two final Vosk outputs after the user spoke “Hey Meyene”: `hey ne` and `teğmen yeni`.
+- Added a narrow compatibility fallback for only those exact two-word prefixes, only at the beginning of a final recognition result. It extracts any following command text. Partial results cannot activate this fallback, and the aliases do not match when they occur later in a sentence.
+- Added unit tests for both observed variants, command extraction, final-result gating and leading-speech false-positive cases.
+- This is a measured ASR-transcript workaround, not the intended final acoustic detector. A person actually saying “hey ne” or “teğmen yeni” at the beginning of a final utterance can still trigger the fallback; users should be able to disable this compatibility path before general release if false activations appear.
+- Candidate version: **0.4.8 / versionCode 25**. The next architecture milestone remains a purpose-trained acoustic model (for example an openWakeWord-compatible ONNX model) plus a single microphone owner that switches from wake detection to full Turkish command ASR after a verified trigger. Pretrained openWakeWord models use different phrases, and the published sherpa-onnx KWS catalogue does not include a verified Turkish pretrained model. Do not substitute “Hey Jarvis” or another unrelated phrase model and claim it detects “Hey Meyene”.
 
 ## 0.4.7 follow-up — measure wake phrase recognition before retuning
 
