@@ -16,7 +16,7 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 - Android remote actions are queued in Firestore commands; the Windows Agent consumes commands for its registered device.
 - The Android app no longer requires the user to type a Windows IP address or local bridge token.
 
-## Hey Meyene — offline voice wake word (Android 0.4.2 candidate)
+## Hey Meyene — offline voice wake word (Android 0.4.3 candidate)
 
 - Listening is explicitly enabled or disabled from **Settings → Arka planda dinle**. While enabled, the app shows an ongoing foreground-service notification and Android's microphone privacy indicator.
 - The first activation downloads the Turkish Vosk model (about 35 MB in this configuration). Once stored locally, recognition runs on-device without sending speech audio to a speech cloud service.
