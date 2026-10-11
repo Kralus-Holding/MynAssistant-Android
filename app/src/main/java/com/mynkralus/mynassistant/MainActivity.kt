@@ -952,7 +952,7 @@ private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILE
  * Returns true only when Android accepted the start request. Listening becomes active
  * only after MynWakeWordService reports the LISTENING phase through shared preferences.
  */
-private fun startMynWakeWordService(context: Context): Boolean {
+private fun requestMynWakeWordServiceStart(context: Context) {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     prefs.edit()
         .putBoolean("wake_word_enabled", true)
@@ -965,11 +965,10 @@ private fun startMynWakeWordService(context: Context): Boolean {
         .putInt("wake_word_retry_count", 0)
         .apply()
 
-    return try {
+    try {
         androidx.core.content.ContextCompat.startForegroundService(
             context, Intent(context, MynWakeWordService::class.java)
         )
-        true
     } catch (error: Exception) {
         val code = "MYN-WAKE-8009"
         val detail = error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
@@ -1613,16 +1612,8 @@ private fun AssistantScreen(
         if (Settings.canDrawOverlays(commandContext)) {
             wakeWordActivationPending = false
             try {
-                val started = startMynWakeWordService(commandContext)
-                wakeWordEnabled = started
+                requestMynWakeWordServiceStart(commandContext)
                 refreshWakeWordUi()
-                if (!started) {
-                    feedback = recordIssue(
-                        "MYN-WAKE-8001", "Hey Meyene",
-                        "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı.",
-                        "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
-                    )
-                }
             } catch (error: Exception) {
                 wakeWordEnabled = false
                 refreshWakeWordUi()
@@ -1721,16 +1712,8 @@ private fun AssistantScreen(
             } else {
                 wakeWordActivationPending = false
                 try {
-                    val started = startMynWakeWordService(commandContext)
-                    wakeWordEnabled = started
+                    requestMynWakeWordServiceStart(commandContext)
                     refreshWakeWordUi()
-                    if (!started) {
-                        feedback = recordIssue(
-                            "MYN-WAKE-8001", "Hey Meyene",
-                            "Bu cihazda yerleşik çevrimdışı konuşma tanıma hizmeti bulunamadı.",
-                            "", "ON_DEVICE_RECOGNIZER_NOT_AVAILABLE"
-                        )
-                    }
                 } catch (error: Exception) {
                     wakeWordEnabled = false
                     refreshWakeWordUi()
@@ -1781,8 +1764,7 @@ private fun AssistantScreen(
                 )
             } else {
                 try {
-                    val started = startMynWakeWordService(commandContext)
-                    wakeWordEnabled = started
+                    requestMynWakeWordServiceStart(commandContext)
                     refreshWakeWordUi()
                 } catch (error: Exception) {
                     wakeWordEnabled = false
