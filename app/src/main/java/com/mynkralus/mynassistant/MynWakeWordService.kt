@@ -25,14 +25,8 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.zip.ZipInputStream
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -69,7 +63,7 @@ class MynWakeWordService : Service() {
     private var overlayMicAnimator: ValueAnimator? = null
     private var overlayDragHandle: View? = null
     private var userRequestedStop = false
-    private var serviceFailed = false
+    @Volatile private var serviceFailed = false
     private var primaryButton: TextView? = null
     private var secondaryButton: TextView? = null
     private var awaitingCommand = false
@@ -93,12 +87,30 @@ class MynWakeWordService : Service() {
             return START_NOT_STICKY
         }
         if (!Settings.canDrawOverlays(this)) {
-            fail("MYN-WAKE-8002", "Ekran üstü izni verilmedi.")
+            fail("MYN-WAKE-8002", "Ekran üstü izni verilmedi.", "Settings.canDrawOverlays=false")
             stopSelf()
             return START_NOT_STICKY
         }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            fail("MYN-WAKE-8004", "Mikrofon izni verilmedi.", "RECORD_AUDIO permission is not granted")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        userRequestedStop = false
+        serviceFailed = false
+        closed = false
+        clearPersistedWakeError()
+        if (speechService != null || modelInitThread?.isAlive == true) return START_STICKY
+
         try {
-            notificationStatus = "Çevrimdışı Türkçe modeli hazırlanıyor…"
+            updateServiceStatus(
+                "Hey Meyene servisi başlatılıyor…",
+                enabled = true,
+                phase = MynWakeWordPhase.STARTING
+            )
             val notification = buildNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -106,44 +118,82 @@ class MynWakeWordService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (error: Exception) {
-            fail("MYN-WAKE-8003", "Mikrofon servisi başlatılamadı: " + error.javaClass.simpleName)
+            fail(
+                "MYN-WAKE-8003",
+                "Ön plan mikrofon servisi başlatılamadı. Uygulama açıkken tekrar dene.",
+                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+            )
             stopSelf()
             return START_NOT_STICKY
         }
-        if (speechService != null || modelInitThread?.isAlive == true) return START_STICKY
-        userRequestedStop = false
-        serviceFailed = false
-        updateServiceStatus("Çevrimdışı Türkçe modeli hazırlanıyor…", enabled = true)
+
         modelInitThread = Thread({ initializeOfflineSpeech() }, "Myn-Vosk-Init").apply {
             isDaemon = true
             start()
         }
         return START_STICKY
     }
+
     private fun initializeOfflineSpeech() {
+        var phase = MynWakeWordPhase.VALIDATING_MODEL
         try {
             val modelDirectory = ensureOfflineModel()
             if (closed || userRequestedStop) return
+
+            phase = MynWakeWordPhase.LOADING_ENGINE
+            updateServiceStatus("Türkçe ses motoru yükleniyor…", enabled = true, phase = phase)
             LibVosk.setLogLevel(LogLevel.WARNINGS)
             val loadedModel = Model(modelDirectory.absolutePath)
-            val loadedRecognizer = Recognizer(loadedModel, SAMPLE_RATE.toFloat())
-            val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
             speechModel = loadedModel
+            val loadedRecognizer = Recognizer(loadedModel, SAMPLE_RATE.toFloat())
             recognizer = loadedRecognizer
+            val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
             speechService = streamingService
-            if (closed || userRequestedStop) { releaseSpeechEngine(); return }
-            if (!streamingService.startListening(voskListener)) throw IOException("Vosk ses akışı başlatılamadı.")
+            if (closed || userRequestedStop) {
+                releaseSpeechEngine()
+                return
+            }
+
+            phase = MynWakeWordPhase.STARTING_MICROPHONE
+            updateServiceStatus("Mikrofon akışı başlatılıyor…", enabled = true, phase = phase)
+            if (!streamingService.startListening(voskListener)) {
+                throw IOException("Vosk SpeechService.startListening(false) döndürdü.")
+            }
             recoveringSpeechService = false
-            updateServiceStatus("Hey Meyene dinliyor · çevrimdışı", enabled = true)
+            recoveryAttempts = 0
+            updateServiceStatus(
+                "Hey Meyene dinliyor · çevrimdışı",
+                enabled = true,
+                phase = MynWakeWordPhase.LISTENING
+            )
             scheduleRecoveryCounterReset(streamingService)
+        } catch (error: VoskModelInstallException) {
+            if (closed || userRequestedStop) return
+            val (code, message) = when (error.stage) {
+                VoskModelInstallStage.DOWNLOADING ->
+                    "MYN-WAKE-8020" to "Türkçe model indirilemedi. İnternet bağlantısını ve boş depolama alanını kontrol et."
+                VoskModelInstallStage.EXTRACTING ->
+                    "MYN-WAKE-8021" to "Türkçe model paketi açılamadı. İndirme bozuk veya eksik olabilir."
+                VoskModelInstallStage.VALIDATING ->
+                    "MYN-WAKE-8022" to "Türkçe model dosyaları doğrulanamadı."
+                VoskModelInstallStage.CACHED, VoskModelInstallStage.READY ->
+                    "MYN-WAKE-8022" to "Türkçe model kurulumu tamamlanamadı."
+            }
+            fail(code, message, "stage=${error.stage}; ${error.javaClass.name}: ${error.message}")
+            stopSelf()
         } catch (error: Exception) {
             if (closed || userRequestedStop) return
-            fail(
-                "MYN-WAKE-8013",
-                "Çevrimdışı Türkçe ses motoru başlatılamadı: " +
-                    (error.message ?: error.javaClass.simpleName) +
-                    ". İlk kurulumda internet bağlantısı gerekebilir."
-            )
+            val code = if (phase == MynWakeWordPhase.STARTING_MICROPHONE) {
+                "MYN-WAKE-8024"
+            } else {
+                "MYN-WAKE-8023"
+            }
+            val message = if (phase == MynWakeWordPhase.STARTING_MICROPHONE) {
+                "Model yüklendi ancak mikrofon akışı başlatılamadı. Mikrofon iznini ve başka uygulamaların mikrofon kullanımını kontrol et."
+            } else {
+                "Türkçe ses motoru/model yüklenemedi. Model dosyası, cihaz uyumluluğu ve native kitaplıkları kontrol et."
+            }
+            fail(code, message, "phase=${phase.persistedValue}; ${error.javaClass.name}: ${error.message}")
             stopSelf()
         }
     }
@@ -278,110 +328,104 @@ class MynWakeWordService : Service() {
     }
 
     private fun ensureOfflineModel(): File {
-        val modelDirectory = File(filesDir, MODEL_DIRECTORY)
-        if (isValidModelDirectory(modelDirectory)) return modelDirectory
-        if (modelDirectory.exists()) modelDirectory.deleteRecursively()
-        val archive = File(cacheDir, MODEL_ARCHIVE_NAME)
-        val partialArchive = File(cacheDir, "$MODEL_ARCHIVE_NAME.part")
-        val connection = (URL(MODEL_DOWNLOAD_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 25_000
-            readTimeout = 30_000
-            instanceFollowRedirects = true
-            requestMethod = "GET"
-        }
-        try {
-            updateServiceStatus("Türkçe çevrimdışı model indiriliyor…", enabled = true)
-            connection.connect()
-            val response = connection.responseCode
-            if (response !in 200..299) throw IOException("Model sunucusu HTTP $response döndürdü.")
-            val totalBytes = connection.contentLengthLong
-            var downloaded = 0L
-            var lastPublishedProgress = -1
-            BufferedInputStream(connection.inputStream).use { input ->
-                BufferedOutputStream(FileOutputStream(partialArchive)).use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        if (Thread.currentThread().isInterrupted || userRequestedStop || closed) throw IOException("Model kurulumu iptal edildi.")
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        if (totalBytes > 0L) {
-                            val percent = ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                            if (percent >= lastPublishedProgress + 5 || percent == 100) {
-                                lastPublishedProgress = percent
-                                updateServiceStatus("Türkçe model indiriliyor · $percent%", enabled = true)
-                            }
-                        } else if (downloaded / (1024 * 1024) > lastPublishedProgress) {
-                            lastPublishedProgress = (downloaded / (1024 * 1024)).toInt()
-                            updateServiceStatus("Türkçe model indiriliyor · $lastPublishedProgress MB", enabled = true)
+        val installer = VoskModelInstaller(
+            filesDir = filesDir,
+            cacheDir = cacheDir,
+            modelDirectoryName = MODEL_DIRECTORY,
+            modelArchiveUrl = MODEL_DOWNLOAD_URL
+        )
+        var lastPublishedPercent = -5
+        var lastPublishedMegabytes = -1L
+        return installer.ensureInstalled(
+            isCancelled = { closed || userRequestedStop }
+        ) { progress ->
+            when (progress.stage) {
+                VoskModelInstallStage.CACHED -> updateServiceStatus(
+                    "Kurulu Türkçe model kullanılıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.VALIDATING_MODEL
+                )
+                VoskModelInstallStage.DOWNLOADING -> {
+                    val total = progress.totalBytes
+                    if (total > 0L) {
+                        val percent = ((progress.downloadedBytes * 100L) / total).toInt().coerceIn(0, 100)
+                        if (percent >= lastPublishedPercent + 5 || percent == 100) {
+                            lastPublishedPercent = percent
+                            updateServiceStatus(
+                                "Türkçe model indiriliyor · $percent%",
+                                enabled = true,
+                                phase = MynWakeWordPhase.DOWNLOADING_MODEL
+                            )
+                        }
+                    } else {
+                        val megabytes = progress.downloadedBytes / (1024L * 1024L)
+                        if (megabytes > lastPublishedMegabytes) {
+                            lastPublishedMegabytes = megabytes
+                            updateServiceStatus(
+                                "Türkçe model indiriliyor · $megabytes MB",
+                                enabled = true,
+                                phase = MynWakeWordPhase.DOWNLOADING_MODEL
+                            )
                         }
                     }
                 }
-            }
-            if (partialArchive.length() < 20L * 1024L * 1024L) throw IOException("İndirilen Türkçe model paketi eksik görünüyor.")
-            if (archive.exists()) archive.delete()
-            if (!partialArchive.renameTo(archive)) throw IOException("Model paketi kaydedilemedi.")
-            updateServiceStatus("Türkçe model açılıyor…", enabled = true)
-            val extractionRoot = File(cacheDir, "myn-vosk-extract")
-            extractionRoot.deleteRecursively()
-            if (!extractionRoot.mkdirs()) throw IOException("Model klasörü oluşturulamadı.")
-            unzipModelSafely(archive, extractionRoot)
-            val extracted = File(extractionRoot, MODEL_DIRECTORY).takeIf { isValidModelDirectory(it) }
-                ?: extractionRoot.listFiles()?.firstOrNull { isValidModelDirectory(it) }
-                ?: throw IOException("İndirilen pakette kullanılabilir Türkçe model bulunamadı.")
-            if (modelDirectory.exists()) modelDirectory.deleteRecursively()
-            if (!extracted.renameTo(modelDirectory)) extracted.copyRecursively(modelDirectory, overwrite = true)
-            extractionRoot.deleteRecursively()
-            archive.delete()
-            if (!isValidModelDirectory(modelDirectory)) {
-                modelDirectory.deleteRecursively()
-                throw IOException("Türkçe model doğrulaması başarısız.")
-            }
-            return modelDirectory
-        } finally {
-            connection.disconnect()
-            partialArchive.delete()
-        }
-    }
-
-    private fun unzipModelSafely(archive: File, destination: File) {
-        val rootPath = destination.canonicalPath + File.separator
-        ZipInputStream(BufferedInputStream(archive.inputStream())).use { zip ->
-            while (true) {
-                if (Thread.currentThread().isInterrupted || userRequestedStop || closed) throw IOException("Model kurulumu iptal edildi.")
-                val entry = zip.nextEntry ?: break
-                val output = File(destination, entry.name.replace('\\', '/')).canonicalFile
-                if (!output.path.startsWith(rootPath)) throw IOException("Model paketinde geçersiz dosya yolu var.")
-                if (entry.isDirectory) output.mkdirs()
-                else {
-                    output.parentFile?.mkdirs()
-                    BufferedOutputStream(FileOutputStream(output)).use { target ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            val read = zip.read(buffer)
-                            if (read < 0) break
-                            target.write(buffer, 0, read)
-                        }
-                    }
-                }
-                zip.closeEntry()
+                VoskModelInstallStage.EXTRACTING -> updateServiceStatus(
+                    "Türkçe model açılıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.EXTRACTING_MODEL
+                )
+                VoskModelInstallStage.VALIDATING -> updateServiceStatus(
+                    "Türkçe model dosyaları doğrulanıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.VALIDATING_MODEL
+                )
+                VoskModelInstallStage.READY -> updateServiceStatus(
+                    "Türkçe model hazır; ses motoru yükleniyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.LOADING_ENGINE
+                )
             }
         }
     }
 
-    private fun isValidModelDirectory(directory: File): Boolean =
-        File(directory, "am/final.mdl").isFile &&
-            (File(directory, "conf/model.conf").isFile || File(directory, "conf/mfcc.conf").isFile)
+    private fun clearPersistedWakeError() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .remove(KEY_ERROR)
+            .remove(KEY_ERROR_DETAILS)
+            .remove(KEY_ERROR_AT)
+            .apply()
+    }
 
-    private fun updateServiceStatus(status: String, enabled: Boolean, errorCode: String? = null) {
+    private fun updateServiceStatus(
+        status: String,
+        enabled: Boolean,
+        errorCode: String? = null,
+        errorDetails: String? = null,
+        phase: MynWakeWordPhase? = null
+    ) {
         notificationStatus = status
         val editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
             .putBoolean(KEY_ENABLED, enabled)
             .putString(KEY_STATUS, status)
-        if (errorCode.isNullOrBlank()) editor.remove(KEY_ERROR) else editor.putString(KEY_ERROR, errorCode)
+
+        if (phase != null) {
+            editor.putString(KEY_PHASE, phase.persistedValue)
+            if (phase != MynWakeWordPhase.ERROR) {
+                editor.putString(KEY_LAST_PHASE, phase.persistedValue)
+            }
+        }
+        if (!errorCode.isNullOrBlank()) {
+            editor.putString(KEY_ERROR, errorCode)
+                .putString(KEY_ERROR_DETAILS, errorDetails.orEmpty().take(1200))
+                .putLong(KEY_ERROR_AT, System.currentTimeMillis())
+        }
+        if (phase == MynWakeWordPhase.LISTENING) {
+            editor.putLong(KEY_LAST_LISTENING_AT, System.currentTimeMillis())
+        }
         editor.apply()
-        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification()) }
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+        }
     }
 
 
@@ -757,7 +801,16 @@ class MynWakeWordService : Service() {
     }
 
     private fun retrying(code: String, detail: String) {
-        updateServiceStatus("Ses akışı yenileniyor…", enabled = true, errorCode = code)
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putInt(KEY_RETRY_COUNT, recoveryAttempts)
+            .apply()
+        updateServiceStatus(
+            "Ses akışı yenileniyor · deneme $recoveryAttempts…",
+            enabled = true,
+            errorCode = code,
+            errorDetails = detail,
+            phase = MynWakeWordPhase.RETRYING
+        )
         val now = System.currentTimeMillis()
         if (now - lastRecoverableIssueAt >= 60_000L) {
             MynAssistantDiagnostics.record(
@@ -767,11 +820,24 @@ class MynWakeWordService : Service() {
         }
     }
 
-    private fun fail(code: String, detail: String) {
+    private fun fail(code: String, userMessage: String, technicalDetails: String = userMessage) {
         serviceFailed = true
-        updateServiceStatus("Kapalı · " + detail, enabled = false, errorCode = code)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val previousPhase = prefs.getString(KEY_PHASE, MynWakeWordPhase.STARTING.persistedValue)
+            ?: MynWakeWordPhase.STARTING.persistedValue
+        prefs.edit()
+            .putString(KEY_LAST_PHASE, previousPhase.takeUnless { it == MynWakeWordPhase.ERROR.persistedValue }
+                ?: prefs.getString(KEY_LAST_PHASE, "UNKNOWN"))
+            .apply()
+        updateServiceStatus(
+            "Hata $code · $userMessage",
+            enabled = false,
+            errorCode = code,
+            errorDetails = technicalDetails,
+            phase = MynWakeWordPhase.ERROR
+        )
         MynAssistantDiagnostics.record(
-            this, code, "Hey Meyene", "", detail
+            this, code, "Hey Meyene", "", "USER_MESSAGE=$userMessage; DETAILS=$technicalDetails"
         )
     }
 
@@ -791,12 +857,38 @@ class MynWakeWordService : Service() {
         modelInitThread?.interrupt()
         hideOverlay()
         releaseSpeechEngine()
-        if (userRequestedStop || serviceFailed) {
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                .putBoolean(KEY_ENABLED, false)
-                .putString(KEY_STATUS, "Kapalı")
-                .apply()
+
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        when {
+            serviceFailed -> {
+                // Keep the real diagnostic status; do not replace it with a generic "Kapalı".
+                prefs.edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putString(KEY_PHASE, MynWakeWordPhase.ERROR.persistedValue)
+                    .apply()
+            }
+            userRequestedStop || !prefs.getBoolean(KEY_ENABLED, false) -> {
+                prefs.edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putString(KEY_STATUS, "Kapalı")
+                    .putString(KEY_PHASE, MynWakeWordPhase.OFF.persistedValue)
+                    .apply()
+            }
+            else -> {
+                val code = "MYN-WAKE-8029"
+                val detail = "Wake-word foreground service onDestroy was called while listening was still requested."
+                prefs.edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putString(KEY_STATUS, "Hata $code · Servis beklenmedik şekilde durdu. Yeniden başlatmayı deneyebilirsin.")
+                    .putString(KEY_PHASE, MynWakeWordPhase.ERROR.persistedValue)
+                    .putString(KEY_ERROR, code)
+                    .putString(KEY_ERROR_DETAILS, detail)
+                    .putLong(KEY_ERROR_AT, System.currentTimeMillis())
+                    .apply()
+                MynAssistantDiagnostics.record(this, code, "Hey Meyene", "", detail)
+            }
         }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else stopForeground(true)
         super.onDestroy()
     }
@@ -808,6 +900,12 @@ class MynWakeWordService : Service() {
         private const val KEY_ENABLED = "wake_word_enabled"
         private const val KEY_STATUS = "wake_word_status"
         private const val KEY_ERROR = "wake_word_error_code"
+        private const val KEY_ERROR_DETAILS = "wake_word_error_details"
+        private const val KEY_ERROR_AT = "wake_word_error_at"
+        private const val KEY_PHASE = "wake_word_phase"
+        private const val KEY_LAST_PHASE = "wake_word_last_phase"
+        private const val KEY_LAST_LISTENING_AT = "wake_word_last_listening_at"
+        private const val KEY_RETRY_COUNT = "wake_word_retry_count"
         private const val KEY_PENDING_COMMAND = "wake_pending_command"
         private const val KEY_WAKE_LAST_AT = "wake_word_last_detected_at"
         private const val KEY_WAKE_COUNT = "wake_word_detection_count"
