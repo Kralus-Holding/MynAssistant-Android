@@ -15,6 +15,12 @@ android {
         targetSdk = 36
         versionCode = 26
         versionName = "0.4.9"
+
+        // This test build targets current ARM64 Android phones and avoids bundling
+        // unused x86 / 32-bit native runtimes from the KWS AAR into one oversized APK.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     // Keep the debug APK signed with the same certificate used for Google OAuth setup.
