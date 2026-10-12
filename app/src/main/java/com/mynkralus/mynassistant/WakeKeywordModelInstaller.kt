@@ -141,7 +141,7 @@ internal class WakeKeywordModelInstaller(
                 while (entry != null) {
                     checkCancellation(isCancelled)
                     if (!entry.isDirectory) {
-                        val normalized = entry.name.replace('\\\\', '/')
+                        val normalized = entry.name.replace('\\', '/')
                         val baseName = normalized.substringAfterLast('/')
                         if (baseName in REQUIRED_MODEL_FILES) {
                             if (baseName in seen) throw IOException("KWS arşivinde yinelenen model dosyası bulundu.")
