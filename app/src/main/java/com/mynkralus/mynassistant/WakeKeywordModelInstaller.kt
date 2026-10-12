@@ -187,7 +187,7 @@ internal class WakeKeywordModelInstaller(
         // CMU-style phones approximate the Turkish pronunciation “hey me-ye-ne”.
         // sherpa-onnx constrains decoding to this phrase instead of transcribing all speech.
         val keywords = File(directory, KEYWORDS_FILE)
-        keywords.writeText("HH EY1 M EH0 Y EH0 N EH0 @HEY_MEYENE\\n", Charsets.UTF_8)
+        keywords.writeText("HH EY1 M EH0 Y EH0 N EH0 @HEY_MEYENE\n", Charsets.UTF_8)
     }
 
     private fun isValidModelDirectory(directory: File): Boolean {
