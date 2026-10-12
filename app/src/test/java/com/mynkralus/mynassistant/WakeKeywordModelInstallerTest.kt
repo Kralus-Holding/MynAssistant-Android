@@ -48,7 +48,7 @@ class WakeKeywordModelInstallerTest {
         assertTrue(File(first, WakeKeywordModelInstaller.JOINER_FILE).length() > 32L * 1024L)
         assertTrue(File(first, WakeKeywordModelInstaller.TOKENS_FILE).length() > 500L)
         assertTrue(File(first, WakeKeywordModelInstaller.KEYWORDS_FILE).readText().contains("@HEY_MEYENE"))
-        assertFalse("unused archive content is not extracted", File(first, "test_wavs").exists())
+        assertFalse("unused archive content is not extracted", File(first, "unused-test-audio.wav").exists())
     }
 
     @Test
