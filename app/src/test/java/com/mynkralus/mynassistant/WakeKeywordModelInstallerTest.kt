@@ -82,7 +82,7 @@ class WakeKeywordModelInstallerTest {
             WakeKeywordModelInstaller.ENCODER_FILE to ByteArray(40_000) { 0x31 },
             WakeKeywordModelInstaller.DECODER_FILE to ByteArray(36_000) { 0x32 },
             WakeKeywordModelInstaller.JOINER_FILE to ByteArray(35_000) { 0x33 },
-            WakeKeywordModelInstaller.TOKENS_FILE to "token 0\\n".repeat(120).toByteArray(Charsets.UTF_8),
+            WakeKeywordModelInstaller.TOKENS_FILE to "token 0\n".repeat(120).toByteArray(Charsets.UTF_8),
             "unused-test-audio.wav" to ByteArray(64) { 0x34 }
         )
         BZip2CompressorOutputStream(FileOutputStream(target)).use { bzip ->
