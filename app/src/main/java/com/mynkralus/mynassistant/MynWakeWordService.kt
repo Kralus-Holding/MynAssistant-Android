@@ -343,35 +343,37 @@ class MynWakeWordService : Service() {
                     phase = MynWakeWordPhase.LOADING_ENGINE
                 )
                 val activeModel = speechModel ?: throw IOException("Türkçe komut modeli bellekte bulunamadı.")
-                nextRecognizer = Recognizer(activeModel, SAMPLE_RATE.toFloat())
+                val createdRecognizer = Recognizer(activeModel, SAMPLE_RATE.toFloat())
+                nextRecognizer = createdRecognizer
                 if (closed || userRequestedStop || serviceFailed || !awaitingCommand) {
-                    runCatching { nextRecognizer?.close() }
+                    runCatching { createdRecognizer.close() }
                     return@Thread
                 }
-                nextService = SpeechService(nextRecognizer, SAMPLE_RATE.toFloat())
+                val createdService = SpeechService(createdRecognizer, SAMPLE_RATE.toFloat())
+                nextService = createdService
                 if (closed || userRequestedStop || serviceFailed || !awaitingCommand) {
-                    runCatching { nextService?.cancel() }
-                    runCatching { nextService?.shutdown() }
-                    runCatching { nextRecognizer?.close() }
+                    runCatching { createdService.cancel() }
+                    runCatching { createdService.shutdown() }
+                    runCatching { createdRecognizer.close() }
                     return@Thread
                 }
-                recognizer = nextRecognizer
-                speechService = nextService
-                if (!nextService.startListening(voskListener)) {
+                recognizer = createdRecognizer
+                speechService = createdService
+                if (!createdService.startListening(voskListener)) {
                     throw IOException("Vosk SpeechService.startListening(false) döndürdü.")
                 }
                 recoveringSpeechService = false
                 recoveryAttempts = 0
                 mainHandler.post {
                     if (!closed && !userRequestedStop && !serviceFailed &&
-                        awaitingCommand && speechService === nextService
+                        awaitingCommand && speechService === createdService
                     ) {
                         updateServiceStatus(
                             "Uyandım · komutunu söyle",
                             enabled = true,
                             phase = MynWakeWordPhase.LISTENING
                         )
-                        scheduleRecoveryCounterReset(nextService)
+                        scheduleRecoveryCounterReset(createdService)
                     }
                 }
             } catch (error: Exception) {
