@@ -857,7 +857,7 @@ class MynWakeWordService : Service() {
                 awaitingCommand = false
                 commandReady = false
                 lastCommand = ""
-                speechService?.setPause(false)
+                resumeWakeWordDetector()
             }
         })
         root.addView(heading)
