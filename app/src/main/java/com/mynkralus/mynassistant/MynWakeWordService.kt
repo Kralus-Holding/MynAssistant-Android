@@ -72,7 +72,7 @@ class MynWakeWordService : Service() {
     @Volatile private var serviceFailed = false
     private var primaryButton: TextView? = null
     private var secondaryButton: TextView? = null
-    private var awaitingCommand = false
+    @Volatile private var awaitingCommand = false
     private var commandReady = false
     private var lastCommand = ""
     private var lastRecoverableIssueAt = 0L
@@ -333,17 +333,29 @@ class MynWakeWordService : Service() {
 
     private fun startCommandSpeechService() {
         modelInitThread = Thread({
+            var nextRecognizer: Recognizer? = null
+            var nextService: SpeechService? = null
             try {
-                if (closed || userRequestedStop || serviceFailed) return@Thread
+                if (closed || userRequestedStop || serviceFailed || !awaitingCommand) return@Thread
                 updateServiceStatus(
                     "Hey Meyene algılandı · komut tanıma başlatılıyor…",
                     enabled = true,
                     phase = MynWakeWordPhase.LOADING_ENGINE
                 )
                 val activeModel = speechModel ?: throw IOException("Türkçe komut modeli bellekte bulunamadı.")
-                val nextRecognizer = Recognizer(activeModel, SAMPLE_RATE.toFloat())
+                nextRecognizer = Recognizer(activeModel, SAMPLE_RATE.toFloat())
+                if (closed || userRequestedStop || serviceFailed || !awaitingCommand) {
+                    runCatching { nextRecognizer?.close() }
+                    return@Thread
+                }
+                nextService = SpeechService(nextRecognizer, SAMPLE_RATE.toFloat())
+                if (closed || userRequestedStop || serviceFailed || !awaitingCommand) {
+                    runCatching { nextService?.cancel() }
+                    runCatching { nextService?.shutdown() }
+                    runCatching { nextRecognizer?.close() }
+                    return@Thread
+                }
                 recognizer = nextRecognizer
-                val nextService = SpeechService(nextRecognizer, SAMPLE_RATE.toFloat())
                 speechService = nextService
                 if (!nextService.startListening(voskListener)) {
                     throw IOException("Vosk SpeechService.startListening(false) döndürdü.")
@@ -351,7 +363,9 @@ class MynWakeWordService : Service() {
                 recoveringSpeechService = false
                 recoveryAttempts = 0
                 mainHandler.post {
-                    if (!closed && !userRequestedStop && !serviceFailed && speechService === nextService) {
+                    if (!closed && !userRequestedStop && !serviceFailed &&
+                        awaitingCommand && speechService === nextService
+                    ) {
                         updateServiceStatus(
                             "Uyandım · komutunu söyle",
                             enabled = true,
@@ -361,9 +375,14 @@ class MynWakeWordService : Service() {
                     }
                 }
             } catch (error: Exception) {
-                if (closed || userRequestedStop || serviceFailed) return@Thread
+                if (closed || userRequestedStop || serviceFailed || !awaitingCommand) {
+                    runCatching { nextService?.cancel() }
+                    runCatching { nextService?.shutdown() }
+                    runCatching { nextRecognizer?.close() }
+                    return@Thread
+                }
                 mainHandler.post {
-                    if (closed || userRequestedStop || serviceFailed) return@post
+                    if (closed || userRequestedStop || serviceFailed || !awaitingCommand) return@post
                     fail(
                         "MYN-WAKE-8032",
                         "Uyandırma algılandı ancak Türkçe komut tanıma başlatılamadı.",
