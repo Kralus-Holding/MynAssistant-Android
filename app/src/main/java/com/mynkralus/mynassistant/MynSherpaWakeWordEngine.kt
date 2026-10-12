@@ -29,6 +29,9 @@ internal class MynSherpaWakeWordEngine(
     private var stopRequested = false
 
     @Volatile
+    private var userStopRequested = false
+
+    @Volatile
     private var activeRecorder: AudioRecord? = null
 
     @Volatile
@@ -40,6 +43,7 @@ internal class MynSherpaWakeWordEngine(
     fun start() {
         if (worker?.isAlive == true) return
         stopRequested = false
+        userStopRequested = false
         worker = Thread({ runSpotter() }, "Myn-Sherpa-KWS").apply {
             isDaemon = true
             start()
@@ -47,6 +51,7 @@ internal class MynSherpaWakeWordEngine(
     }
 
     fun stop() {
+        userStopRequested = true
         stopRequested = true
         activeRecorder?.let { recorder ->
             runCatching {
@@ -152,15 +157,13 @@ internal class MynSherpaWakeWordEngine(
         }
 
         worker = null
-        if (detected && !stopRequestedByUser()) {
+        if (detected && !userStopRequested) {
             onWakeWordDetected()
-        } else if (failure != null && !stopRequestedByUser()) {
+        } else if (failure != null && !userStopRequested) {
             Log.e(TAG, "KWS capture failed", failure)
             onFailure(failure!!)
         }
     }
-
-    private fun stopRequestedByUser(): Boolean = stopRequested && worker == null
 
     companion object {
         private const val TAG = "MynSherpaWakeWord"
