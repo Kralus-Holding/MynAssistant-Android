@@ -82,7 +82,9 @@ internal class MynSherpaWakeWordEngine(
                     numThreads = KWS_THREADS,
                     debug = false,
                     provider = "cpu",
-                    modelType = "zipformer2",
+                    // The official zh-en KWS model uses this model family with phone+ppinyin tokens.
+                    // Empty modelType selects the model's documented default.
+                    modelType = "",
                     modelingUnit = "phone+ppinyin"
                 ),
                 maxActivePaths = 4,
