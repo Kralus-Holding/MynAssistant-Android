@@ -399,21 +399,18 @@ class MynWakeWordService : Service() {
         override fun onPartialResult(hypothesis: String?) {
             val transcript = parseVoskText(hypothesis, "partial")
             if (transcript.isNotBlank()) mainHandler.post {
-                publishWakeTranscriptForDiagnostics(transcript, isFinal = false)
                 processTranscript(transcript, isFinal = false)
             }
         }
         override fun onResult(hypothesis: String?) {
             val transcript = parseVoskText(hypothesis, "text")
             if (transcript.isNotBlank()) mainHandler.post {
-                publishWakeTranscriptForDiagnostics(transcript, isFinal = true)
                 processTranscript(transcript, isFinal = true)
             }
         }
         override fun onFinalResult(hypothesis: String?) {
             val transcript = parseVoskText(hypothesis, "text")
             if (transcript.isNotBlank()) mainHandler.post {
-                publishWakeTranscriptForDiagnostics(transcript, isFinal = true)
                 processTranscript(transcript, isFinal = true)
             }
         }
@@ -424,20 +421,10 @@ class MynWakeWordService : Service() {
     }
 
     private fun processTranscript(transcript: String, isFinal: Boolean) {
-        if (closed || commandReady) return
-        val match = MynWakeWordMatcher.findMatch(transcript, allowObservedAsrFallback = isFinal)
-        val isWakeOnly = match != null && match.trailingText.isBlank()
-        if (!awaitingCommand) {
-            if (match == null) return
-            recordWakeDetection(match.matchedPhrase)
-            awaitingCommand = true
-            val trailing = match.trailingText.trim()
-            if (trailing.isBlank()) showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
-            else if (isFinal) acceptRecognizedCommand(trailing)
-            else showOverlay("Komutunu dinliyorum.", trailing, ready = false)
-            return
-        }
-        val candidate = match?.trailingText?.takeIf { it.isNotBlank() } ?: transcript.takeIf { !isWakeOnly }.orEmpty()
+        // Vosk is opened only after acoustic KWS has triggered. It handles the command,
+        // not the wake phrase, so never run text fuzzy matching in this phase.
+        if (closed || commandReady || !awaitingCommand) return
+        val candidate = transcript.trim()
         if (candidate.isBlank()) {
             if (isFinal) showOverlay("Seni dinliyorum. Komutunu söyle.", "", ready = false)
             return
@@ -469,26 +456,6 @@ class MynWakeWordService : Service() {
         if (payload.isNullOrBlank()) return ""
         return try { JSONObject(payload).optString(key, "").trim() } catch (_: Exception) { "" }
     }
-
-    private fun publishWakeTranscriptForDiagnostics(transcript: String, isFinal: Boolean) {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val displayText = WakeWordDiagnosticsPolicy.transcriptToDisplay(
-            enabled = prefs.getBoolean(KEY_WAKE_DEBUG_TRANSCRIPTS, false),
-            awaitingCommand = awaitingCommand,
-            commandReady = commandReady,
-            transcript = transcript
-        ) ?: return
-
-        // Opt-in diagnostics only: keep the most recent short ASR text while waiting for
-        // the wake phrase. Do not save PCM/audio and do not capture command speech.
-        prefs.edit()
-            .putString(KEY_WAKE_LAST_TRANSCRIPT, displayText)
-            .putBoolean(KEY_WAKE_LAST_TRANSCRIPT_FINAL, isFinal)
-            .putLong(KEY_WAKE_LAST_TRANSCRIPT_AT, System.currentTimeMillis())
-            .apply()
-    }
-
-
 
     private fun recoverSpeechEngine(exception: Exception?) {
         if (closed || userRequestedStop || serviceFailed || recoveringSpeechService) return
@@ -966,8 +933,9 @@ class MynWakeWordService : Service() {
                 } else {
                     hideOverlay()
                     awaitingCommand = false
+                    commandReady = false
                     lastCommand = ""
-                    speechService?.setPause(false)
+                    resumeWakeWordDetector()
                 }
             }
         }
@@ -1018,7 +986,7 @@ class MynWakeWordService : Service() {
             fail("MYN-WAKE-8008", "Komut MynAssistant içinde açılamadı.")
             stopSelf()
         }
-        speechService?.setPause(false)
+        resumeWakeWordDetector()
     }
 
 
@@ -1156,6 +1124,8 @@ class MynWakeWordService : Service() {
         overlayMicAnimator?.cancel()
         overlayMicAnimator = null
         modelInitThread?.interrupt()
+        wakeWordEngine?.stop()
+        wakeWordEngine = null
         hideOverlay()
         releaseSpeechEngine()
 
@@ -1216,10 +1186,6 @@ class MynWakeWordService : Service() {
         private const val KEY_WAKE_LAST_AT = "wake_word_last_detected_at"
         private const val KEY_WAKE_COUNT = "wake_word_detection_count"
         private const val KEY_WAKE_LAST_PHRASE = "wake_word_last_phrase"
-        private const val KEY_WAKE_DEBUG_TRANSCRIPTS = "wake_word_debug_transcripts"
-        private const val KEY_WAKE_LAST_TRANSCRIPT = "wake_word_last_transcript"
-        private const val KEY_WAKE_LAST_TRANSCRIPT_FINAL = "wake_word_last_transcript_final"
-        private const val KEY_WAKE_LAST_TRANSCRIPT_AT = "wake_word_last_transcript_at"
         private const val CHANNEL_ID = "mynassistant_wake_word"
         private const val NOTIFICATION_ID = 4127
         private const val ACTION_STOP = "com.mynkralus.mynassistant.STOP_WAKE_WORD"
