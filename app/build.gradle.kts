@@ -59,7 +59,7 @@ dependencies {
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     // Low-compute, keyword-constrained wake detection; full Vosk ASR runs only after a hit.
-    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.8")
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8")
     implementation("org.apache.commons:commons-compress:1.27.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2025.08.00")
