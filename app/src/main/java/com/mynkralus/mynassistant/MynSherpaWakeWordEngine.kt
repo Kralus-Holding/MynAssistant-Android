@@ -22,6 +22,7 @@ import java.io.IOException
  */
 internal class MynSherpaWakeWordEngine(
     private val modelDirectory: File,
+    private val onReady: () -> Unit,
     private val onWakeWordDetected: () -> Unit,
     private val onFailure: (Exception) -> Unit
 ) {
@@ -119,6 +120,7 @@ internal class MynSherpaWakeWordEngine(
 
             Log.i(TAG, "KWS ready: threshold=$KEYWORD_THRESHOLD, threads=$KWS_THREADS")
             val pcmBuffer = ShortArray(SAMPLES_PER_FRAME)
+            var readyReported = false
             while (!stopRequested) {
                 val count = recorder.read(pcmBuffer, 0, pcmBuffer.size, AudioRecord.READ_BLOCKING)
                 if (count == AudioRecord.ERROR_DEAD_OBJECT) {
@@ -128,6 +130,10 @@ internal class MynSherpaWakeWordEngine(
                     throw IOException("AudioRecord.read returned $count.")
                 }
                 if (count <= 0) continue
+                if (!readyReported) {
+                    readyReported = true
+                    onReady()
+                }
 
                 val samples = FloatArray(count) { index -> pcmBuffer[index] / 32768.0f }
                 stream.acceptWaveform(samples, SAMPLE_RATE)
