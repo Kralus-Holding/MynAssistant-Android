@@ -1,6 +1,15 @@
 # MynAssistant Android voice assistant roadmap
 
-Status: 0.4.8 wake-transcript fallback candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+Status: 0.4.9 experimental sherpa-onnx KWS candidate. A green build is not evidence of reliable wake-word detection on a physical phone. Real-device acceptance remains required.
+
+## 0.4.9 follow-up — separate keyword spotting from Turkish command ASR
+
+- The wake standby path now uses sherpa-onnx `KeywordSpotter` with its own `AudioRecord` stream. It no longer depends on the Vosk transcript aliases to trigger the wake phrase.
+- The official sherpa-onnx zh-en KWS archive is installed once under app-private storage; only the allowlisted INT8 encoder, FP32 decoder, INT8 joiner and token file are extracted. The keyword file uses a phonetic approximation of “Hey Meyene”.
+- The KWS worker owns the microphone during standby. After a keyword event it releases its recorder/native stream before Vosk starts Turkish command recognition. On command dismissal/submit the Vosk stream is released and standby KWS is restarted.
+- Candidate version: **0.4.9 / versionCode 26**. The Android package is restricted to `arm64-v8a` to avoid bundling unused native ABIs. Older 32-bit ARM and x86 devices are not supported by this test APK.
+- **Major uncertainty:** the upstream pretrained model is a Chinese/English model, not trained or validated for Turkish. A phoneme string accepted by the API does not prove the model can acoustically detect the phrase. It may fail to trigger, trigger incorrectly, or cost more battery than expected. CI can check compilation and installer behavior, but only the target phone can establish recognition quality and screen-off/battery behavior.
+- The 0.4.8 ASR-alias fallback is not used for wake detection in the 0.4.9 standby path. The previous matcher remains available for unit tests/other callers but must not be treated as the wake engine.
 
 ## 0.4.8 follow-up — recognize observed Turkish ASR variants narrowly
 
