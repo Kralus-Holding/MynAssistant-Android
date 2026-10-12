@@ -55,6 +55,8 @@ class MynWakeWordService : Service() {
     @Volatile private var speechModel: Model? = null
     @Volatile private var recognizer: Recognizer? = null
     @Volatile private var speechService: SpeechService? = null
+    @Volatile private var wakeWordEngine: MynSherpaWakeWordEngine? = null
+    @Volatile private var wakeKeywordModelDirectory: File? = null
     @Volatile private var modelInitThread: Thread? = null
     @Volatile private var notificationStatus = "Çevrimdışı Türkçe modeli hazırlanıyor…"
     private var recoveryAttempts = 0
@@ -79,7 +81,9 @@ class MynWakeWordService : Service() {
 
     private val livenessHeartbeat = object : Runnable {
         override fun run() {
-            if (closed || userRequestedStop || serviceFailed || speechService == null) return
+            if (closed || userRequestedStop || serviceFailed ||
+                (speechService == null && wakeWordEngine == null)
+            ) return
             val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             if (prefs.getString(KEY_PHASE, "") != MynWakeWordPhase.LISTENING.persistedValue) return
             prefs.edit().putLong(KEY_HEARTBEAT_AT, System.currentTimeMillis()).apply()
@@ -97,6 +101,8 @@ class MynWakeWordService : Service() {
         if (intent?.action == ACTION_STOP) {
             userRequestedStop = true
             modelInitThread?.interrupt()
+            wakeWordEngine?.stop()
+            wakeWordEngine = null
             stopSelf()
             return START_NOT_STICKY
         }
@@ -117,7 +123,7 @@ class MynWakeWordService : Service() {
         serviceFailed = false
         closed = false
         clearPersistedWakeError()
-        if (speechService != null || modelInitThread?.isAlive == true) return START_STICKY
+        if (speechService != null || wakeWordEngine != null || modelInitThread?.isAlive == true) return START_STICKY
 
         try {
             updateServiceStatus(
@@ -154,45 +160,36 @@ class MynWakeWordService : Service() {
             val modelDirectory = ensureOfflineModel()
             if (closed || userRequestedStop) return
 
+            val wakeModelDirectory = ensureWakeKeywordModel()
+            if (closed || userRequestedStop) return
+
             phase = MynWakeWordPhase.LOADING_ENGINE
-            updateServiceStatus("Türkçe ses motoru yükleniyor…", enabled = true, phase = phase)
+            updateServiceStatus("Türkçe komut modeli belleğe yükleniyor…", enabled = true, phase = phase)
             LibVosk.setLogLevel(LogLevel.WARNINGS)
-            val loadedModel = Model(modelDirectory.absolutePath)
-            speechModel = loadedModel
-            val loadedRecognizer = Recognizer(loadedModel, SAMPLE_RATE.toFloat())
-            recognizer = loadedRecognizer
+            // Load Vosk once, but do not run full ASR during standby. KWS owns the microphone
+            // until the wake phrase is detected; only then is SpeechService started.
+            speechModel = Model(modelDirectory.absolutePath)
+            wakeKeywordModelDirectory = wakeModelDirectory
             if (closed || userRequestedStop) {
                 releaseSpeechEngine()
                 return
             }
 
             phase = MynWakeWordPhase.STARTING_MICROPHONE
-            updateServiceStatus("Mikrofon akışı başlatılıyor…", enabled = true, phase = phase)
-
-            // SpeechService.startListening() only schedules the capture worker. Probe the
-            // actual microphone once so we do not publish LISTENING based on that return value.
+            updateServiceStatus("Düşük güç uyandırma motoru başlatılıyor…", enabled = true, phase = phase)
             val capturedSamples = verifyMicrophoneCapture()
             if (!MynWakeWordStartupReadiness.canReportListening(phase, capturedSamples)) {
                 throw IOException("Mikrofon yakalama doğrulanamadı; okunan örnek sayısı=$capturedSamples.")
             }
-
-            val streamingService = SpeechService(loadedRecognizer, SAMPLE_RATE.toFloat())
-            speechService = streamingService
-            if (closed || userRequestedStop) {
-                releaseSpeechEngine()
-                return
-            }
-            if (!streamingService.startListening(voskListener)) {
-                throw IOException("Vosk SpeechService.startListening(false) döndürdü.")
-            }
-            recoveringSpeechService = false
-            recoveryAttempts = 0
-            updateServiceStatus(
-                "Hey Meyene dinliyor · çevrimdışı",
-                enabled = true,
-                phase = MynWakeWordPhase.LISTENING
+            startWakeWordEngine(wakeModelDirectory)
+        } catch (error: WakeKeywordModelInstallException) {
+            if (closed || userRequestedStop) return
+            fail(
+                "MYN-WAKE-8030",
+                "Düşük güç uyandırma modeli indirilemedi veya doğrulanamadı.",
+                "stage=${error.stage}; ${error.javaClass.name}: ${error.message}"
             )
-            scheduleRecoveryCounterReset(streamingService)
+            stopSelf()
         } catch (error: VoskModelInstallException) {
             if (closed || userRequestedStop) return
             val (code, message) = when (error.stage) {
@@ -223,13 +220,179 @@ class MynWakeWordService : Service() {
                 "MYN-WAKE-8023"
             }
             val message = if (phase == MynWakeWordPhase.STARTING_MICROPHONE) {
-                "Model yüklendi ancak mikrofon akışı başlatılamadı. Mikrofon iznini ve başka uygulamaların mikrofon kullanımını kontrol et."
+                "Mikrofon akışı başlatılamadı. Mikrofon iznini ve başka uygulamaların mikrofon kullanımını kontrol et."
             } else {
-                "Türkçe ses motoru/model yüklenemedi. Model dosyası, cihaz uyumluluğu ve native kitaplıkları kontrol et."
+                "Ses motoru yüklenemedi. Model dosyası, cihaz uyumluluğu ve native kitaplıkları kontrol et."
             }
             fail(code, message, "phase=${phase.persistedValue}; ${error.javaClass.name}: ${error.message}")
             stopSelf()
         }
+    }
+
+    private fun ensureWakeKeywordModel(): File {
+        val installer = WakeKeywordModelInstaller(filesDir = filesDir, cacheDir = cacheDir)
+        var lastPublishedPercent = -5
+        var lastPublishedMegabytes = -1L
+        return installer.ensureInstalled(isCancelled = { closed || userRequestedStop }) { progress ->
+            when (progress.stage) {
+                WakeKeywordModelInstallStage.CACHED -> updateServiceStatus(
+                    "Kurulu düşük güç uyandırma modeli kullanılıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.VALIDATING_MODEL
+                )
+                WakeKeywordModelInstallStage.DOWNLOADING -> {
+                    val total = progress.totalBytes
+                    if (total > 0L) {
+                        val percent = ((progress.downloadedBytes * 100L) / total).toInt().coerceIn(0, 100)
+                        if (percent >= lastPublishedPercent + 5 || percent == 100) {
+                            lastPublishedPercent = percent
+                            updateServiceStatus(
+                                "Düşük güç uyandırma modeli indiriliyor · $percent%",
+                                enabled = true,
+                                phase = MynWakeWordPhase.DOWNLOADING_MODEL
+                            )
+                        }
+                    } else {
+                        val megabytes = progress.downloadedBytes / (1024L * 1024L)
+                        if (megabytes > lastPublishedMegabytes) {
+                            lastPublishedMegabytes = megabytes
+                            updateServiceStatus(
+                                "Düşük güç uyandırma modeli indiriliyor · $megabytes MB",
+                                enabled = true,
+                                phase = MynWakeWordPhase.DOWNLOADING_MODEL
+                            )
+                        }
+                    }
+                }
+                WakeKeywordModelInstallStage.EXTRACTING -> updateServiceStatus(
+                    "Düşük güç uyandırma modeli hazırlanıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.EXTRACTING_MODEL
+                )
+                WakeKeywordModelInstallStage.VALIDATING -> updateServiceStatus(
+                    "Düşük güç uyandırma modeli doğrulanıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.VALIDATING_MODEL
+                )
+                WakeKeywordModelInstallStage.READY -> updateServiceStatus(
+                    "Düşük güç uyandırma modeli hazır…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.LOADING_ENGINE
+                )
+            }
+        }
+    }
+
+    private fun startWakeWordEngine(modelDirectory: File) {
+        if (closed || userRequestedStop || serviceFailed) return
+        updateServiceStatus(
+            "Düşük güç uyandırma motoru başlatılıyor…",
+            enabled = true,
+            phase = MynWakeWordPhase.STARTING_MICROPHONE
+        )
+        val engine = MynSherpaWakeWordEngine(
+            modelDirectory = modelDirectory,
+            onReady = {
+                mainHandler.post {
+                    if (!closed && !userRequestedStop && !serviceFailed && wakeWordEngine != null) {
+                        updateServiceStatus(
+                            "Hey Meyene dinliyor · düşük güç · çevrimdışı",
+                            enabled = true,
+                            phase = MynWakeWordPhase.LISTENING
+                        )
+                    }
+                }
+            },
+            onWakeWordDetected = {
+                mainHandler.post {
+                    if (closed || userRequestedStop || serviceFailed) return@post
+                    wakeWordEngine = null
+                    recordWakeDetection("Hey Meyene")
+                    awaitingCommand = true
+                    commandReady = false
+                    lastCommand = ""
+                    showOverlay("Hey Meyene algılandı. Komutunu söyle.", "", ready = false)
+                    startCommandSpeechService()
+                }
+            },
+            onFailure = { error ->
+                mainHandler.post {
+                    if (closed || userRequestedStop || serviceFailed) return@post
+                    fail(
+                        "MYN-WAKE-8031",
+                        "Düşük güç uyandırma motoru çalışırken durdu.",
+                        "${error.javaClass.name}: ${error.message}"
+                    )
+                    stopSelf()
+                }
+            }
+        )
+        wakeWordEngine = engine
+        engine.start()
+    }
+
+    private fun startCommandSpeechService() {
+        modelInitThread = Thread({
+            try {
+                if (closed || userRequestedStop || serviceFailed) return@Thread
+                updateServiceStatus(
+                    "Hey Meyene algılandı · komut tanıma başlatılıyor…",
+                    enabled = true,
+                    phase = MynWakeWordPhase.LOADING_ENGINE
+                )
+                val activeModel = speechModel ?: throw IOException("Türkçe komut modeli bellekte bulunamadı.")
+                val nextRecognizer = Recognizer(activeModel, SAMPLE_RATE.toFloat())
+                recognizer = nextRecognizer
+                val nextService = SpeechService(nextRecognizer, SAMPLE_RATE.toFloat())
+                speechService = nextService
+                if (!nextService.startListening(voskListener)) {
+                    throw IOException("Vosk SpeechService.startListening(false) döndürdü.")
+                }
+                recoveringSpeechService = false
+                recoveryAttempts = 0
+                mainHandler.post {
+                    if (!closed && !userRequestedStop && !serviceFailed && speechService === nextService) {
+                        updateServiceStatus(
+                            "Uyandım · komutunu söyle",
+                            enabled = true,
+                            phase = MynWakeWordPhase.LISTENING
+                        )
+                        scheduleRecoveryCounterReset(nextService)
+                    }
+                }
+            } catch (error: Exception) {
+                if (closed || userRequestedStop || serviceFailed) return@Thread
+                mainHandler.post {
+                    if (closed || userRequestedStop || serviceFailed) return@post
+                    fail(
+                        "MYN-WAKE-8032",
+                        "Uyandırma algılandı ancak Türkçe komut tanıma başlatılamadı.",
+                        "${error.javaClass.name}: ${error.message}"
+                    )
+                    stopSelf()
+                }
+            }
+        }, "Myn-Vosk-Command").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun resumeWakeWordDetector() {
+        if (closed || userRequestedStop || serviceFailed) return
+        val modelDirectory = wakeKeywordModelDirectory
+        if (modelDirectory == null) {
+            fail("MYN-WAKE-8030", "Düşük güç uyandırma modeli bulunamadı.")
+            stopSelf()
+            return
+        }
+        recoveryStableReset?.let(mainHandler::removeCallbacks)
+        recoveryStableReset = null
+        releaseSpeechStreamOnly()
+        awaitingCommand = false
+        commandReady = false
+        lastCommand = ""
+        startWakeWordEngine(modelDirectory)
     }
 
     private val voskListener = object : RecognitionListener {
