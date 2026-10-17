@@ -332,7 +332,8 @@ def upload_screen_frame(session: FirebaseSession, device_id: str) -> None:
     )
 
 
-def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
+def fetch_device_commands(session: FirebaseSession, device_id: str) -> list[dict]:
+    """Fetch only pending commands for this Firebase user and this registered device."""
     response = requests.post(
         f"{FIRESTORE}:runQuery",
         headers=session.headers(),
@@ -352,6 +353,13 @@ def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
                             },
                             {
                                 "fieldFilter": {
+                                    "field": {"fieldPath": "deviceId"},
+                                    "op": "EQUAL",
+                                    "value": {"stringValue": device_id},
+                                }
+                            },
+                            {
+                                "fieldFilter": {
                                     "field": {"fieldPath": "status"},
                                     "op": "EQUAL",
                                     "value": {"stringValue": "pending"},
@@ -360,6 +368,12 @@ def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
                         ],
                     }
                 },
+                "orderBy": [
+                    {
+                        "field": {"fieldPath": "createdAt"},
+                        "direction": "ASCENDING",
+                    }
+                ],
                 "limit": 100,
             }
         },
@@ -608,9 +622,9 @@ def run_agent() -> int:
                     last_screen_frame = now
 
             if now - last_command_poll >= COMMAND_POLL_SECONDS:
-                for document in fetch_owner_commands(session):
+                for document in fetch_device_commands(session, device_id):
                     fields = decode_document(document)
-                    if fields.get("deviceId") != device_id or fields.get("status") != "pending":
+                    if fields.get("ownerId") != session.uid or fields.get("deviceId") != device_id or fields.get("status") != "pending":
                         continue
                     command = str(fields.get("command") or "")
                     if not command_is_supported(command):
