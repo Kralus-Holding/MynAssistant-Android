@@ -389,6 +389,55 @@ def fetch_device_commands(session: FirebaseSession, device_id: str) -> list[dict
     return documents
 
 
+def claim_command(session: FirebaseSession, document: dict) -> bool:
+    """Atomically transition a pending command to running using Firestore updateTime."""
+    full_name = document.get("name", "")
+    marker = "/documents/"
+    update_time = document.get("updateTime")
+    if marker not in full_name or not update_time:
+        raise RuntimeError("Komut belgesinin yolu veya updateTime bilgisi eksik.")
+
+    document_path = full_name.split(marker, 1)[1]
+    params = [
+        ("updateMask.fieldPaths", "status"),
+        ("updateMask.fieldPaths", "result"),
+        ("updateMask.fieldPaths", "startedAt"),
+        ("currentDocument.updateTime", update_time),
+    ]
+    response = requests.patch(
+        f"{FIRESTORE}/{document_path}",
+        params=params,
+        headers=session.headers(),
+        json={
+            "fields": {
+                "status": encode_string("running"),
+                "result": encode_string("Windows Agent komutu sahipleniyor."),
+                "startedAt": encode_timestamp(),
+            }
+        },
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        try:
+            error = response.json().get("error", {})
+        except (ValueError, AttributeError):
+            error = {}
+        error_status = str(error.get("status", "")).upper()
+        error_message = str(error.get("message", "")).lower()
+        if (
+            response.status_code == 409
+            or error_status in {"ABORTED", "FAILED_PRECONDITION"}
+            or "update time" in error_message
+            or "precondition" in error_message
+        ):
+            # Another Agent changed the pending command first; let that Agent process it.
+            return False
+        raise RuntimeError(
+            f"Komut sahiplenilemedi: HTTP {response.status_code}: {response.text[:500]}"
+        )
+    return True
+
+
 def update_command(session: FirebaseSession, document: dict, status: str, result: str) -> None:
     full_name = document.get("name", "")
     marker = "/documents/"
@@ -624,13 +673,31 @@ def run_agent() -> int:
             if now - last_command_poll >= COMMAND_POLL_SECONDS:
                 for document in fetch_device_commands(session, device_id):
                     fields = decode_document(document)
-                    if fields.get("ownerId") != session.uid or fields.get("deviceId") != device_id or fields.get("status") != "pending":
+                    if (
+                        fields.get("ownerId") != session.uid
+                        or fields.get("deviceId") != device_id
+                        or fields.get("status") != "pending"
+                    ):
                         continue
+
+                    # Claim with the fetched updateTime so multiple Agent processes cannot
+                    # successfully transition the same pending document to running.
+                    try:
+                        claimed = claim_command(session, document)
+                    except Exception as exc:
+                        print(f"[Hata] Komut sahiplenilemedi: {exc}")
+                        continue
+                    if not claimed:
+                        continue
+
                     command = str(fields.get("command") or "")
                     if not command_is_supported(command):
-                        update_command(session, document, "failed", "Desteklenmeyen komut.")
+                        try:
+                            update_command(session, document, "failed", "Desteklenmeyen komut.")
+                        except Exception as exc:
+                            print(f"[Hata] Desteklenmeyen komutun durumu güncellenemedi: {exc}")
                         continue
-                    update_command(session, document, "running", "Windows Agent komutu çalıştırıyor.")
+
                     try:
                         result = execute_command(command, fields)
                         status = "failed" if result.startswith("Desteklenmeyen komut") else "completed"
