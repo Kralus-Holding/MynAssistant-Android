@@ -6,6 +6,10 @@ on:
     paths:
       - "desktop-agent/**"
       - ".github/workflows/windows-agent.yml"
+  pull_request:
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/windows-agent.yml"
   workflow_dispatch:
 
 permissions:
