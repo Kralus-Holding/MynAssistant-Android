@@ -32,6 +32,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r desktop-agent/requirements.txt
 
+      - name: Run Windows Agent tests
+        run: python -m unittest discover -s desktop-agent/tests -v
+
       - name: Build Windows EXE
         run: |
           pyinstaller --noconfirm --clean --onefile --console --name MynAssistantAgent --collect-all google_auth_oauthlib --collect-all google.auth --hidden-import win32crypt desktop-agent/agent.py
