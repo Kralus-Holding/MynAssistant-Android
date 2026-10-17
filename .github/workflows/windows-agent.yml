@@ -48,6 +48,7 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath MynAssistant-Windows-Agent.zip -Force
 
       - name: Upload Windows Agent package
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: MynAssistant-Windows-Agent
