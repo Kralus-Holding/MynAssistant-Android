@@ -273,6 +273,18 @@ class ScreenFrameSizeTests(unittest.TestCase):
         )
 
 
+class FirebaseResponseHandlingTests(unittest.TestCase):
+    def test_transient_server_failure_is_retryable(self):
+        response = FakeResponse(503, {"error": {"status": "UNAVAILABLE"}}, "service unavailable")
+        with self.assertRaisesRegex(agent.requests.HTTPError, "HTTP 503"):
+            agent.raise_for_firebase_response("Firestore", response)
+
+    def test_permanent_client_failure_is_not_marked_retryable(self):
+        response = FakeResponse(403, {"error": {"status": "PERMISSION_DENIED"}}, "permission denied")
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+            agent.raise_for_firebase_response("Firestore", response)
+
+
 class OAuthScopeTests(unittest.TestCase):
     def test_google_sign_in_uses_canonical_scope_uris(self):
         self.assertEqual(
