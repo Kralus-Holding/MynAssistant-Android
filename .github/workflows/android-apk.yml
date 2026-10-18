@@ -197,7 +197,7 @@ jobs:
             echo "### APK integrity"
             echo
             echo "- File: app/build/outputs/apk/debug/app-debug.apk"
-            echo "- SHA-256: `$SHA256`"
+            echo "- SHA-256: \`$SHA256\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK as Actions artifact
