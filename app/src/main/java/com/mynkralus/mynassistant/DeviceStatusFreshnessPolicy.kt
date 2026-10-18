@@ -33,3 +33,10 @@ internal fun normalizeDeviceStatus(
         "offline"
     }
 }
+
+internal fun isDeviceOnlineAt(
+    rawStatus: String?,
+    lastSeenAtMillis: Long?,
+    nowMillis: Long
+): Boolean = normalizeDeviceStatus(rawStatus, lastSeenAtMillis, nowMillis)
+    .lowercase(Locale.ROOT) in onlineDeviceStates
