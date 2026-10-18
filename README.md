@@ -33,6 +33,10 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 - Android APK: Android APK workflow artifact MynAssistant-debug-apk.
 - Windows companion: Windows Agent workflow artifact MynAssistant-Windows-Agent.
 
+### Release fallback when Actions artifact storage is full
+
+The workflow token remains read-only. If an Actions artifact upload fails because the repository's artifact storage quota is exhausted, the fallback Release upload requires a repository Actions secret named `GH_RELEASE_TOKEN` containing a fine-grained token with **Contents: Read and write** permission for this repository. Without that secret, the workflow reports an actionable error instead of the previous opaque 403 permission failure. The secret is used only by the fallback Release-publishing step.
+
 ## Current scope
 
 The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands, and an on-demand low-frame-rate JPEG desktop preview. Smooth full-screen remote desktop streaming is a later WebRTC milestone.
