@@ -82,7 +82,7 @@ jobs:
             --prerelease
 
           release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
-          download_url="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "MynAssistant-Windows-Agent.zip") | .url' | head -n 1)"
+          download_url="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json assets --jq '.assets[] | select(.name == "MynAssistant-Windows-Agent.zip") | .url' | head -n 1)"
           if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
             echo "::error::Windows Agent Release asset upload could not be verified."
             exit 1
