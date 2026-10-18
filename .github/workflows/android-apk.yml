@@ -79,6 +79,8 @@ jobs:
               "Authenticated owner identifier": '"ownerId" to uid',
               "Phone heartbeat": "heartbeatHandler.postDelayed(this, 25_000L)",
               "Windows-only remote target list": 'if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null',
+              "Periodic Android UI liveness refresh": "delay(10_000L)",
+              "Time-aware Windows target status": "isOnlineAt(deviceStatusNowMillis)",
               "Offline state on disposal": '"status", "offline"',
               "Safe legacy duplicate cleanup": 'val legacyIdKey = "firebase_android_device_id_" + uid',
               "Legacy record deletion": "legacyDeviceRef.delete()",
