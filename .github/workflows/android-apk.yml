@@ -103,6 +103,18 @@ jobs:
           missing_freshness = [label for label, text in freshness_required.items() if text not in freshness]
           if missing_freshness:
               raise SystemExit("Android-PC heartbeat freshness validation failed; missing: " + ", ".join(missing_freshness))
+          rules = Path("firestore.rules").read_text(encoding="utf-8")
+          required_rules = {
+              "Command target must belong to the signed-in owner": "get(/databases/$(database)/documents/devices/$(request.resource.data.deviceId)).data.ownerId == request.auth.uid",
+              "Command target must use Firebase Agent": "get(/databases/$(database)/documents/devices/$(request.resource.data.deviceId)).data.connectionMode == 'firebase-agent'",
+              "Command target must be Windows": "get(/databases/$(database)/documents/devices/$(request.resource.data.deviceId)).data.platform == 'Windows'",
+              "Command must enter queue as pending": "request.resource.data.status == 'pending'",
+              "Command target is immutable": "resource.data.deviceId == request.resource.data.deviceId",
+              "Command operation is immutable": "resource.data.command == request.resource.data.command",
+          }
+          missing_rules = [label for label, text in required_rules.items() if text not in rules]
+          if missing_rules:
+              raise SystemExit("Firestore command authorization validation failed; missing: " + ", ".join(missing_rules))
           if 'document.getTimestamp("lastSeenAt")?.toDate()?.time' not in source:
               raise SystemExit("Android-PC heartbeat freshness validation failed; Windows targets must use Firestore lastSeenAt.")
 
