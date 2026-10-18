@@ -948,6 +948,43 @@ private fun saveWindowsBridgeDevice(
         .addOnFailureListener { onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
 }
 
+private fun saveAndroidDevice(user: FirebaseUser, context: Context) {
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val preferenceKey = "firebase_android_device_id_" + user.uid
+    var deviceId = prefs.getString(preferenceKey, null)
+    if (deviceId.isNullOrBlank()) {
+        deviceId = "android-" + java.util.UUID.randomUUID().toString().replace("-", "")
+        prefs.edit().putString(preferenceKey, deviceId).apply()
+    }
+
+    val deviceName = listOf(Build.MANUFACTURER, Build.MODEL)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString(" ")
+        .ifBlank { "Android telefon" }
+
+    val data = hashMapOf<String, Any>(
+        "ownerId" to user.uid,
+        "name" to deviceName,
+        "deviceName" to deviceName,
+        "platform" to "Android",
+        "type" to "Android",
+        "model" to Build.MODEL,
+        "status" to "online",
+        "connectionMode" to "android-app",
+        "lastSeenAt" to FieldValue.serverTimestamp()
+    )
+
+    FirebaseFirestore.getInstance()
+        .collection("devices")
+        .document(deviceId)
+        .set(data, SetOptions.merge())
+        .addOnFailureListener { error ->
+            android.util.Log.w("MynAssistantPairing", "Android cihaz kaydı yapılamadı.", error)
+        }
+}
+
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
 
@@ -1483,6 +1520,18 @@ private fun AssistantScreen(
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
+
+    // Publish this Android installation to the same owner-scoped devices collection
+    // used by the Windows Desktop Bridge; refresh lastSeenAt while the app is active.
+    LaunchedEffect(firebaseUserId, signedIn) {
+        val user = FirebaseAuth.getInstance().currentUser
+        if (signedIn && user != null && user.uid == firebaseUserId) {
+            while (true) {
+                saveAndroidDevice(user, commandContext)
+                delay(30_000L)
+            }
+        }
+    }
     var wakeWordEnabled by remember {
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean("wake_word_enabled", false))
