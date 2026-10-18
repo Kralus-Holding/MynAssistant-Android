@@ -34,6 +34,7 @@ SCREEN_CHECK_SECONDS = 8.0
 SCREEN_FRAME_SECONDS = 1.5
 SCREEN_REQUEST_MAX_AGE_SECONDS = 25.0
 HEARTBEAT_SECONDS = 25.0
+DEVICE_STALE_AFTER_SECONDS = 90.0
 DPAPI_ENTROPY = b"MynAssistantDesktopAgent-v1"
 APP_DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "MynAssistant" / "DesktopAgent"
 OAUTH_FILE_NAME = "client_secret.json"
@@ -50,6 +51,19 @@ KEYEVENTF_KEYUP = 0x0002
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def is_device_heartbeat_fresh(last_seen_at: str | None) -> bool:
+    if not isinstance(last_seen_at, str) or not last_seen_at.strip():
+        return False
+    try:
+        timestamp = datetime.fromisoformat(last_seen_at.strip().replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - timestamp.astimezone(timezone.utc)).total_seconds()
+        return -120.0 <= age_seconds <= DEVICE_STALE_AFTER_SECONDS
+    except (OverflowError, ValueError):
+        return False
 
 
 def running_directory() -> Path:
@@ -341,12 +355,17 @@ def fetch_android_phone_devices(session: FirebaseSession) -> list[dict]:
         if fields.get("ownerId") != session.uid or platform_name.casefold() != "android":
             continue
         full_name = str(document.get("name") or "")
+        last_seen_at = fields.get("lastSeenAt") if isinstance(fields.get("lastSeenAt"), str) else ""
+        status = str(fields.get("status") or "offline")
+        if status.casefold() == "online" and not is_device_heartbeat_fresh(last_seen_at):
+            status = "offline"
+
         devices.append({
             "id": full_name.rsplit("/", 1)[-1],
             "name": str(fields.get("name") or fields.get("deviceName") or "Android telefon"),
             "platform": platform_name,
-            "status": str(fields.get("status") or "offline"),
-            "lastSeenAt": fields.get("lastSeenAt") if isinstance(fields.get("lastSeenAt"), str) else "",
+            "status": status,
+            "lastSeenAt": last_seen_at,
         })
 
     devices.sort(key=lambda item: (item["name"].casefold(), item["id"]))
