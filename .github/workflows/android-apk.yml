@@ -79,6 +79,8 @@ jobs:
               "Authenticated owner identifier": '"ownerId" to uid',
               "Phone heartbeat": "heartbeatHandler.postDelayed(this, 25_000L)",
               "Windows-only remote target list": 'if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null',
+              "Only server-connected Windows agents are selectable": 'if (connectionMode != "firebase-agent") return@mapNotNull null',
+              "Phone sends commands through Firebase": 'FirebaseFirestore.getInstance().collection("commands")',
               "Periodic Android UI liveness refresh": "delay(10_000L)",
               "Time-aware Windows target status": "isOnlineAt(deviceStatusNowMillis)",
               "Offline state on disposal": '"status", "offline"',
@@ -101,6 +103,20 @@ jobs:
               raise SystemExit("Android-PC heartbeat freshness validation failed; missing: " + ", ".join(missing_freshness))
           if 'document.getTimestamp("lastSeenAt")?.toDate()?.time' not in source:
               raise SystemExit("Android-PC heartbeat freshness validation failed; Windows targets must use Firestore lastSeenAt.")
+
+          forbidden_direct_transport = [
+              "callMynAiBridge(",
+              "sendPcBridgeCommand",
+              "java.net.URL(endpoint)",
+              "mynai-local-bridge",
+              '"bridgeUrl"',
+          ]
+          direct_transport = [marker for marker in forbidden_direct_transport if marker in source]
+          if direct_transport:
+              raise SystemExit(
+                  "Phone-PC architecture violation: direct phone-to-PC transport found: "
+                  + ", ".join(direct_transport)
+              )
 
           legacy_registration_markers = [
               'val preferenceKey = "firebase_android_device_id_" + user.uid',
