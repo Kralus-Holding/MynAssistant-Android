@@ -2,7 +2,7 @@ name: Build MynAssistant Windows Agent
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "feature/android-pc-firebase-bridge"]
     paths:
       - "desktop-agent/**"
       - ".github/workflows/windows-agent.yml"

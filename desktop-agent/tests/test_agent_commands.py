@@ -231,5 +231,17 @@ class ScreenFrameSizeTests(unittest.TestCase):
         )
 
 
+class OAuthScopeTests(unittest.TestCase):
+    def test_google_sign_in_uses_canonical_scope_uris(self):
+        self.assertEqual(
+            agent.SCOPES,
+            [
+                "https://www.googleapis.com/auth/userinfo.email",
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "openid",
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
