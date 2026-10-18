@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -48,10 +48,44 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath MynAssistant-Windows-Agent.zip -Force
 
       - name: Upload Windows Agent package
+        id: upload_agent_package
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: MynAssistant-Windows-Agent
           path: MynAssistant-Windows-Agent.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish Windows Agent package if Actions storage is unavailable
+        if: github.event_name != 'pull_request' && steps.upload_agent_package.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          package="MynAssistant-Windows-Agent.zip"
+          test -f "$package"
+          tag="mynassistant-windows-agent-build-${GH_RUN_ID}-attempt-${GH_RUN_ATTEMPT}"
+          notes="Standalone Windows Agent preview built and tested by GitHub Actions. This ZIP is not the full MynAssistant Windows installer; use the MynAssistant Setup release for the desktop UI and phone list."
+
+          gh release create "$tag" "$package" \
+            --repo "$GH_REPOSITORY" \
+            --target "$GH_SHA" \
+            --title "MynAssistant Windows Agent Preview (${GH_RUN_ID})" \
+            --notes "$notes" \
+            --prerelease
+
+          release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
+          download_url="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "MynAssistant-Windows-Agent.zip") | .url' | head -n 1)"
+          if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
+            echo "::error::Windows Agent Release asset upload could not be verified."
+            exit 1
+          fi
+          printf 'Verified Windows Agent release URL: %s\n' "$download_url"
+          printf 'Release metadata: %s\n' "$release_json"
