@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -145,10 +145,44 @@ jobs:
             echo "- SHA-256: `$SHA256`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload APK
+      - name: Upload APK as Actions artifact
+        id: upload_apk
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: MynAssistant-debug-apk
+          name: MynAssistant-pc-pairing-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish APK to GitHub Releases if Actions storage is unavailable
+        if: github.event_name != 'pull_request' && steps.upload_apk.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          tag="mynassistant-pc-pairing-build-${GH_RUN_ID}-attempt-${GH_RUN_ATTEMPT}"
+          notes="Debug/test APK for the MynAssistant Android-PC Firebase pairing branch. Built and validated by GitHub Actions. This is a sideloaded test build, not a Google Play production release. Signing certificate SHA-1 is verified by CI; use the same signing key for later upgrade APKs."
+
+          gh release create "$tag" "$apk#MynAssistant-debug.apk" \
+            --repo "$GH_REPOSITORY" \
+            --target "$GH_SHA" \
+            --title "MynAssistant PC Pairing Preview (${GH_RUN_ID})" \
+            --notes "$notes" \
+            --prerelease
+
+          release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
+          download_url="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "MynAssistant-debug.apk") | .browserDownloadUrl' | head -n 1)"
+          if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
+            echo "::error::APK Release asset upload could not be verified."
+            exit 1
+          fi
+          printf 'Verified APK release URL: %s\n' "$download_url"
+          printf 'Release metadata: %s\n' "$release_json"
