@@ -84,7 +84,19 @@ jobs:
           missing = [label for label, text in required.items() if text not in source]
           if missing:
               raise SystemExit("Android-PC pairing validation failed; missing: " + ", ".join(missing))
-          print("Android-PC pairing validation passed: phone registration, heartbeat, owner scoping, and Windows target filtering.")
+
+          legacy_registration_markers = [
+              "firebase_android_device_id_",
+              "saveAndroidDevice(",
+          ]
+          legacy = [marker for marker in legacy_registration_markers if marker in source]
+          if legacy:
+              raise SystemExit(
+                  "Android-PC pairing validation failed; duplicate legacy registration path found: "
+                  + ", ".join(legacy)
+              )
+
+          print("Android-PC pairing validation passed: single phone registration, heartbeat, owner scoping, and Windows target filtering.")
           PY
 
       - name: Build debug APK
