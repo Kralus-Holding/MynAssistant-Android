@@ -1962,6 +1962,49 @@ private fun AssistantScreen(
             val deviceRef = FirebaseFirestore.getInstance()
                 .collection("devices")
                 .document(phoneDeviceId)
+
+            // Migrate the duplicate record created by older builds, but only after checking ownership.
+            val legacyIdKey = "firebase_android_device_id_" + uid
+            val legacyDeviceId = devicePrefs.getString(legacyIdKey, null)
+                ?.takeIf { it.isNotBlank() && it != phoneDeviceId }
+            if (legacyDeviceId != null) {
+                val legacyDeviceRef = FirebaseFirestore.getInstance()
+                    .collection("devices")
+                    .document(legacyDeviceId)
+                legacyDeviceRef.get()
+                    .addOnSuccessListener { legacySnapshot ->
+                        if (!legacySnapshot.exists()) {
+                            devicePrefs.edit().remove(legacyIdKey).apply()
+                        } else if (
+                            legacySnapshot.getString("ownerId") == uid &&
+                            (legacySnapshot.getString("platform") == "Android" ||
+                                legacySnapshot.getString("type") == "Android")
+                        ) {
+                            legacyDeviceRef.delete()
+                                .addOnSuccessListener {
+                                    devicePrefs.edit().remove(legacyIdKey).apply()
+                                }
+                                .addOnFailureListener { error ->
+                                    android.util.Log.w(
+                                        "MynAssistantPairing",
+                                        "Eski yinelenen telefon kaydı temizlenemedi.",
+                                        error
+                                    )
+                                }
+                        } else {
+                            // Never delete a record that cannot be verified as this user's Android device.
+                            devicePrefs.edit().remove(legacyIdKey).apply()
+                        }
+                    }
+                    .addOnFailureListener { error ->
+                        android.util.Log.w(
+                            "MynAssistantPairing",
+                            "Eski telefon kaydı doğrulanamadı; temizleme sonraki açılışa bırakıldı.",
+                            error
+                        )
+                    }
+            }
+
             val heartbeatHandler = Handler(Looper.getMainLooper())
             val heartbeat = object : Runnable {
                 override fun run() {
