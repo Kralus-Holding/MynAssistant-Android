@@ -26,11 +26,7 @@ FIREBASE_API_KEY = "AIzaSyB0z1b5OOMh8Pqn2GPd1ZuWoHEhRoKSrRM"
 IDENTITY_TOOLKIT = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN = "https://securetoken.googleapis.com/v1/token"
 FIRESTORE = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
-SCOPES = [
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-    "openid",
-]
+SCOPES = ["https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile", "openid"]
 AGENT_VERSION = "0.2.1"
 POLL_SECONDS = 2.0
 COMMAND_POLL_SECONDS = 2.0
@@ -362,6 +358,7 @@ def write_android_phone_snapshot(session: FirebaseSession) -> None:
     APP_DATA.mkdir(parents=True, exist_ok=True)
     snapshot = {
         "ownerId": session.uid,
+        "email": getattr(session, "email", ""),
         "updatedAt": utc_now(),
         "devices": fetch_android_phone_devices(session),
     }
