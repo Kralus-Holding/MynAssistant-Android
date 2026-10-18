@@ -35,6 +35,52 @@ jobs:
       - name: Run Windows Agent tests
         run: python -m unittest discover -s desktop-agent/tests -v
 
+      - name: Validate server-only phone-PC architecture
+        shell: pwsh
+        run: |
+          $agent = Get-Content -LiteralPath "desktop-agent/agent.py" -Raw
+          $android = Get-Content -LiteralPath "app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt" -Raw
+
+          $requiredServerFlow = @(
+            'def fetch_device_commands(session: FirebaseSession, device_id: str) -> list[dict]:',
+            'def claim_command(session: FirebaseSession, document: dict) -> bool:',
+            'def update_command(session: FirebaseSession, document: dict, status: str, result: str) -> None:',
+            '"connectionMode": encode_string("firebase-agent")'
+          )
+          $missing = @($requiredServerFlow | Where-Object { -not $agent.Contains($_) })
+          if ($missing.Count -gt 0) {
+            throw "Windows Agent must use the Firebase command queue; missing: $($missing -join ', ')"
+          }
+
+          $forbiddenPhoneTransport = @(
+            'callMynAiBridge(',
+            'sendPcBridgeCommand',
+            'java.net.URL(endpoint)',
+            'mynai-local-bridge',
+            '"bridgeUrl"'
+          )
+          $direct = @($forbiddenPhoneTransport | Where-Object { $android.Contains($_) })
+          if ($direct.Count -gt 0) {
+            throw "Direct phone-to-PC transport is forbidden; use Firebase commands only: $($direct -join ', ')"
+          }
+
+          $forbiddenLocalServers = @(
+            'BaseHTTPRequestHandler',
+            'ThreadingHTTPServer',
+            'HTTPServer(',
+            'HttpListener',
+            'TcpListener',
+            'Flask(__name__',
+            'FastAPI(',
+            'uvicorn.run(',
+            'app.run('
+          )
+          $listeners = @($forbiddenLocalServers | Where-Object { $agent.Contains($_) })
+          if ($listeners.Count -gt 0) {
+            throw "Windows Agent must not expose a phone-facing listener: $($listeners -join ', ')"
+          }
+          Write-Host "Validated Android-to-Firebase-to-Windows command routing; no direct phone-to-PC transport or local command listener."
+
       - name: Build Windows EXE
         run: |
           pyinstaller --noconfirm --clean --onefile --console --name MynAssistantAgent --collect-all google_auth_oauthlib --collect-all google.auth --hidden-import win32crypt desktop-agent/agent.py
