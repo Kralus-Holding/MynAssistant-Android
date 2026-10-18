@@ -81,6 +81,8 @@ jobs:
               "Windows-only remote target list": 'if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null',
               "Only server-connected Windows agents are selectable": 'if (connectionMode != "firebase-agent") return@mapNotNull null',
               "Phone sends commands through Firebase": 'FirebaseFirestore.getInstance().collection("commands")',
+              "Command payload is sanitized": "sanitizeRemoteCommandPayload(payload)",
+              "Server owns command identity metadata": 'commandData["ownerId"] = user.uid',
               "Periodic Android UI liveness refresh": "delay(10_000L)",
               "Time-aware Windows target status": "isOnlineAt(deviceStatusNowMillis)",
               "Offline state on disposal": '"status", "offline"',
