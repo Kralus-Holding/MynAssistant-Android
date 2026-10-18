@@ -65,6 +65,28 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon testDebugUnitTest
 
+      - name: Validate Android-to-Windows pairing registration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt").read_text(encoding="utf-8")
+          required = {
+              "Android device registration lifecycle": "Register this Android installation so the Windows app can show it in Telefonlarım.",
+              "Stable per-account device identifier": 'val idKey = "android_device_id_" + uid',
+              "Android platform marker": '"platform" to "Android"',
+              "Authenticated owner identifier": '"ownerId" to uid',
+              "Phone heartbeat": "heartbeatHandler.postDelayed(this, 25_000L)",
+              "Windows-only remote target list": 'if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null',
+              "Offline state on disposal": '"status", "offline"',
+          }
+          missing = [label for label, text in required.items() if text not in source]
+          if missing:
+              raise SystemExit("Android-PC pairing validation failed; missing: " + ", ".join(missing))
+          print("Android-PC pairing validation passed: phone registration, heartbeat, owner scoping, and Windows target filtering.")
+          PY
+
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
