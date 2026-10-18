@@ -13,8 +13,14 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 
 - Android listens in real time to Firestore devices documents filtered by the signed-in user's ownerId.
 - Windows Agent signs in via Google OAuth on first launch and registers the PC under the same Firebase user.
-- Android remote actions are queued in Firestore commands; the Windows Agent consumes commands for its registered device.
+- Android remote actions are queued in Firestore commands; the Windows Agent consumes commands for its registered device and writes the result back to that server-side command document.
 - The Android app no longer requires the user to type a Windows IP address or local bridge token.
+
+## Required phone-PC architecture: server-only relay
+
+**Android phone → Firebase / Cloud Firestore ← Windows Agent.** Each device connects outbound to the shared service independently. The phone writes an owner- and device-scoped command to `commands`; the Windows Agent polls only its own pending commands, claims a command before executing it, and updates its status/result in Firestore. Android observes the same command document for progress and completion. Device discovery and online state come from `devices` and heartbeat timestamps.
+
+There is no phone-to-PC HTTP endpoint, local network address, or peer-to-peer command fallback. OAuth's loopback callback on the Windows computer is used only to complete the PC's own Google sign-in; it does not carry phone commands. Firestore rules must be deployed to the live Firebase project for the source-side command authorization rules to take effect.
 
 ## Hey Meyene — offline voice wake word (Android 0.4.4 candidate)
 
