@@ -1,6 +1,8 @@
 package com.mynkralus.mynassistant
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeviceStatusFreshnessPolicyTest {
@@ -34,6 +36,12 @@ class DeviceStatusFreshnessPolicyTest {
             "offline",
             normalizeDeviceStatus("offline", lastSeenAtMillis = 99_000L, nowMillis = 100_000L)
         )
+    }
+
+    @Test
+    fun computedOnlineStateChangesAsHeartbeatAges() {
+        assertTrue(isDeviceOnlineAt("online", lastSeenAtMillis = 70_000L, nowMillis = 100_000L))
+        assertFalse(isDeviceOnlineAt("online", lastSeenAtMillis = 9_000L, nowMillis = 100_000L))
     }
 
     @Test
