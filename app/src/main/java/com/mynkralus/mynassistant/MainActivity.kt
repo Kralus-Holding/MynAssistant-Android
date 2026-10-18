@@ -118,10 +118,11 @@ private data class PcDevice(
     val platform: String,
     val status: String,
     val connectionMode: String = "",
-    val screenJpegBase64: String = ""
+    val screenJpegBase64: String = "",
+    val lastSeenAtMillis: Long? = null
 ) {
-    val isOnline: Boolean
-        get() = status.trim().lowercase() in setOf("online", "connected", "ready", "active")
+    fun isOnlineAt(nowMillis: Long): Boolean =
+        isDeviceOnlineAt(status, lastSeenAtMillis, nowMillis)
 }
 
 private fun loadSavedGoogleAccounts(prefs: android.content.SharedPreferences): List<SavedGoogleAccount> {
@@ -1463,6 +1464,15 @@ private fun AssistantScreen(
     var showExitConfirmation by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
+    var deviceStatusNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(firebaseUserId, devices.isNotEmpty()) {
+        if (devices.isNotEmpty()) {
+            while (true) {
+                delay(10_000L)
+                deviceStatusNowMillis = System.currentTimeMillis()
+            }
+        }
+    }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -2069,12 +2079,11 @@ private fun AssistantScreen(
                                     ?: document.getString("deviceName")
                                     ?: "Windows bilgisayar",
                                 platform = devicePlatform,
-                                status = normalizeDeviceStatus(
-                                    rawStatus = document.getString("status")
-                                        ?: document.getString("connectionStatus"),
-                                    lastSeenAtMillis = document.getTimestamp("lastSeenAt")?.toDate()?.time
-                                ),
+                                status = document.getString("status")
+                                    ?: document.getString("connectionStatus")
+                                    ?: "offline",
                                 connectionMode = document.getString("connectionMode").orEmpty(),
+                                lastSeenAtMillis = document.getTimestamp("lastSeenAt")?.toDate()?.time,
                                 screenJpegBase64 = document.getString("screenJpegBase64").orEmpty()
                             )
                         }
@@ -2119,7 +2128,7 @@ private fun AssistantScreen(
 
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val connectedDevices = devices.filter { device ->
-        if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+        if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(deviceStatusNowMillis)
     }
     val hasConnectedPc = signedIn && connectedDevices.isNotEmpty()
     val testPcBridgeNow: () -> Unit = {
@@ -2362,7 +2371,7 @@ private fun AssistantScreen(
             }
             routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
             !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
-            selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
+            selectedDevice?.isOnlineAt(deviceStatusNowMillis) == true && selectedDevice.connectionMode == "firebase-agent" -> {
                 feedback = "Komut bilgisayarına gönderiliyor..."
                 sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
             }
@@ -2534,7 +2543,7 @@ private fun AssistantScreen(
                                     }
                                 }
                                 devices.forEach { device ->
-                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(deviceStatusNowMillis)
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -2966,11 +2975,11 @@ private fun AssistantScreen(
                                                 when {
                                                     !signedIn -> "Önce hesabına giriş yap."
                                                     devicesLoading -> "Hesabına bağlı cihazlar aranıyor..."
-                                                    devices.any { it.isOnline } -> "En az bir cihaz çevrimiçi."
+                                                    devices.any { it.isOnlineAt(deviceStatusNowMillis) } -> "En az bir cihaz çevrimiçi."
                                                     else -> "Henüz çevrimiçi bilgisayar yok."
                                                 },
                                                 fontSize = 12.sp,
-                                                color = if (devices.any { it.isOnline }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                                color = if (devices.any { it.isOnlineAt(deviceStatusNowMillis) }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
                                             )
                                         }
                                     }
@@ -3009,7 +3018,7 @@ private fun AssistantScreen(
                             val localBridgeSelected = signedIn && localPcConnected &&
                                 (device == null || device.id == localPcDeviceId)
                             val remoteOnline = localBridgeSelected ||
-                                (device?.isOnline == true && signedIn && device.id != localPcDeviceId)
+                                (device?.isOnlineAt(deviceStatusNowMillis) == true && signedIn && device.id != localPcDeviceId)
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
