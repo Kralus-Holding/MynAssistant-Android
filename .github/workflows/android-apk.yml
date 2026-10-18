@@ -80,13 +80,16 @@ jobs:
               "Phone heartbeat": "heartbeatHandler.postDelayed(this, 25_000L)",
               "Windows-only remote target list": 'if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null',
               "Offline state on disposal": '"status", "offline"',
+              "Safe legacy duplicate cleanup": 'val legacyIdKey = "firebase_android_device_id_" + uid',
+              "Legacy record deletion": "legacyDeviceRef.delete()",
+              "Legacy ownership guard": 'legacySnapshot.getString("ownerId") == uid',
           }
           missing = [label for label, text in required.items() if text not in source]
           if missing:
               raise SystemExit("Android-PC pairing validation failed; missing: " + ", ".join(missing))
 
           legacy_registration_markers = [
-              "firebase_android_device_id_",
+              'val preferenceKey = "firebase_android_device_id_" + user.uid',
               "saveAndroidDevice(",
           ]
           legacy = [marker for marker in legacy_registration_markers if marker in source]
