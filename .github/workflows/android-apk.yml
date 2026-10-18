@@ -88,6 +88,18 @@ jobs:
           if missing:
               raise SystemExit("Android-PC pairing validation failed; missing: " + ", ".join(missing))
 
+          freshness = Path("app/src/main/java/com/mynkralus/mynassistant/DeviceStatusFreshnessPolicy.kt").read_text(encoding="utf-8")
+          freshness_required = {
+              "90-second heartbeat freshness policy": "DEVICE_HEARTBEAT_MAX_AGE_MS = 90_000L",
+              "Missing heartbeat fails offline": "val lastSeen = lastSeenAtMillis ?: return \"offline\"",
+              "Online status uses freshness policy": "normalizeDeviceStatus(",
+          }
+          missing_freshness = [label for label, text in freshness_required.items() if text not in freshness]
+          if missing_freshness:
+              raise SystemExit("Android-PC heartbeat freshness validation failed; missing: " + ", ".join(missing_freshness))
+          if 'document.getTimestamp("lastSeenAt")?.toDate()?.time' not in source:
+              raise SystemExit("Android-PC heartbeat freshness validation failed; Windows targets must use Firestore lastSeenAt.")
+
           legacy_registration_markers = [
               'val preferenceKey = "firebase_android_device_id_" + user.uid',
               "saveAndroidDevice(",
