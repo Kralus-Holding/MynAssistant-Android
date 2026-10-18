@@ -1123,14 +1123,14 @@ class MainActivity : ComponentActivity() {
                         if (user == null) {
                             report("Devam etmek için önce giriş yap.", null)
                         } else {
-                            val commandData = hashMapOf<String, Any>(
-                                "ownerId" to user.uid,
-                                "deviceId" to deviceId,
-                                "command" to commandName,
-                                "status" to "pending",
-                                "createdAt" to FieldValue.serverTimestamp()
-                            )
-                            commandData.putAll(payload)
+                            val commandData = hashMapOf<String, Any>()
+                            commandData.putAll(sanitizeRemoteCommandPayload(payload))
+                            // Server routing and lifecycle metadata must never be overridden by an action payload.
+                            commandData["ownerId"] = user.uid
+                            commandData["deviceId"] = deviceId
+                            commandData["command"] = commandName
+                            commandData["status"] = "pending"
+                            commandData["createdAt"] = FieldValue.serverTimestamp()
                             FirebaseFirestore.getInstance().collection("commands")
                                 .add(commandData)
                                 .addOnSuccessListener { document ->
