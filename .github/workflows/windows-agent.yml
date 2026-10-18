@@ -6,6 +6,10 @@ on:
     paths:
       - "desktop-agent/**"
       - ".github/workflows/windows-agent.yml"
+  pull_request:
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/windows-agent.yml"
   workflow_dispatch:
 
 permissions:
@@ -28,6 +32,55 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r desktop-agent/requirements.txt
 
+      - name: Run Windows Agent tests
+        run: python -m unittest discover -s desktop-agent/tests -v
+
+      - name: Validate server-only phone-PC architecture
+        shell: pwsh
+        run: |
+          $agent = Get-Content -LiteralPath "desktop-agent/agent.py" -Raw
+          $android = Get-Content -LiteralPath "app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt" -Raw
+
+          $requiredServerFlow = @(
+            'def fetch_device_commands(session: FirebaseSession, device_id: str) -> list[dict]:',
+            'def claim_command(session: FirebaseSession, document: dict) -> bool:',
+            'def update_command(session: FirebaseSession, document: dict, status: str, result: str) -> None:',
+            '"connectionMode": encode_string("firebase-agent")'
+          )
+          $missing = @($requiredServerFlow | Where-Object { -not $agent.Contains($_) })
+          if ($missing.Count -gt 0) {
+            throw "Windows Agent must use the Firebase command queue; missing: $($missing -join ', ')"
+          }
+
+          $forbiddenPhoneTransport = @(
+            'callMynAiBridge(',
+            'sendPcBridgeCommand',
+            'java.net.URL(endpoint)',
+            'mynai-local-bridge',
+            '"bridgeUrl"'
+          )
+          $direct = @($forbiddenPhoneTransport | Where-Object { $android.Contains($_) })
+          if ($direct.Count -gt 0) {
+            throw "Direct phone-to-PC transport is forbidden; use Firebase commands only: $($direct -join ', ')"
+          }
+
+          $forbiddenLocalServers = @(
+            'BaseHTTPRequestHandler',
+            'ThreadingHTTPServer',
+            'HTTPServer(',
+            'HttpListener',
+            'TcpListener',
+            'Flask(__name__',
+            'FastAPI(',
+            'uvicorn.run(',
+            'app.run('
+          )
+          $listeners = @($forbiddenLocalServers | Where-Object { $agent.Contains($_) })
+          if ($listeners.Count -gt 0) {
+            throw "Windows Agent must not expose a phone-facing listener: $($listeners -join ', ')"
+          }
+          Write-Host "Validated Android-to-Firebase-to-Windows command routing; no direct phone-to-PC transport or local command listener."
+
       - name: Build Windows EXE
         run: |
           pyinstaller --noconfirm --clean --onefile --console --name MynAssistantAgent --collect-all google_auth_oauthlib --collect-all google.auth --hidden-import win32crypt desktop-agent/agent.py
@@ -41,9 +94,50 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath MynAssistant-Windows-Agent.zip -Force
 
       - name: Upload Windows Agent package
+        id: upload_agent_package
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: MynAssistant-Windows-Agent
           path: MynAssistant-Windows-Agent.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish Windows Agent package if Actions storage is unavailable
+        if: github.event_name != 'pull_request' && steps.upload_agent_package.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_RELEASE_TOKEN:-}" ]; then
+            echo "::error::GitHub Actions artifact storage is unavailable and GH_RELEASE_TOKEN is not configured."
+            echo "::error::Add a fine-grained PAT as repository Actions secret GH_RELEASE_TOKEN with Contents: Read and write, then rerun this workflow."
+            exit 1
+          fi
+          package="MynAssistant-Windows-Agent.zip"
+          test -f "$package"
+          tag="mynassistant-windows-agent-build-${GH_RUN_ID}-attempt-${GH_RUN_ATTEMPT}"
+          notes="Standalone Windows Agent preview built and tested by GitHub Actions. This ZIP is not the full MynAssistant Windows installer; use the MynAssistant Setup release for the desktop UI and phone list."
+
+          gh release create "$tag" "$package" \
+            --repo "$GH_REPOSITORY" \
+            --target "$GH_SHA" \
+            --title "MynAssistant Windows Agent Preview (${GH_RUN_ID})" \
+            --notes "$notes" \
+            --prerelease
+
+          release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
+          download_url="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json assets --jq '.assets[] | select(.name == "MynAssistant-Windows-Agent.zip") | .url' | head -n 1)"
+          if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
+            echo "::error::Windows Agent Release asset upload could not be verified."
+            exit 1
+          fi
+          printf 'Verified Windows Agent release URL: %s\n' "$download_url"
+          printf 'Release metadata: %s\n' "$release_json"

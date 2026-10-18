@@ -37,3 +37,6 @@ EXE paketi GitHub Actions'ta windows-latest üzerinde oluşturulur. Artifact ZIP
 ## Önemli sınırlar
 
 Bu ilk sürüm otomatik cihaz keşfi, çevrimiçi durumu, temel komut/fare kontrolü ve düşük kare hızlı masaüstü önizlemesi sağlar. Önizleme Chrome Uzaktan Masaüstü gibi akıcı bir video oturumu değildir; yaklaşık 1–2 saniyede bir JPEG kare gönderir. Sonraki aşamada WebRTC tabanlı akıcı ekran aktarımı ve güvenli bağlantı pazarlığı gerekir. Bilgisayarın görünmesi için Windows Agent'ın çalışması ve aynı Firebase hesabına kaydolması gerekir.
+
+
+OAuth yapılandırması önce EXE yanındaki `client_secret.json` dosyasından, yoksa `%LOCALAPPDATA%\\MynAI\\Google\\client_secret.json` konumundan okunur.

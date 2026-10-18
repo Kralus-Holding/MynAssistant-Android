@@ -26,19 +26,22 @@ FIREBASE_API_KEY = "AIzaSyB0z1b5OOMh8Pqn2GPd1ZuWoHEhRoKSrRM"
 IDENTITY_TOOLKIT = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN = "https://securetoken.googleapis.com/v1/token"
 FIRESTORE = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
-SCOPES = ["openid", "email", "profile"]
-AGENT_VERSION = "0.2.0"
+SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]
+AGENT_VERSION = "0.2.1"
 POLL_SECONDS = 2.0
 COMMAND_POLL_SECONDS = 2.0
 SCREEN_CHECK_SECONDS = 8.0
 SCREEN_FRAME_SECONDS = 1.5
 SCREEN_REQUEST_MAX_AGE_SECONDS = 25.0
 HEARTBEAT_SECONDS = 25.0
+DEVICE_STALE_AFTER_SECONDS = 90.0
 DPAPI_ENTROPY = b"MynAssistantDesktopAgent-v1"
 APP_DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "MynAssistant" / "DesktopAgent"
 OAUTH_FILE_NAME = "client_secret.json"
 SESSION_FILE = APP_DATA / "session.bin"
 DEVICE_FILE = APP_DATA / "devices.json"
+PHONE_DISCOVERY_SECONDS = 8.0
+PHONE_DEVICE_CACHE_NAME = "android_devices.json"
 
 VK_VOLUME_MUTE = 0xAD
 VK_VOLUME_DOWN = 0xAE
@@ -48,6 +51,46 @@ KEYEVENTF_KEYUP = 0x0002
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def is_device_heartbeat_fresh(last_seen_at: str | None) -> bool:
+    if not isinstance(last_seen_at, str) or not last_seen_at.strip():
+        return False
+    try:
+        timestamp = datetime.fromisoformat(last_seen_at.strip().replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - timestamp.astimezone(timezone.utc)).total_seconds()
+        return -120.0 <= age_seconds <= DEVICE_STALE_AFTER_SECONDS
+    except (OverflowError, ValueError):
+        return False
+
+
+
+def raise_for_firebase_response(operation: str, response) -> None:
+    """Retry transient Firestore/Auth failures; surface permanent client errors immediately."""
+    status_code = int(response.status_code)
+    if status_code < 400:
+        return
+    message = f"{operation} HTTP {status_code}: {str(response.text)[:600]}"
+    if status_code in {408, 425, 429} or status_code >= 500:
+        raise requests.HTTPError(message, response=response)
+    raise RuntimeError(message)
+
+
+
+def retry_transient_operation(operation, operation_name: str, initial_delay: float = 2.0, max_delay: float = 30.0):
+    """Retry only transient network/server failures while allowing permanent errors to surface."""
+    delay = initial_delay
+    while True:
+        try:
+            return operation()
+        except requests.RequestException as exc:
+            safe_operation = str(operation_name).encode("ascii", "backslashreplace").decode("ascii")
+            safe_error = str(exc).encode("ascii", "backslashreplace").decode("ascii")
+            print(f"[Network] {safe_operation} transient failure: {safe_error}. Retry in {delay:.0f}s.")
+            time.sleep(delay)
+            delay = min(max_delay, delay * 2.0)
 
 
 def running_directory() -> Path:
@@ -130,13 +173,29 @@ def load_device_id(uid: str) -> str:
     return device_id
 
 
+def oauth_credentials_candidates() -> tuple[Path, ...]:
+    # Prefer a side-by-side config for standalone use; packaged MynAI installs
+    # share the per-user Google OAuth configuration used by the main app.
+    return (
+        running_directory() / OAUTH_FILE_NAME,
+        APP_DATA.parent / "Google" / OAUTH_FILE_NAME,
+    )
+
+
+def find_oauth_credentials_path() -> Path | None:
+    return next(
+        (path for path in oauth_credentials_candidates() if path.is_file()),
+        None,
+    )
+
+
 def google_oauth_credentials():
-    credentials_path = running_directory() / OAUTH_FILE_NAME
-    if not credentials_path.is_file():
+    credentials_path = find_oauth_credentials_path()
+    if credentials_path is None:
+        searched = "\n".join(f"- {path}" for path in oauth_credentials_candidates())
         raise FileNotFoundError(
-            "Google OAuth dosyası bulunamadı.\n"
-            f"Google Cloud Console'dan Desktop app türündeki OAuth istemcisinin JSON dosyasını indirip\n"
-            f"adı '{OAUTH_FILE_NAME}' olacak şekilde şu klasöre koy:\n{running_directory()}"
+            "Google OAuth dosyası bulunamadı. MynAI Google ayarlarında "
+            f"'{OAUTH_FILE_NAME}' dosyasını yapılandır. Aranan konumlar:\n{searched}"
         )
     flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)
     return flow.run_local_server(
@@ -152,19 +211,23 @@ def google_oauth_credentials():
 
 def firebase_exchange_google_access_token(access_token: str) -> dict:
     post_body = urlencode({"access_token": access_token, "providerId": "google.com"})
-    response = requests.post(
-        f"{IDENTITY_TOOLKIT}/accounts:signInWithIdp",
-        params={"key": FIREBASE_API_KEY},
-        json={
-            "postBody": post_body,
-            "requestUri": "http://localhost",
-            "returnSecureToken": True,
-            "returnIdpCredential": False,
-        },
-        timeout=25,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError("Firebase Google girişi başarısız: " + response.text[:700])
+
+    def exchange():
+        response = requests.post(
+            f"{IDENTITY_TOOLKIT}/accounts:signInWithIdp",
+            params={"key": FIREBASE_API_KEY},
+            json={
+                "postBody": post_body,
+                "requestUri": "http://localhost",
+                "returnSecureToken": True,
+                "returnIdpCredential": False,
+            },
+            timeout=25,
+        )
+        raise_for_firebase_response("Firebase Google girişi başarısız", response)
+        return response
+
+    response = retry_transient_operation(exchange, "Firebase Google token exchange")
     data = response.json()
     payload = {
         "uid": data["localId"],
@@ -214,8 +277,7 @@ class FirebaseSession:
             data={"grant_type": "refresh_token", "refresh_token": self.refresh_token},
             timeout=20,
         )
-        if response.status_code >= 400:
-            raise RuntimeError("Firebase oturumu yenilenemedi: " + response.text[:500])
+        raise_for_firebase_response("Firebase oturumu yenilenemedi", response)
         data = response.json()
         self.id_token = data["id_token"]
         self.refresh_token = data.get("refresh_token", self.refresh_token)
@@ -238,10 +300,7 @@ def firestore_patch(session: FirebaseSession, document_path: str, fields: dict, 
         json={"fields": fields},
         timeout=20,
     )
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"Firestore PATCH {document_path} HTTP {response.status_code}: {response.text[:500]}"
-        )
+    raise_for_firebase_response(f"Firestore PATCH {document_path}", response)
     return response.json()
 
 
@@ -265,8 +324,7 @@ def register_or_heartbeat(session: FirebaseSession, device_id: str, initial: boo
             json={"fields": fields},
             timeout=20,
         )
-        if response.status_code >= 400:
-            raise RuntimeError("Windows cihaz kaydı başarısız: " + response.text[:700])
+        raise_for_firebase_response("Windows cihaz kaydı başarısız", response)
     else:
         firestore_patch(
             session,
@@ -285,9 +343,72 @@ def read_device_state(session: FirebaseSession, device_id: str) -> dict:
         headers=session.headers(),
         timeout=15,
     )
-    if response.status_code >= 400:
-        raise RuntimeError("Windows cihaz durumu okunamadı: " + response.text[:500])
+    raise_for_firebase_response("Windows cihaz durumu okunamadı", response)
     return decode_document(response.json())
+
+
+def fetch_android_phone_devices(session: FirebaseSession) -> list[dict]:
+    """Fetch this account's Android device records for the Windows pairing list."""
+    response = requests.post(
+        f"{FIRESTORE}:runQuery",
+        headers=session.headers(),
+        json={
+            "structuredQuery": {
+                "from": [{"collectionId": "devices"}],
+                "where": {
+                    "fieldFilter": {
+                        "field": {"fieldPath": "ownerId"},
+                        "op": "EQUAL",
+                        "value": {"stringValue": session.uid},
+                    }
+                },
+                "limit": 100,
+            }
+        },
+        timeout=20,
+    )
+    raise_for_firebase_response("Telefon cihazları okunamadı", response)
+
+    devices = []
+    for result in response.json():
+        document = result.get("document")
+        if not document:
+            continue
+        fields = decode_document(document)
+        platform_name = str(fields.get("platform") or fields.get("type") or "").strip()
+        if fields.get("ownerId") != session.uid or platform_name.casefold() != "android":
+            continue
+        full_name = str(document.get("name") or "")
+        last_seen_at = fields.get("lastSeenAt") if isinstance(fields.get("lastSeenAt"), str) else ""
+        status = str(fields.get("status") or "offline")
+        if status.casefold() == "online" and not is_device_heartbeat_fresh(last_seen_at):
+            status = "offline"
+
+        devices.append({
+            "id": full_name.rsplit("/", 1)[-1],
+            "name": str(fields.get("name") or fields.get("deviceName") or "Android telefon"),
+            "platform": platform_name,
+            "status": status,
+            "lastSeenAt": last_seen_at,
+        })
+
+    devices.sort(key=lambda item: (item["name"].casefold(), item["id"]))
+    return devices
+
+
+def write_android_phone_snapshot(session: FirebaseSession) -> None:
+    """Atomically publish a small local cache consumed by the WPF phone list."""
+    APP_DATA.mkdir(parents=True, exist_ok=True)
+    snapshot = {
+        "ownerId": session.uid,
+        "email": getattr(session, "email", ""),
+        "updatedAt": utc_now(),
+        "devices": fetch_android_phone_devices(session),
+    }
+    destination = APP_DATA / PHONE_DEVICE_CACHE_NAME
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(destination)
 
 
 def screen_request_is_active(fields: dict) -> bool:
@@ -304,19 +425,34 @@ def screen_request_is_active(fields: dict) -> bool:
         return False
 
 
+MAX_SCREEN_FRAME_BASE64_CHARS = 650_000
+
+
 def capture_screen_base64() -> str:
     image = pyautogui.screenshot()
-    image.thumbnail((1280, 720))
-    output = io.BytesIO()
-    image.save(output, format="JPEG", quality=45, optimize=True)
-    payload = output.getvalue()
-    if len(payload) > 800_000:
+    # The Firestore document limit applies after Base64 expansion (roughly +33%),
+    # not to the compressed JPEG bytes. Keep ample room for the document's other
+    # fields by enforcing a 650 KB Base64 string budget.
+    attempts = (
+        ((1280, 720), 40),
+        ((960, 540), 35),
+        ((800, 450), 30),
+        ((640, 360), 25),
+    )
+
+    for dimensions, quality in attempts:
+        frame_image = image.copy()
+        frame_image.thumbnail(dimensions)
         output = io.BytesIO()
-        image.save(output, format="JPEG", quality=30, optimize=True)
-        payload = output.getvalue()
-    if len(payload) > 900_000:
-        raise RuntimeError("Ekran görüntüsü Firestore belge sınırına sığmıyor.")
-    return base64.b64encode(payload).decode("ascii")
+        frame_image.save(output, format="JPEG", quality=quality, optimize=True)
+        encoded = base64.b64encode(output.getvalue()).decode("ascii")
+        if len(encoded) <= MAX_SCREEN_FRAME_BASE64_CHARS:
+            return encoded
+
+    raise RuntimeError(
+        "Ekran görüntüsü Base64 olarak Firestore belge bütçesine sığmıyor; "
+        "çözünürlüğü düşürüp tekrar dene."
+    )
 
 
 def upload_screen_frame(session: FirebaseSession, device_id: str) -> None:
@@ -332,7 +468,8 @@ def upload_screen_frame(session: FirebaseSession, device_id: str) -> None:
     )
 
 
-def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
+def fetch_device_commands(session: FirebaseSession, device_id: str) -> list[dict]:
+    """Fetch only pending commands for this Firebase user and this registered device."""
     response = requests.post(
         f"{FIRESTORE}:runQuery",
         headers=session.headers(),
@@ -352,6 +489,13 @@ def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
                             },
                             {
                                 "fieldFilter": {
+                                    "field": {"fieldPath": "deviceId"},
+                                    "op": "EQUAL",
+                                    "value": {"stringValue": device_id},
+                                }
+                            },
+                            {
+                                "fieldFilter": {
                                     "field": {"fieldPath": "status"},
                                     "op": "EQUAL",
                                     "value": {"stringValue": "pending"},
@@ -360,19 +504,73 @@ def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
                         ],
                     }
                 },
+                "orderBy": [
+                    {
+                        "field": {"fieldPath": "createdAt"},
+                        "direction": "ASCENDING",
+                    }
+                ],
                 "limit": 100,
             }
         },
         timeout=25,
     )
-    if response.status_code >= 400:
-        raise RuntimeError("Komut kuyruğu okunamadı: " + response.text[:700])
+    raise_for_firebase_response("Komut kuyruğu okunamadı", response)
     documents = []
     for result in response.json():
         document = result.get("document")
         if document:
             documents.append(document)
     return documents
+
+
+def claim_command(session: FirebaseSession, document: dict) -> bool:
+    """Atomically transition a pending command to running using Firestore updateTime."""
+    full_name = document.get("name", "")
+    marker = "/documents/"
+    update_time = document.get("updateTime")
+    if marker not in full_name or not update_time:
+        raise RuntimeError("Komut belgesinin yolu veya updateTime bilgisi eksik.")
+
+    document_path = full_name.split(marker, 1)[1]
+    params = [
+        ("updateMask.fieldPaths", "status"),
+        ("updateMask.fieldPaths", "result"),
+        ("updateMask.fieldPaths", "startedAt"),
+        ("currentDocument.updateTime", update_time),
+    ]
+    response = requests.patch(
+        f"{FIRESTORE}/{document_path}",
+        params=params,
+        headers=session.headers(),
+        json={
+            "fields": {
+                "status": encode_string("running"),
+                "result": encode_string("Windows Agent komutu sahipleniyor."),
+                "startedAt": encode_timestamp(),
+            }
+        },
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        try:
+            error = response.json().get("error", {})
+        except (ValueError, AttributeError):
+            error = {}
+        error_status = str(error.get("status", "")).upper()
+        error_message = str(error.get("message", "")).lower()
+        if (
+            response.status_code == 409
+            or error_status in {"ABORTED", "FAILED_PRECONDITION"}
+            or "update time" in error_message
+            or "precondition" in error_message
+        ):
+            # Another Agent changed the pending command first; let that Agent process it.
+            return False
+        raise RuntimeError(
+            f"Komut sahiplenilemedi: HTTP {response.status_code}: {response.text[:500]}"
+        )
+    return True
 
 
 def update_command(session: FirebaseSession, document: dict, status: str, result: str) -> None:
@@ -396,6 +594,56 @@ def press_virtual_key(vk: int, repeat: int = 1) -> None:
         user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
 
 
+
+def list_user_files(home: Path | None = None, max_entries_per_folder: int = 15) -> str:
+    """Return a bounded, non-recursive listing of the user's common folders."""
+    root = home or Path.home()
+    targets = (
+        ("Masaüstü", (root / "Desktop", root / "OneDrive" / "Desktop")),
+        ("Belgeler", (root / "Documents", root / "OneDrive" / "Documents")),
+        ("İndirilenler", (root / "Downloads", root / "OneDrive" / "Downloads")),
+    )
+    limit = max(1, min(int(max_entries_per_folder), 20))
+    sections = []
+
+    for label, candidates in targets:
+        directory = next((candidate for candidate in candidates if candidate.is_dir()), None)
+        if directory is None:
+            continue
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            sections.append(f"{label}: klasör okunamadı.")
+            continue
+
+        def entry_sort_key(entry: Path) -> tuple[bool, str]:
+            try:
+                is_directory = entry.is_dir()
+            except OSError:
+                is_directory = False
+            return (not is_directory, entry.name.casefold())
+
+        entries.sort(key=entry_sort_key)
+        lines = [f"{label} ({directory}):"]
+        if not entries:
+            lines.append("  (boş)")
+        else:
+            for entry in entries[:limit]:
+                try:
+                    kind = "Klasör" if entry.is_dir() else "Dosya"
+                except OSError:
+                    kind = "Öğe"
+                lines.append(f"  [{kind}] {entry.name}")
+            if len(entries) > limit:
+                lines.append(f"  … ve {len(entries) - limit} öğe daha")
+        sections.append("\n".join(lines))
+
+    if not sections:
+        return "Masaüstü, Belgeler veya İndirilenler klasörü bulunamadı."
+    result = "\n\n".join(sections)
+    return result if len(result) <= 6500 else result[:6450] + "\n… liste kısaltıldı."
+
+
 def normalize_text_command(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text.casefold())
     normalized = "".join(char for char in normalized if not unicodedata.combining(char))
@@ -403,10 +651,22 @@ def normalize_text_command(text: str) -> str:
     return " ".join(normalized.split())
 
 
+
 def execute_text_command(text: str) -> str:
     command = normalize_text_command(text)
     if not command:
         return "Önce bir komut yaz."
+
+    if command in {
+        "dosyalari listele",
+        "dosya listesini iste",
+        "dosya listesini goster",
+        "bilgisayar dosyalarini listele",
+        "bilgisayar dosyalarini goster",
+        "bilgisayarin dosyalarini listele",
+        "dosyalari goster",
+    }:
+        return list_user_files()
 
     if command in {"sesi kapa", "sesi kapat", "sessize al", "sesi sustur", "mute"}:
         press_virtual_key(VK_VOLUME_MUTE)
@@ -549,7 +809,10 @@ def run_agent() -> int:
     session = None
     if session_state:
         try:
-            session = FirebaseSession(session_state)
+            session = retry_transient_operation(
+                lambda: FirebaseSession(session_state),
+                "Firebase kayıtlı oturum yenileme",
+            )
             print(f"Kaydedilmiş Firebase oturumu kullanılıyor: {session.email or session.uid}")
         except Exception as exc:
             print(f"[Auth] Kayıtlı oturum yenilenemedi; Google girişi yeniden açılacak. Ayrıntı: {exc}")
@@ -561,76 +824,120 @@ def run_agent() -> int:
         ask_install_startup()
 
     device_id = load_device_id(session.uid)
-    register_or_heartbeat(session, device_id, initial=True)
+    retry_transient_operation(
+        lambda: register_or_heartbeat(session, device_id, initial=True),
+        "Windows cihaz kaydı",
+    )
     print(f"Cihaz çevrimiçi: {platform.node()} (ID: {device_id})")
     print("Android uygulamasında Cihazlarım bölümünde otomatik görünmesi gerekir.")
     print("PC Kumandası açıkken masaüstü önizlemesi yaklaşık saniyede bir güncellenir.")
     print("Durdurmak için Ctrl+C.")
 
+    try:
+        write_android_phone_snapshot(session)
+    except Exception as exc:
+        print(f"[Telefonlar] İlk telefon listesi alınamadı: {exc}")
+
     last_heartbeat = time.monotonic()
+    last_phone_discovery = time.monotonic()
     last_screen_check = 0.0
     last_screen_frame = 0.0
     last_command_poll = 0.0
     screen_active = False
     pyautogui.FAILSAFE = False
+    retry_delay = 2.0
     try:
         while True:
-            session.ensure_fresh()
-            now = time.monotonic()
+            try:
+                session.ensure_fresh()
+                now = time.monotonic()
 
-            if now - last_heartbeat >= HEARTBEAT_SECONDS:
-                register_or_heartbeat(session, device_id)
-                last_heartbeat = now
+                if now - last_heartbeat >= HEARTBEAT_SECONDS:
+                    register_or_heartbeat(session, device_id)
+                    last_heartbeat = now
 
-            screen_check_interval = 3.0 if screen_active else SCREEN_CHECK_SECONDS
-            if now - last_screen_check >= screen_check_interval:
-                device_state = read_device_state(session, device_id)
-                was_active = screen_active
-                screen_active = screen_request_is_active(device_state)
-                last_screen_check = now
-                if was_active and not screen_active:
+                if now - last_phone_discovery >= PHONE_DISCOVERY_SECONDS:
                     try:
-                        firestore_patch(
-                            session,
-                            f"devices/{device_id}",
-                            {"screenJpegBase64": encode_string(""), "screenFrameAt": encode_timestamp()},
-                            update_mask=["screenJpegBase64", "screenFrameAt"],
-                        )
+                        write_android_phone_snapshot(session)
                     except Exception as exc:
-                        print(f"[Uyarı] Önizleme alanı temizlenemedi: {exc}")
+                        print(f"[Telefonlar] Telefon listesi yenilenemedi: {exc}")
+                    last_phone_discovery = now
 
-            if screen_active and now - last_screen_frame >= SCREEN_FRAME_SECONDS:
-                try:
-                    upload_screen_frame(session, device_id)
-                    last_screen_frame = now
-                except Exception as exc:
-                    print(f"[Önizleme] Ekran karesi gönderilemedi: {exc}")
-                    last_screen_frame = now
-
-            if now - last_command_poll >= COMMAND_POLL_SECONDS:
-                for document in fetch_owner_commands(session):
-                    fields = decode_document(document)
-                    if fields.get("deviceId") != device_id or fields.get("status") != "pending":
-                        continue
-                    command = str(fields.get("command") or "")
-                    if not command_is_supported(command):
-                        update_command(session, document, "failed", "Desteklenmeyen komut.")
-                        continue
-                    update_command(session, document, "running", "Windows Agent komutu çalıştırıyor.")
-                    try:
-                        result = execute_command(command, fields)
-                        status = "failed" if result.startswith("Desteklenmeyen komut") else "completed"
-                        update_command(session, document, status, result)
-                        print(f"[Komut] {command}: {result}")
-                    except Exception as exc:
+                screen_check_interval = 3.0 if screen_active else SCREEN_CHECK_SECONDS
+                if now - last_screen_check >= screen_check_interval:
+                    device_state = read_device_state(session, device_id)
+                    was_active = screen_active
+                    screen_active = screen_request_is_active(device_state)
+                    last_screen_check = now
+                    if was_active and not screen_active:
                         try:
-                            update_command(session, document, "failed", str(exc))
-                        except Exception as update_exc:
-                            print(f"[Hata] Komut durumu güncellenemedi: {update_exc}")
-                        print(f"[Hata] {command}: {exc}")
-                last_command_poll = now
+                            firestore_patch(
+                                session,
+                                f"devices/{device_id}",
+                                {"screenJpegBase64": encode_string(""), "screenFrameAt": encode_timestamp()},
+                                update_mask=["screenJpegBase64", "screenFrameAt"],
+                            )
+                        except Exception as exc:
+                            print(f"[Uyarı] Önizleme alanı temizlenemedi: {exc}")
 
-            time.sleep(POLL_SECONDS)
+                if screen_active and now - last_screen_frame >= SCREEN_FRAME_SECONDS:
+                    try:
+                        upload_screen_frame(session, device_id)
+                        last_screen_frame = now
+                    except Exception as exc:
+                        print(f"[Önizleme] Ekran karesi gönderilemedi: {exc}")
+                        last_screen_frame = now
+
+                if now - last_command_poll >= COMMAND_POLL_SECONDS:
+                    for document in fetch_device_commands(session, device_id):
+                        fields = decode_document(document)
+                        if (
+                            fields.get("ownerId") != session.uid
+                            or fields.get("deviceId") != device_id
+                            or fields.get("status") != "pending"
+                        ):
+                            continue
+
+                        # Claim with the fetched updateTime so multiple Agent processes cannot
+                        # successfully transition the same pending document to running.
+                        try:
+                            claimed = claim_command(session, document)
+                        except Exception as exc:
+                            print(f"[Hata] Komut sahiplenilemedi: {exc}")
+                            continue
+                        if not claimed:
+                            continue
+
+                        command = str(fields.get("command") or "")
+                        if not command_is_supported(command):
+                            try:
+                                update_command(session, document, "failed", "Desteklenmeyen komut.")
+                            except Exception as exc:
+                                print(f"[Hata] Desteklenmeyen komutun durumu güncellenemedi: {exc}")
+                            continue
+
+                        try:
+                            result = execute_command(command, fields)
+                            status = "failed" if result.startswith("Desteklenmeyen komut") else "completed"
+                            update_command(session, document, status, result)
+                            print(f"[Komut] {command}: {result}")
+                        except Exception as exc:
+                            try:
+                                update_command(session, document, "failed", str(exc))
+                            except Exception as update_exc:
+                                print(f"[Hata] Komut durumu güncellenemedi: {update_exc}")
+                            print(f"[Hata] {command}: {exc}")
+                    last_command_poll = now
+
+                time.sleep(POLL_SECONDS)
+
+                retry_delay = 2.0
+            except requests.RequestException as exc:
+                delay = retry_delay
+                retry_delay = min(30.0, retry_delay * 2.0)
+                safe_error = str(exc).encode("ascii", "backslashreplace").decode("ascii")
+                print(f"[Network] Firebase transient failure: {safe_error}. Retry in {delay:.0f}s.")
+                time.sleep(delay)
     except KeyboardInterrupt:
         print("\nAgent kapatılıyor...")
     finally:

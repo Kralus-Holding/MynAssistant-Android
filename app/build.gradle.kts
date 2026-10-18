@@ -13,8 +13,8 @@ android {
         applicationId = "com.mynkralus.mynassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26
-        versionName = "0.4.9"
+        versionCode = 27
+        versionName = "0.5.0"
 
         // This test build targets current ARM64 Android phones and avoids bundling
         // unused x86 / 32-bit native runtimes from the KWS AAR into one oversized APK.

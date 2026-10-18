@@ -38,12 +38,27 @@ service cloud.firestore {
       allow read: if isSignedIn()
                   && resource.data.ownerId == request.auth.uid;
 
+      // A phone may enqueue work only for a server-connected Windows device owned by the same user.
       allow create: if isSignedIn()
-                    && request.resource.data.ownerId == request.auth.uid;
+                    && request.resource.data.ownerId == request.auth.uid
+                    && request.resource.data.deviceId is string
+                    && request.resource.data.command is string
+                    && request.resource.data.command in [
+                      'text_command', 'mute', 'volume_up', 'volume_down',
+                      'home', 'mouse_move', 'mouse_click', 'mouse_right_click', 'power'
+                    ]
+                    && request.resource.data.status == 'pending'
+                    && exists(/databases/$(database)/documents/devices/$(request.resource.data.deviceId))
+                    && get(/databases/$(database)/documents/devices/$(request.resource.data.deviceId)).data.ownerId == request.auth.uid
+                    && get(/databases/$(database)/documents/devices/$(request.resource.data.deviceId)).data.connectionMode == 'firebase-agent'
+                    && get(/databases/$(database)/documents/devices/$(request.resource.data.deviceId)).data.platform == 'Windows';
 
+      // Clients cannot retarget or rewrite a command after it has entered the server queue.
       allow update: if isSignedIn()
                     && resource.data.ownerId == request.auth.uid
-                    && request.resource.data.ownerId == request.auth.uid;
+                    && request.resource.data.ownerId == request.auth.uid
+                    && resource.data.deviceId == request.resource.data.deviceId
+                    && resource.data.command == request.resource.data.command;
 
       allow delete: if isSignedIn()
                     && resource.data.ownerId == request.auth.uid;
