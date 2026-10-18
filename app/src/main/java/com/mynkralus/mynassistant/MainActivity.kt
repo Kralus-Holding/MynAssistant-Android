@@ -187,12 +187,6 @@ private fun saveFirebaseProfile(
             onComplete("Profil kaydedilemedi.")
         }
 }
-private data class PcBridgeResult(
-    val connected: Boolean,
-    val success: Boolean,
-    val message: String
-)
-
 /**
  * Executes the Android-side command subset locally on this handset.
  * Protected operations such as silently toggling Bluetooth or initiating a call
@@ -847,109 +841,6 @@ private fun executeAndroidTextCommand(context: Context, rawText: String): String
     }
 }
 
-private fun callMynAiBridge(baseUrl: String, token: String, command: String? = null): PcBridgeResult {
-    var base = baseUrl.trim().trimEnd('/')
-    if (base.endsWith("/health")) base = base.removeSuffix("/health")
-    if (base.endsWith("/command")) base = base.removeSuffix("/command")
-    base = base.trimEnd('/')
-    if (base.isBlank() || !(base.startsWith("http://") || base.startsWith("https://"))) {
-        return PcBridgeResult(false, false, "Bilgisayar bağlantı adresini kontrol et.")
-    }
-
-    var connection: java.net.HttpURLConnection? = null
-    return try {
-        val endpoint = if (command == null) "$base/health" else "$base/command"
-        connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
-            connectTimeout = 5000
-            readTimeout = 15000
-            setRequestProperty("Accept", "application/json")
-            if (command != null) {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                doOutput = true
-            } else {
-                requestMethod = "GET"
-            }
-        }
-        if (command != null) {
-            val body = JSONObject().put("text", command).put("token", token.trim()).toString()
-                .toByteArray(Charsets.UTF_8)
-            connection.outputStream.use { it.write(body) }
-        }
-
-        val statusCode = connection.responseCode
-        val responseStream = try {
-            if (statusCode in 200..299) connection.inputStream else connection.errorStream
-        } catch (_: Exception) {
-            connection.errorStream
-        }
-        val bodyText = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-        if (statusCode !in 200..299) {
-            return PcBridgeResult(false, false, "Bilgisayara ulaşılamadı. Bağlantı ayarlarını kontrol edip tekrar dene.")
-        }
-
-        val response = try { JSONObject(bodyText) } catch (_: Exception) {
-            return PcBridgeResult(true, false, "Bilgisayardan beklenen yanıt alınamadı. Yardımcı uygulamayı yeniden başlatıp tekrar dene.")
-        }
-        if (command == null) {
-            val ok = response.optBoolean("ok", true)
-            val message = response.optString("message").takeIf { it.isNotBlank() }
-                ?: if (ok) "Bilgisayar bağlantısı hazır." else "Bilgisayar bağlantısı hazır değil."
-            PcBridgeResult(ok, ok, message)
-        } else {
-            val result = response.optJSONObject("result")
-            val ok = response.optBoolean("ok", result?.optBoolean("ok", false) ?: false)
-            val message = result?.optString("message").orEmpty()
-            val actionText = result?.optJSONObject("data")?.optString("action_text").orEmpty()
-            val displayText = when {
-                message.isBlank() -> actionText.ifBlank { "Komut yanıtlandı." }
-                actionText.isBlank() || actionText == message -> message
-                else -> message + "\n" + actionText
-            }
-            PcBridgeResult(true, ok, displayText)
-        }
-    } catch (error: Exception) {
-        PcBridgeResult(
-            false, false,
-            "Bilgisayara ulaşılamadı. Telefon ve bilgisayarın aynı Wi-Fi ağına bağlı olduğunu ve bilgisayar uygulamasının açık olduğunu kontrol et."
-        )
-    } finally {
-        connection?.disconnect()
-    }
-}
-
-private fun saveWindowsBridgeDevice(
-    user: FirebaseUser,
-    bridgeUrl: String,
-    connected: Boolean,
-    onComplete: (String?) -> Unit
-) {
-    val data = hashMapOf<String, Any>(
-        "ownerId" to user.uid,
-        "name" to "Windows bilgisayarım",
-        "platform" to "Windows",
-        "type" to "Windows",
-        "status" to if (connected) "online" else "offline",
-        "connectionMode" to "mynai-local-bridge",
-        "bridgeUrl" to bridgeUrl.trim(),
-        "lastCheckedAt" to FieldValue.serverTimestamp()
-    )
-    if (connected) data["lastSeenAt"] = FieldValue.serverTimestamp()
-    val deviceRef = FirebaseFirestore.getInstance()
-        .collection("devices")
-        .document("windows-" + user.uid)
-    deviceRef.get()
-        .addOnSuccessListener { snapshot ->
-            val existingName = snapshot.getString("name")?.trim().orEmpty()
-            data["name"] = existingName.ifBlank { "Windows bilgisayarım" }
-            deviceRef.set(data, SetOptions.merge())
-                .addOnSuccessListener { onComplete(null) }
-                .addOnFailureListener { onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
-        }
-        .addOnFailureListener { onComplete("Bilgisayar bağlantısı kaydedilemedi.") }
-}
-
-
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
 
@@ -1104,6 +995,12 @@ class MainActivity : ComponentActivity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Delete deprecated phone-to-PC direct URL settings; all PC commands now use Firebase.
+        prefs.edit().also { editor ->
+            prefs.all.keys
+                .filter { it.startsWith("pc_bridge_url_") || it.startsWith("pc_bridge_token_") }
+                .forEach(editor::remove)
+        }.apply()
         reconcileStaleWakeWordState(this)
         // Remove old local-only demo account data. Firebase now owns auth sessions.
         prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider")
@@ -1221,39 +1118,6 @@ class MainActivity : ComponentActivity() {
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
                     firebaseUserId = auth.currentUser?.uid,
-                    initialPcBridgeUrl = prefs.getString("pc_bridge_url_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
-                    initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "meyene") ?: "meyene",
-                    savePcBridgeSettings = { url, token ->
-                        val scope = auth.currentUser?.uid ?: "guest"
-                        prefs.edit()
-                            .putString("pc_bridge_url_$scope", url.trim())
-                            .putString("pc_bridge_token_$scope", token.trim())
-                            .apply()
-                    },
-                    checkPcBridge = { url, token, report ->
-                        Thread {
-                            val result = callMynAiBridge(url, token)
-                            runOnUiThread {
-                                val user = auth.currentUser
-                                if (user != null && url.isNotBlank()) {
-                                    saveWindowsBridgeDevice(user, url, result.connected) { firestoreError ->
-                                        val finalResult = if (firestoreError == null) result else result.copy(
-                                            message = "Bağlantı kontrol edildi ancak bilgisayar bilgileri kaydedilemedi."
-                                        )
-                                        report(finalResult)
-                                    }
-                                } else {
-                                    report(result)
-                                }
-                            }
-                        }.start()
-                    },
-                    sendPcBridgeCommand = { url, token, commandText, report ->
-                        Thread {
-                            val result = callMynAiBridge(url, token, commandText)
-                            runOnUiThread { report(result) }
-                        }.start()
-                    },
                     sendRemoteCommand = { deviceId, commandName, payload, report ->
                         val user = auth.currentUser
                         if (user == null) {
@@ -1443,11 +1307,6 @@ class MainActivity : ComponentActivity() {
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
     email: String, phone: String, photoUrl: String, firebaseUserId: String?,
-    initialPcBridgeUrl: String,
-    initialPcBridgeToken: String,
-    savePcBridgeSettings: (String, String) -> Unit,
-    checkPcBridge: (String, String, (PcBridgeResult) -> Unit) -> Unit,
-    sendPcBridgeCommand: (String, String, String, (PcBridgeResult) -> Unit) -> Unit,
     sendRemoteCommand: (String, String, Map<String, Any>, (String, String?) -> Unit) -> Unit,
     photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
@@ -1808,11 +1667,6 @@ private fun AssistantScreen(
             showAccessibilitySetupDialog = true
         }
     }
-    var pcBridgeUrl by remember(firebaseUserId) { mutableStateOf(initialPcBridgeUrl) }
-    var pcBridgeToken by remember(firebaseUserId) { mutableStateOf(initialPcBridgeToken) }
-    var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
-    var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
-    var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var activeCommandListener by remember {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
@@ -2071,8 +1925,10 @@ private fun AssistantScreen(
                                     ?: document.getString("os")
                                     ?: "Windows"
                                 ).trim()
-                            // This page is the phone's list of Windows targets, not a list of all device types.
+                            // This page lists Windows targets reachable through the server command queue only.
                             if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null
+                            val connectionMode = document.getString("connectionMode").orEmpty()
+                            if (connectionMode != "firebase-agent") return@mapNotNull null
                             PcDevice(
                                 id = document.id,
                                 name = document.getString("name")
@@ -2082,7 +1938,7 @@ private fun AssistantScreen(
                                 status = document.getString("status")
                                     ?: document.getString("connectionStatus")
                                     ?: "offline",
-                                connectionMode = document.getString("connectionMode").orEmpty(),
+                                connectionMode = connectionMode,
                                 lastSeenAtMillis = document.getTimestamp("lastSeenAt")?.toDate()?.time,
                                 screenJpegBase64 = document.getString("screenJpegBase64").orEmpty()
                             )
@@ -2126,42 +1982,8 @@ private fun AssistantScreen(
         }
     }
 
-    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
-    val connectedDevices = devices.filter { device ->
-        if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(deviceStatusNowMillis)
-    }
+    val connectedDevices = devices.filter { it.isOnlineAt(deviceStatusNowMillis) }
     val hasConnectedPc = signedIn && connectedDevices.isNotEmpty()
-    val testPcBridgeNow: () -> Unit = {
-        if (!signedIn) {
-            feedback = "Devam etmek için önce giriş yap."
-        } else if (pcBridgeUrl.isBlank()) {
-            feedback = "Önce bilgisayar bağlantı ayarlarını tamamla."
-            navigateToPage(Page.SETTINGS)
-        } else {
-            savePcBridgeSettings(pcBridgeUrl, pcBridgeToken)
-            pcBridgeBusy = true
-            checkPcBridge(pcBridgeUrl, pcBridgeToken) { result ->
-                pcBridgeBusy = false
-                localPcConnected = result.connected
-                pcBridgeStatus = result.message
-                if (localPcDeviceId != null) selectedDeviceId = localPcDeviceId
-                feedback = result.message
-            }
-        }
-    }
-    val sendLocalPcText: (String) -> Unit = { commandText ->
-        if (!signedIn) {
-            feedback = "Devam etmek için önce giriş yap."
-        } else if (!localPcConnected) {
-            feedback = "Önce bilgisayar bağlantı ayarlarını tamamla."
-        } else {
-            sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, commandText) { result ->
-                localPcConnected = result.connected
-                pcBridgeStatus = result.message
-                feedback = result.message
-            }
-        }
-    }
 
     val executeResolvedContactAction: (String, ContactPhoneMatch) -> Unit = { commandText, contact ->
         val action = contactActionKind(commandText)
@@ -2375,23 +2197,6 @@ private fun AssistantScreen(
                 feedback = "Komut bilgisayarına gönderiliyor..."
                 sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
             }
-            localPcConnected -> {
-                feedback = "Komut bilgisayarına gönderiliyor..."
-                sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, routedText) { result ->
-                    localPcConnected = result.connected
-                    pcBridgeStatus = result.message
-                    feedback = if (result.connected) {
-                        result.message
-                    } else {
-                        recordIssue(
-                            "MYN-PC-6004", "Bilgisayar bağlantısı",
-                            "Bilgisayara komut gönderemedim. Windows yardımcı uygulamasının açık ve bağlantı ayarlarının doğru olduğunu kontrol et.",
-                            routedText,
-                            "LOCAL_BRIDGE_COMMAND_FAILED; message=" + result.message
-                        )
-                    }
-                }
-            }
             else -> feedback = "Şu anda bağlı bilgisayar yok. Windows uygulaması çalıştığında burada görünür."
         }
     }
@@ -2543,7 +2348,7 @@ private fun AssistantScreen(
                                     }
                                 }
                                 devices.forEach { device ->
-                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(deviceStatusNowMillis)
+                                    val deviceOnlineNow = device.isOnlineAt(deviceStatusNowMillis)
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -2694,18 +2499,9 @@ private fun AssistantScreen(
                                                 selectedDeviceId = device.id
                                                 if (!deviceOnlineNow) {
                                                     feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
-                                                } else if (device.connectionMode == "firebase-agent") {
+                                                } else {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
                                                     sendTrackedRemoteCommand(device.id, "text_command", mapOf("text" to "bilgisayar dosyalarını listele"))
-                                                } else if (device.id == localPcDeviceId && localPcConnected) {
-                                                    feedback = "Dosya listesi bilgisayardan isteniyor..."
-                                                    sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, "dosyaları listele") { result ->
-                                                        localPcConnected = result.connected
-                                                        pcBridgeStatus = result.message
-                                                        feedback = result.message
-                                                    }
-                                                } else {
-                                                    feedback = "Bu bağlantı türünde dosya listeleme henüz desteklenmiyor."
                                                 }
                                             }, modifier = Modifier.fillMaxWidth()) {
                                                 Icon(Icons.Default.FolderOpen, contentDescription = null)
@@ -3015,10 +2811,7 @@ private fun AssistantScreen(
                                     null
                                 }
                             }
-                            val localBridgeSelected = signedIn && localPcConnected &&
-                                (device == null || device.id == localPcDeviceId)
-                            val remoteOnline = localBridgeSelected ||
-                                (device?.isOnlineAt(deviceStatusNowMillis) == true && signedIn && device.id != localPcDeviceId)
+                            val remoteOnline = device?.isOnlineAt(deviceStatusNowMillis) == true && signedIn
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -3030,10 +2823,8 @@ private fun AssistantScreen(
                                     Text(
                                         when {
                                             !signedIn -> "Giriş yapılmamış"
-                                            localBridgeSelected -> "Bağlı • Yerel bağlantı"
-                                            device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
-                                            device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
-                                            remoteOnline -> "Bağlı • " + device.platform
+                                            device == null -> "Sunucuya bağlı bilgisayar bekleniyor"
+                                            remoteOnline -> "Sunucu üzerinden bağlı • " + device.platform
                                             else -> "Çevrimdışı • Bilgisayar bekleniyor"
                                         },
                                         fontSize = 11.sp,
@@ -3092,21 +2883,10 @@ private fun AssistantScreen(
                             }
                             TvRemotePanel(
                                 enabled = remoteOnline,
-                                mouseEnabled = remoteOnline && !localBridgeSelected,
+                                mouseEnabled = remoteOnline,
                                 onCommand = { commandName, payload ->
                                     if (!signedIn) {
                                         feedback = "Devam etmek için önce giriş yap."
-                                    } else if (localBridgeSelected) {
-                                        when (commandName) {
-                                            "mute" -> sendLocalPcText("sesi kapa")
-                                            "volume_up" -> sendLocalPcText("ses 10 arttir")
-                                            "volume_down" -> sendLocalPcText("ses 10 azalt")
-                                            "home" -> sendLocalPcText("masaustunu goster")
-                                            "power" -> feedback = "Bilgisayarı uzaktan açma özelliği henüz desteklenmiyor."
-                                            "mouse_move", "mouse_click", "mouse_right_click" ->
-                                                feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
-                                            else -> feedback = "Bu kumanda işlemi bu bağlantı türünde desteklenmiyor."
-                                        }
                                     } else if (device == null) {
                                         feedback = "Bilgisayar henüz çevrimiçi değil. Windows uygulaması açıldığında otomatik bağlanacak."
                                     } else if (!remoteOnline) {
