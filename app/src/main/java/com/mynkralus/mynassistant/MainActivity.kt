@@ -2069,9 +2069,11 @@ private fun AssistantScreen(
                                     ?: document.getString("deviceName")
                                     ?: "Windows bilgisayar",
                                 platform = devicePlatform,
-                                status = document.getString("status")
-                                    ?: document.getString("connectionStatus")
-                                    ?: "offline",
+                                status = normalizeDeviceStatus(
+                                    rawStatus = document.getString("status")
+                                        ?: document.getString("connectionStatus"),
+                                    lastSeenAtMillis = document.getTimestamp("lastSeenAt")?.toDate()?.time
+                                ),
                                 connectionMode = document.getString("connectionMode").orEmpty(),
                                 screenJpegBase64 = document.getString("screenJpegBase64").orEmpty()
                             )
