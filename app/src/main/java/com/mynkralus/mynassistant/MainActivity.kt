@@ -9,10 +9,13 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.ContactsContract
 import android.provider.Settings
 import java.util.Locale
+import java.util.UUID
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -1939,6 +1942,60 @@ private fun AssistantScreen(
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
+    // Register this Android installation so the Windows app can show it in Telefonlarım.
+    // The same Firebase account is the pairing identity; the ID is stable per account and install.
+    DisposableEffect(firebaseUserId, signedIn) {
+        val uid = firebaseUserId
+        if (!signedIn || uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val devicePrefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val idKey = "android_device_id_" + uid
+            val phoneDeviceId = devicePrefs.getString(idKey, null)
+                ?.takeIf { it.startsWith("android-") }
+                ?: ("android-" + UUID.randomUUID().toString().replace("-", "")).also {
+                    devicePrefs.edit().putString(idKey, it).apply()
+                }
+            val phoneName = Build.MODEL?.trim().orEmpty().ifBlank { "Android telefon" }
+            val deviceRef = FirebaseFirestore.getInstance()
+                .collection("devices")
+                .document(phoneDeviceId)
+            val heartbeatHandler = Handler(Looper.getMainLooper())
+            val heartbeat = object : Runnable {
+                override fun run() {
+                    val phoneData = hashMapOf<String, Any>(
+                        "ownerId" to uid,
+                        "name" to phoneName,
+                        "deviceName" to phoneName,
+                        "platform" to "Android",
+                        "type" to "Android",
+                        "status" to "online",
+                        "connectionMode" to "android-device",
+                        "lastSeenAt" to FieldValue.serverTimestamp()
+                    )
+                    deviceRef.set(phoneData, SetOptions.merge())
+                        .addOnFailureListener { error ->
+                            android.util.Log.w(
+                                "MynAssistant",
+                                "Android cihaz kaydı güncellenemedi.",
+                                error
+                            )
+                        }
+                    heartbeatHandler.postDelayed(this, 25_000L)
+                }
+            }
+            heartbeatHandler.post(heartbeat)
+
+            onDispose {
+                heartbeatHandler.removeCallbacks(heartbeat)
+                deviceRef.update(
+                    "status", "offline",
+                    "lastSeenAt", FieldValue.serverTimestamp()
+                )
+            }
+        }
+    }
+
     DisposableEffect(firebaseUserId) {
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
         if (!firebaseUserId.isNullOrBlank()) {
@@ -1953,15 +2010,20 @@ private fun AssistantScreen(
                     } else {
                         devices = snapshot?.documents.orEmpty().mapNotNull { document ->
                             if (document.getString("ownerId") != firebaseUserId) return@mapNotNull null
+                            val devicePlatform = (
+                                document.getString("platform")
+                                    ?: document.getString("type")
+                                    ?: document.getString("os")
+                                    ?: "Windows"
+                                ).trim()
+                            // This page is the phone's list of Windows targets, not a list of all device types.
+                            if (!devicePlatform.startsWith("Windows", ignoreCase = true)) return@mapNotNull null
                             PcDevice(
                                 id = document.id,
                                 name = document.getString("name")
                                     ?: document.getString("deviceName")
                                     ?: "Windows bilgisayar",
-                                platform = document.getString("platform")
-                                    ?: document.getString("type")
-                                    ?: document.getString("os")
-                                    ?: "Windows",
+                                platform = devicePlatform,
                                 status = document.getString("status")
                                     ?: document.getString("connectionStatus")
                                     ?: "offline",
