@@ -13,8 +13,14 @@ android {
         applicationId = "com.mynkralus.mynassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.1"
+        versionCode = 26
+        versionName = "0.4.9"
+
+        // Include both ARM ABIs so the test APK also installs on devices whose
+        // Android userspace is 32-bit, while avoiding unrelated x86 emulator runtimes.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     // Keep the debug APK signed with the same certificate used for Google OAuth setup.
@@ -55,6 +61,15 @@ dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
     implementation("androidx.activity:activity-compose:1.10.1")
+    // Continuous, fully on-device Turkish speech recognition for Hey Meyene.
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    // Low-compute, keyword-constrained wake detection; full Vosk ASR runs only after a hit.
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.13.8") {
+        // The Android AAR already contains these API classes; avoid its duplicate JVM JAR.
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
+    }
+    implementation("org.apache.commons:commons-compress:1.27.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2025.08.00")
     implementation(composeBom)
@@ -64,6 +79,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+
+    testImplementation("junit:junit:4.13.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
