@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feature/android-command-status-tracking" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -145,10 +145,48 @@ jobs:
             echo "- SHA-256: `$SHA256`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload APK
+      - name: Upload APK as Actions artifact
+        id: upload_apk
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: MynAssistant-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish APK to GitHub Releases if Actions storage is unavailable
+        if: github.event_name != 'pull_request' && steps.upload_apk.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_RELEASE_TOKEN:-}" ]; then
+            echo "::error::Artifact storage is unavailable and GH_RELEASE_TOKEN is not configured."
+            exit 1
+          fi
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          tag="mynassistant-android-apk-${GH_RUN_ID}-attempt-${GH_RUN_ATTEMPT}"
+          notes="MynAssistant Android debug/test APK built from ${GH_SHA}. This is a sideloaded test build, not a Google Play production release. CI verifies the APK signature against the repository's stable debug signing key."
+
+          gh release create "$tag" "$apk" \
+            --repo "$GH_REPOSITORY" \
+            --target "$GH_SHA" \
+            --title "MynAssistant Android Preview (${GH_RUN_ID})" \
+            --notes "$notes" \
+            --prerelease
+
+          release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
+          download_url="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "app-debug.apk") | .url' | head -n 1)"
+          if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
+            echo "::error::APK release asset upload could not be verified."
+            exit 1
+          fi
+          printf 'Verified APK release URL: %s\n' "$download_url"
