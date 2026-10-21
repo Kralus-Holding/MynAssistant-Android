@@ -16,10 +16,10 @@ android {
         versionCode = 26
         versionName = "0.4.9"
 
-        // This test build targets current ARM64 Android phones and avoids bundling
-        // unused x86 / 32-bit native runtimes from the KWS AAR into one oversized APK.
+        // Include both ARM ABIs so the test APK also installs on devices whose
+        // Android userspace is 32-bit, while avoiding unrelated x86 emulator runtimes.
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 

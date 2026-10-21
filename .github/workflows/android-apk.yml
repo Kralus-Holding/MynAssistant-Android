@@ -37,6 +37,18 @@ jobs:
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Verify launcher icon is a real PNG
+        shell: bash
+        run: |
+          ICON="app/src/main/res/drawable-nodpi/mynassistant_launcher.png"
+          test -f "$ICON"
+          SIGNATURE="$(od -An -tx1 -N8 "$ICON" | tr -d ' \n')"
+          if [ "$SIGNATURE" != "89504e470d0a1a0a" ]; then
+            echo "::error::Launcher icon has a .png extension but is not a real PNG file."
+            exit 1
+          fi
+          echo "Launcher icon format verified: PNG."
+
       - name: Restore stable debug signing key
         run: |
           mkdir -p "$HOME/.android"
@@ -49,6 +61,305 @@ jobs:
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK archive, identity, launcher icon, and ARM libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          unzip -tq "$APK"
+          BADGING="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK")"
+          printf '%s\n' "$BADGING" | grep -F "package: name='com.mynkralus.mynassistant' versionCode='26' versionName='0.4.9'"
+          if ! printf '%s\n' "$BADGING" | grep -q "application-icon-"; then
+            echo "::error::APK has no discoverable application icon."
+            exit 1
+          fi
+          APK_FILES="$(unzip -Z1 "$APK")"
+          printf '%s\n' "$APK_FILES" | grep -Eq '^lib/arm64-v8a/[^/]+\.so
+      - name: Verify built APK manifest
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK_ANALYZER="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          if [ ! -x "$APK_ANALYZER" ]; then
+            echo "::error::apkanalyzer is missing; cannot verify the built APK manifest."
+            exit 1
+          fi
+          "$APK_ANALYZER" manifest print "$APK" > "$RUNNER_TEMP/AndroidManifest.xml"
+          python3 - "$RUNNER_TEMP/AndroidManifest.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          path = sys.argv[1]
+          android_ns = "http://schemas.android.com/apk/res/android"
+          attr = lambda name: "{" + android_ns + "}" + name
+          root = ET.parse(path).getroot()
+
+          permissions = {
+              item.get(attr("name"), "")
+              for item in root.findall("uses-permission")
+          }
+          required = {
+              "android.permission.RECORD_AUDIO",
+              "android.permission.FOREGROUND_SERVICE",
+              "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+              "android.permission.SYSTEM_ALERT_WINDOW",
+              "android.permission.POST_NOTIFICATIONS",
+          }
+          missing = sorted(required - permissions)
+          if missing:
+              raise SystemExit("Missing APK permissions: " + ", ".join(missing))
+
+          application = root.find("application")
+          if application is None:
+              raise SystemExit("APK manifest has no application element.")
+          service = next((
+              item for item in application.findall("service")
+              if item.get(attr("name")) in {
+                  ".MynWakeWordService",
+                  "com.mynkralus.mynassistant.MynWakeWordService",
+              }
+          ), None)
+          if service is None:
+              raise SystemExit("MynWakeWordService is missing from the built APK manifest.")
+          foreground_type = service.get(attr("foregroundServiceType"), "")
+          # Android's binary manifest decoder may render this flag symbolically or numerically.
+          is_microphone_type = foreground_type == "microphone"
+          if not is_microphone_type:
+              try:
+                  is_microphone_type = int(foreground_type, 0) == 0x80
+              except ValueError:
+                  is_microphone_type = False
+          if not is_microphone_type:
+              raise SystemExit(
+                  "MynWakeWordService must declare microphone foregroundServiceType; got "
+                  + repr(foreground_type)
+              )
+          if service.get(attr("exported")) != "false":
+              raise SystemExit("MynWakeWordService must not be exported.")
+
+          uses_sdk = root.find("uses-sdk")
+          target_sdk = uses_sdk.get(attr("targetSdkVersion")) if uses_sdk is not None else None
+          if target_sdk != "36":
+              raise SystemExit("Expected targetSdkVersion 36, got " + str(target_sdk))
+
+          print("APK manifest verified: required permissions, microphone FGS type, non-exported service, targetSdk=36.")
+          PY
+
+      - name: Verify APK signing SHA-1
+        shell: bash
+        run: |
+          KEYSTORE_SHA1=$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | awk '/SHA1:/ { gsub(":", "", $2); print tolower($2) }')
+          APK_SHA1=$($ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')
+          echo "Debug keystore SHA-1: $KEYSTORE_SHA1"
+          echo "APK signing SHA-1:      $APK_SHA1"
+          if [ -z "$KEYSTORE_SHA1" ] || [ -z "$APK_SHA1" ] || [ "$KEYSTORE_SHA1" != "$APK_SHA1" ]; then
+            echo "::error::APK signing certificate does not match the stable debug keystore."
+            exit 1
+          fi
+
+      - name: Calculate APK SHA-256
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SHA256=$(sha256sum "$APK" | awk '{print $1}')
+          echo "APK SHA-256: $SHA256"
+          {
+            echo "### APK integrity"
+            echo
+            echo "- File: `$APK`"
+            echo "- SHA-256: `$SHA256`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK as Actions artifact
+        id: upload_apk
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: MynAssistant-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish APK to GitHub Releases if Actions storage is unavailable
+        if: github.event_name != 'pull_request' && steps.upload_apk.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_RELEASE_TOKEN:-}" ]; then
+            echo "::error::Artifact storage is unavailable and GH_RELEASE_TOKEN is not configured."
+            exit 1
+          fi
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          tag="mynassistant-android-apk-${GH_RUN_ID}-attempt-${GH_RUN_ATTEMPT}"
+          notes="MynAssistant Android debug/test APK built from ${GH_SHA}. This is a sideloaded test build, not a Google Play production release. CI verifies the APK signature against the repository's stable debug signing key."
+
+          gh release create "$tag" "$apk" \
+            --repo "$GH_REPOSITORY" \
+            --target "$GH_SHA" \
+            --title "MynAssistant Android Preview (${GH_RUN_ID})" \
+            --notes "$notes" \
+            --prerelease
+
+          release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
+          download_url="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "app-debug.apk") | .url' | head -n 1)"
+          if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
+            echo "::error::APK release asset upload could not be verified."
+            exit 1
+          fi
+          printf 'Verified APK release URL: %s\n' "$download_url"
+
+          printf '%s\n' "$APK_FILES" | grep -Eq '^lib/armeabi-v7a/[^/]+\.so
+      - name: Verify built APK manifest
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK_ANALYZER="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          if [ ! -x "$APK_ANALYZER" ]; then
+            echo "::error::apkanalyzer is missing; cannot verify the built APK manifest."
+            exit 1
+          fi
+          "$APK_ANALYZER" manifest print "$APK" > "$RUNNER_TEMP/AndroidManifest.xml"
+          python3 - "$RUNNER_TEMP/AndroidManifest.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          path = sys.argv[1]
+          android_ns = "http://schemas.android.com/apk/res/android"
+          attr = lambda name: "{" + android_ns + "}" + name
+          root = ET.parse(path).getroot()
+
+          permissions = {
+              item.get(attr("name"), "")
+              for item in root.findall("uses-permission")
+          }
+          required = {
+              "android.permission.RECORD_AUDIO",
+              "android.permission.FOREGROUND_SERVICE",
+              "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+              "android.permission.SYSTEM_ALERT_WINDOW",
+              "android.permission.POST_NOTIFICATIONS",
+          }
+          missing = sorted(required - permissions)
+          if missing:
+              raise SystemExit("Missing APK permissions: " + ", ".join(missing))
+
+          application = root.find("application")
+          if application is None:
+              raise SystemExit("APK manifest has no application element.")
+          service = next((
+              item for item in application.findall("service")
+              if item.get(attr("name")) in {
+                  ".MynWakeWordService",
+                  "com.mynkralus.mynassistant.MynWakeWordService",
+              }
+          ), None)
+          if service is None:
+              raise SystemExit("MynWakeWordService is missing from the built APK manifest.")
+          foreground_type = service.get(attr("foregroundServiceType"), "")
+          # Android's binary manifest decoder may render this flag symbolically or numerically.
+          is_microphone_type = foreground_type == "microphone"
+          if not is_microphone_type:
+              try:
+                  is_microphone_type = int(foreground_type, 0) == 0x80
+              except ValueError:
+                  is_microphone_type = False
+          if not is_microphone_type:
+              raise SystemExit(
+                  "MynWakeWordService must declare microphone foregroundServiceType; got "
+                  + repr(foreground_type)
+              )
+          if service.get(attr("exported")) != "false":
+              raise SystemExit("MynWakeWordService must not be exported.")
+
+          uses_sdk = root.find("uses-sdk")
+          target_sdk = uses_sdk.get(attr("targetSdkVersion")) if uses_sdk is not None else None
+          if target_sdk != "36":
+              raise SystemExit("Expected targetSdkVersion 36, got " + str(target_sdk))
+
+          print("APK manifest verified: required permissions, microphone FGS type, non-exported service, targetSdk=36.")
+          PY
+
+      - name: Verify APK signing SHA-1
+        shell: bash
+        run: |
+          KEYSTORE_SHA1=$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | awk '/SHA1:/ { gsub(":", "", $2); print tolower($2) }')
+          APK_SHA1=$($ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')
+          echo "Debug keystore SHA-1: $KEYSTORE_SHA1"
+          echo "APK signing SHA-1:      $APK_SHA1"
+          if [ -z "$KEYSTORE_SHA1" ] || [ -z "$APK_SHA1" ] || [ "$KEYSTORE_SHA1" != "$APK_SHA1" ]; then
+            echo "::error::APK signing certificate does not match the stable debug keystore."
+            exit 1
+          fi
+
+      - name: Calculate APK SHA-256
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SHA256=$(sha256sum "$APK" | awk '{print $1}')
+          echo "APK SHA-256: $SHA256"
+          {
+            echo "### APK integrity"
+            echo
+            echo "- File: `$APK`"
+            echo "- SHA-256: `$SHA256`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK as Actions artifact
+        id: upload_apk
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: MynAssistant-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish APK to GitHub Releases if Actions storage is unavailable
+        if: github.event_name != 'pull_request' && steps.upload_apk.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_RELEASE_TOKEN:-}" ]; then
+            echo "::error::Artifact storage is unavailable and GH_RELEASE_TOKEN is not configured."
+            exit 1
+          fi
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          tag="mynassistant-android-apk-${GH_RUN_ID}-attempt-${GH_RUN_ATTEMPT}"
+          notes="MynAssistant Android debug/test APK built from ${GH_SHA}. This is a sideloaded test build, not a Google Play production release. CI verifies the APK signature against the repository's stable debug signing key."
+
+          gh release create "$tag" "$apk" \
+            --repo "$GH_REPOSITORY" \
+            --target "$GH_SHA" \
+            --title "MynAssistant Android Preview (${GH_RUN_ID})" \
+            --notes "$notes" \
+            --prerelease
+
+          release_json="$(gh release view "$tag" --repo "$GH_REPOSITORY" --json url,isPrerelease,assets)"
+          download_url="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name == "app-debug.apk") | .url' | head -n 1)"
+          if [ -z "$download_url" ] || [ "$download_url" = "null" ]; then
+            echo "::error::APK release asset upload could not be verified."
+            exit 1
+          fi
+          printf 'Verified APK release URL: %s\n' "$download_url"
+
+          echo "APK ZIP, application identity, icon metadata, and both ARM native ABI folders verified."
 
       - name: Verify built APK manifest
         shell: bash
