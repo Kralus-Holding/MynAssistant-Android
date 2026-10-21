@@ -69,13 +69,16 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
           unzip -tq "$APK"
           BADGING="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK")"
-          printf '%s\n' "$BADGING" | grep -F "package: name='com.mynkralus.mynassistant' versionCode='26' versionName='0.4.9'"
-          if ! printf '%s\n' "$BADGING" | grep -q "application-icon-"; then
+          printf '%s\\n' "$BADGING" | grep -F "package: name='com.mynkralus.mynassistant' versionCode='26' versionName='0.4.9'"
+          if ! printf '%s\\n' "$BADGING" | grep -q "application-icon-"; then
             echo "::error::APK has no discoverable application icon."
             exit 1
           fi
           APK_FILES="$(unzip -Z1 "$APK")"
-          printf '%s\n' "$APK_FILES" | grep -Eq '^lib/arm64-v8a/[^/]+\.so
+          printf '%s\\n' "$APK_FILES" | grep -q '^lib/arm64-v8a/'
+          printf '%s\\n' "$APK_FILES" | grep -q '^lib/armeabi-v7a/'
+          echo "APK ZIP, application identity, icon metadata, and both ARM native ABI folders verified."
+
       - name: Verify built APK manifest
         shell: bash
         run: |
