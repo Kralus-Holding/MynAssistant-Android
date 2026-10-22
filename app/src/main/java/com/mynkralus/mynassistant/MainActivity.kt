@@ -278,10 +278,8 @@ class MainActivity : ComponentActivity() {
 
     private val firebaseAuthStateListener = FirebaseAuth.AuthStateListener { auth ->
         val currentUser = auth.currentUser
-        val previousUser = lastObservedFirebaseUser
-        if (previousUser != null && previousUser.uid != currentUser?.uid) {
-            updateAndroidDevicePresence(previousUser, online = false)
-        }
+        // A sign-out/switch may change Firestore auth before the previous record can be
+        // marked offline. The server's three-minute lastSeenAt TTL handles that transition.
         lastObservedFirebaseUser = currentUser
         if (activityResumed) {
             startAndroidDeviceHeartbeat(currentUser)
