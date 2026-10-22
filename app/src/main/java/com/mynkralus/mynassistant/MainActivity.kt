@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.TouchApp
@@ -2578,47 +2579,81 @@ private fun AssistantScreen(
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                     ) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
                                                 Icon(
                                                     if (device.isPcTarget) Icons.Default.Computer else Icons.Default.Devices,
                                                     contentDescription = if (device.isPcTarget) "Windows bilgisayar" else "Android telefon",
                                                     modifier = Modifier.size(30.dp),
                                                     tint = MaterialTheme.colorScheme.primary
                                                 )
-                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                                    Text(device.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                                Column(
+                                                    Modifier.weight(1f),
+                                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                                    ) {
+                                                        Text(
+                                                            device.name,
+                                                            modifier = Modifier.weight(1f),
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            fontSize = 16.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        IconButton(
+                                                            onClick = {
+                                                                deviceNameEditError = null
+                                                                if (isEditingName) {
+                                                                    editingDeviceNameId = null
+                                                                    deviceNameDrafts = deviceNameDrafts - device.id
+                                                                } else {
+                                                                    editingDeviceNameId = device.id
+                                                                    deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
+                                                                    editedDeviceName = device.name
+                                                                }
+                                                                feedback = null
+                                                            },
+                                                            modifier = Modifier.size(30.dp)
+                                                        ) {
+                                                            Icon(
+                                                                if (isEditingName) Icons.Default.Close else Icons.Default.Edit,
+                                                                contentDescription = if (isEditingName) "Ad düzenlemeyi kapat" else "Cihaz adını düzenle",
+                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.size(19.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        device.platform,
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                    )
+                                                }
+                                                val badgeBackground = when {
+                                                    deviceOnlineNow && dark -> Color(0xFF183D2B)
+                                                    deviceOnlineNow -> Color(0xFFE0F5E8)
+                                                    dark -> Color(0xFF10131B)
+                                                    else -> Color(0xFFF1F3F8)
+                                                }
+                                                val badgeForeground = when {
+                                                    deviceOnlineNow && dark -> Color(0xFF65D68B)
+                                                    deviceOnlineNow -> Color(0xFF187344)
+                                                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .78f)
                                                 }
                                                 Surface(
                                                     shape = RoundedCornerShape(20.dp),
-                                                    color = if (deviceOnlineNow) Color(0xFF183D2B) else MaterialTheme.colorScheme.background
+                                                    color = badgeBackground
                                                 ) {
                                                     Text(
                                                         if (deviceOnlineNow) "Çevrimiçi" else "Çevrimdışı",
                                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                                         fontSize = 11.sp,
-                                                        color = if (deviceOnlineNow) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                }
-                                                IconButton(
-                                                    onClick = {
-                                                        deviceNameEditError = null
-                                                        if (isEditingName) {
-                                                            editingDeviceNameId = null
-                                                            deviceNameDrafts = deviceNameDrafts - device.id
-                                                        } else {
-                                                            editingDeviceNameId = device.id
-                                                            deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
-                                                            editedDeviceName = device.name
-                                                        }
-                                                        feedback = null
-                                                    },
-                                                    modifier = Modifier.size(40.dp)
-                                                ) {
-                                                    Icon(
-                                                        if (isEditingName) Icons.Default.Close else Icons.Default.Edit,
-                                                        contentDescription = if (isEditingName) "Ad düzenlemeyi kapat" else "Cihaz adını düzenle",
-                                                        tint = MaterialTheme.colorScheme.primary
+                                                        color = badgeForeground
                                                     )
                                                 }
                                             }
@@ -2683,7 +2718,7 @@ private fun AssistantScreen(
                                                         if (deviceNameSaveBusyId == device.id) {
                                                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                                         } else {
-                                                            Icon(Icons.Default.Edit, contentDescription = null)
+                                                            Icon(Icons.Default.Save, contentDescription = null)
                                                             Spacer(Modifier.width(6.dp))
                                                             Text("Kaydet")
                                                         }
@@ -3144,27 +3179,15 @@ private fun AssistantScreen(
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )
                                 }
-                                IconButton(
-                                    onClick = {
-                                        if (device != null) {
-                                            editingDeviceNameId = device.id
-                                            deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
-                                            remoteEditedDeviceName = device.name
-                                            deviceNameEditError = null
-                                            feedback = null
-                                        }
-                                    },
-                                    enabled = device != null && deviceNameSaveBusyId != device.id,
-                                    modifier = Modifier.size(40.dp)
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (remoteOnline) {
+                                        if (dark) Color(0xFF49B86E) else Color(0xFF218653)
+                                    } else {
+                                        MaterialTheme.colorScheme.outline.copy(alpha = .55f)
+                                    }
                                 ) {
-                                    Icon(
-                                        Icons.Default.Edit,
-                                        contentDescription = "Cihaz adını düzenle",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                                Surface(shape = CircleShape, color = if (remoteOnline) Color(0xFF49B86E) else Color(0xFFB85C5C)) {
-                                    Box(Modifier.size(10.dp))
+                                    Box(Modifier.size(9.dp))
                                 }
                             }
                             if (device?.connectionMode == "firebase-agent") {
@@ -3932,27 +3955,31 @@ private fun TvRemotePanel(
                     .fillMaxSize()
                     .then(touchpadGestureModifier)
             ) {
-                drawRect(Color(0xFF424242))
-                val spacing = 17.dp.toPx()
-                var y = spacing * .55f
+                drawRect(Color(0xFF414141))
+                val spacing = 20.dp.toPx()
+                var y = spacing * .58f
                 var rowIndex = 0
                 while (y < size.height) {
-                    val stagger = (rowIndex % 2) * spacing * .5f
+                    val stagger = (rowIndex % 2) * spacing * .48f
                     var x = spacing * .35f + stagger
                     while (x < size.width) {
-                        val wave = kotlin.math.sin((x / spacing + rowIndex * .7f) * .24f)
                         val normalizedX = (x / size.width).coerceIn(0f, 1f)
                         val normalizedY = (y / size.height).coerceIn(0f, 1f)
-                        val upperLeftCluster =
-                            (1f - kotlin.math.abs(normalizedX - .18f) / .50f).coerceIn(0f, 1f) *
-                            (1f - kotlin.math.abs(normalizedY - .20f) / .75f).coerceIn(0f, 1f)
-                        val lowerRightCluster =
-                            (1f - kotlin.math.abs(normalizedX - .90f) / .45f).coerceIn(0f, 1f) *
-                            (1f - kotlin.math.abs(normalizedY - .82f) / .65f).coerceIn(0f, 1f)
+                        val upperLeftDistance = kotlin.math.sqrt(
+                            ((normalizedX - .15f) / .68f) * ((normalizedX - .15f) / .68f) +
+                            ((normalizedY - .16f) / .54f) * ((normalizedY - .16f) / .54f)
+                        )
+                        val lowerRightDistance = kotlin.math.sqrt(
+                            ((normalizedX - .86f) / .67f) * ((normalizedX - .86f) / .67f) +
+                            ((normalizedY - .69f) / .48f) * ((normalizedY - .69f) / .48f)
+                        )
+                        val upperLeftCluster = (1f - upperLeftDistance).coerceIn(0f, 1f)
+                        val lowerRightCluster = (1f - lowerRightDistance).coerceIn(0f, 1f)
                         val visibility = maxOf(upperLeftCluster, lowerRightCluster)
-                        if (visibility > .24f) {
-                            val radius = (0.48f + (wave + 1f) * .16f + visibility * .12f).dp.toPx()
-                            val alpha = ((0.08f + (wave + 1f) * .045f) * visibility).coerceIn(0f, .18f)
+                        if (visibility > .08f) {
+                            val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
+                            val radius = (0.72f + visibility * 1.25f + wave * .52f).dp.toPx()
+                            val alpha = (0.10f + visibility * .25f + wave * .035f).coerceIn(.10f, .38f)
                             drawCircle(
                                 color = Color.White.copy(alpha = alpha),
                                 radius = radius,
