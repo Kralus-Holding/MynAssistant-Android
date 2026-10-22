@@ -1559,20 +1559,17 @@ class MainActivity : ComponentActivity() {
                         val cleanEmail = identity.trim()
                         if (!cleanEmail.contains("@")) {
                             val message = "E-posta adresinle giriş yapmak için e-posta adresini gir."
-                            googleStatus = message
                             report(message)
                         } else {
                             auth.signInWithEmailAndPassword(cleanEmail, password)
                                 .addOnCompleteListener { task ->
                                     if (!task.isSuccessful) {
                                         val message = firebaseAuthErrorMessage(task.exception)
-                                        googleStatus = message
                                         report(message)
                                     } else {
                                         val user = task.result?.user ?: auth.currentUser
                                         if (user == null) {
                                             val message = "Giriş tamamlandı ancak kullanıcı bilgisi alınamadı."
-                                            googleStatus = message
                                             report(message)
                                         } else {
                                             name = user.displayName?.takeIf { it.isNotBlank() }
@@ -1589,7 +1586,6 @@ class MainActivity : ComponentActivity() {
                                                 } else {
                                                     "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
                                                 }
-                                                googleStatus = message
                                                 report(message)
                                             }
                                         }
@@ -1600,22 +1596,19 @@ class MainActivity : ComponentActivity() {
                     register = { newName, identity, password, report ->
                         val cleanName = newName.trim()
                         val cleanEmail = identity.trim()
-                        if (cleanName.isBlank() || !cleanEmail.contains("@") || password.length < 6) {
-                            val message = "Ad soyad, geçerli e-posta adresi ve en az 6 karakterli şifre gerekli."
-                            googleStatus = message
+                        if (cleanName.isBlank() || !cleanEmail.contains("@") || password.length < 8) {
+                            val message = "Ad soyad, geçerli e-posta adresi ve en az 8 karakterli şifre gerekli."
                             report(message)
                         } else {
                             auth.createUserWithEmailAndPassword(cleanEmail, password)
                                 .addOnCompleteListener { task ->
                                     if (!task.isSuccessful) {
                                         val message = firebaseAuthErrorMessage(task.exception)
-                                        googleStatus = message
                                         report(message)
                                     } else {
                                         val user = task.result?.user
                                         if (user == null) {
                                             val message = "Hesap oluşturulamadı. Lütfen tekrar dene."
-                                            googleStatus = message
                                             report(message)
                                         } else {
                                             val profileRequest = UserProfileChangeRequest.Builder()
@@ -1648,7 +1641,6 @@ class MainActivity : ComponentActivity() {
                                                             " Hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
                                                         }
                                                         val message = "Hesabın oluşturuldu." + verificationMessage + profileMessage
-                                                        googleStatus = message
                                                         report(message)
                                                     }
                                                 }
@@ -4036,18 +4028,6 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
-                            googleStatus?.let { status ->
-                                Text(
-                                    status,
-                                    modifier = Modifier.fillMaxWidth().padding(start = 60.dp, bottom = 4.dp),
-                                    fontSize = 11.sp,
-                                    color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }
-                                )
-                            }
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         DrawerItem("Ana sayfa") { navigateToPage(Page.HOME) }
@@ -4362,17 +4342,17 @@ private fun AuthForm(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (registerMode) {
-                    OutlinedButton(onClick = { onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = { message = null; onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
                         Text("Giriş yap")
                     }
-                    Button(onClick = { onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
+                    Button(onClick = { message = null; onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
                         Text("Kayıt ol")
                     }
                 } else {
-                    Button(onClick = { onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
+                    Button(onClick = { message = null; onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
                         Text("Giriş yap")
                     }
-                    OutlinedButton(onClick = { onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = { message = null; onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
                         Text("Kayıt ol")
                     }
                 }
@@ -4390,7 +4370,7 @@ private fun AuthForm(
             )
             OutlinedTextField(
                 value = password, onValueChange = { password = it.take(128) },
-                modifier = Modifier.fillMaxWidth(), label = { Text("Şifre (en az 6 karakter)") },
+                modifier = Modifier.fillMaxWidth(), label = { Text(if (registerMode) "Şifre (en az 8 karakter)" else "Şifre") },
                 singleLine = true, visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
             )
@@ -4408,20 +4388,15 @@ private fun AuthForm(
             HorizontalDivider()
 
             OutlinedButton(
-                onClick = { googleLogin(GoogleAuthMode.REGISTER) },
+                onClick = {
+                    message = null
+                    googleLogin(if (registerMode) GoogleAuthMode.REGISTER else GoogleAuthMode.LOGIN)
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 GoogleGLogo(Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("Google ile kayıt ol")
-            }
-            OutlinedButton(
-                onClick = { googleLogin(GoogleAuthMode.LOGIN) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                GoogleGLogo(Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Google ile giriş yap")
+                Text(if (registerMode) "Google ile kayıt ol" else "Google ile giriş yap")
             }
 
             googleStatus?.let { status ->
@@ -4439,7 +4414,23 @@ private fun AuthForm(
                     fontSize = 12.sp
                 )
             }
-            message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
+            message?.let { status ->
+                Text(
+                    status,
+                    color = when {
+                        status.contains("hatalı", ignoreCase = true) ||
+                            status.contains("bulunamadı", ignoreCase = true) ||
+                            status.contains("gerekli", ignoreCase = true) ||
+                            status.contains("geçerli", ignoreCase = true) ||
+                            status.contains("hata", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                        status.contains("başarı", ignoreCase = true) ||
+                            status.contains("oluşturuldu", ignoreCase = true) ||
+                            status.contains("doğrulama bağlantısı gönderildi", ignoreCase = true) -> Color(0xFF2D9B62)
+                        else -> MaterialTheme.colorScheme.secondary
+                    },
+                    fontSize = 13.sp
+                )
+            }
             Text(
                 "E-posta ile kayıt olduktan sonra hesabını doğrulamak için gelen bağlantıyı aç.",
                 fontSize = 11.sp,
