@@ -3941,13 +3941,24 @@ private fun TvRemotePanel(
                     var x = spacing * .35f + stagger
                     while (x < size.width) {
                         val wave = kotlin.math.sin((x / spacing + rowIndex * .7f) * .24f)
-                        val radius = (0.62f + (wave + 1f) * .19f).dp.toPx()
-                        val alpha = (0.12f + (wave + 1f) * .035f).coerceIn(.10f, .19f)
-                        drawCircle(
-                            color = Color.White.copy(alpha = alpha),
-                            radius = radius,
-                            center = androidx.compose.ui.geometry.Offset(x, y)
-                        )
+                        val normalizedX = (x / size.width).coerceIn(0f, 1f)
+                        val normalizedY = (y / size.height).coerceIn(0f, 1f)
+                        val upperLeftCluster =
+                            (1f - kotlin.math.abs(normalizedX - .18f) / .50f).coerceIn(0f, 1f) *
+                            (1f - kotlin.math.abs(normalizedY - .20f) / .75f).coerceIn(0f, 1f)
+                        val lowerRightCluster =
+                            (1f - kotlin.math.abs(normalizedX - .90f) / .45f).coerceIn(0f, 1f) *
+                            (1f - kotlin.math.abs(normalizedY - .82f) / .65f).coerceIn(0f, 1f)
+                        val visibility = maxOf(upperLeftCluster, lowerRightCluster)
+                        if (visibility > .24f) {
+                            val radius = (0.48f + (wave + 1f) * .16f + visibility * .12f).dp.toPx()
+                            val alpha = ((0.08f + (wave + 1f) * .045f) * visibility).coerceIn(0f, .18f)
+                            drawCircle(
+                                color = Color.White.copy(alpha = alpha),
+                                radius = radius,
+                                center = androidx.compose.ui.geometry.Offset(x, y)
+                            )
+                        }
                         x += spacing
                     }
                     y += spacing
