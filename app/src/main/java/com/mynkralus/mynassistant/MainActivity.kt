@@ -94,6 +94,8 @@ import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Touchpad
+import androidx.compose.material.icons.filled.TouchpadOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Send
@@ -3822,16 +3824,21 @@ private fun TvRemotePanel(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                     )
                 }
-                IconButton(
-                    onClick = { touchpadEnabled = !touchpadEnabled },
-                    modifier = Modifier.size(44.dp)
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (touchpadEnabled && mouseEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
                 ) {
-                    Icon(
-                        if (touchpadEnabled) Icons.Default.TouchApp else Icons.Default.Block,
-                        contentDescription = if (touchpadEnabled) "Dokunmatiği kapat" else "Dokunmatiği aç",
-                        tint = if (touchpadEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f),
-                        modifier = Modifier.size(26.dp)
-                    )
+                    IconButton(
+                        onClick = { touchpadEnabled = !touchpadEnabled },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            if (touchpadEnabled) Icons.Default.Touchpad else Icons.Default.TouchpadOff,
+                            contentDescription = if (touchpadEnabled) "Dokunmatiği kapat" else "Dokunmatiği aç",
+                            tint = if (touchpadEnabled && mouseEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
             }
 
@@ -3839,8 +3846,9 @@ private fun TvRemotePanel(
                 Modifier
                     .fillMaxWidth()
                     .height(250.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .then(touchpadGestureModifier)
+                    .clip(RoundedCornerShape(28.dp))
+                    .then(if (mouseEnabled && touchpadEnabled) touchpadGestureModifier else Modifier)
+                    .then(if (!touchpadEnabled) Modifier.verticalScroll(rememberScrollState()) else Modifier)
             ) {
                 Canvas(Modifier.fillMaxSize()) {
                     drawRect(Color(0xFF3D3D3D))
@@ -3917,7 +3925,7 @@ private fun TvRemotePanel(
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 OutlinedTextField(
                     value = keyboardText,
@@ -3925,31 +3933,45 @@ private fun TvRemotePanel(
                     modifier = Modifier.weight(1f),
                     enabled = mouseEnabled,
                     singleLine = true,
-                    label = { Text("Bilgisayara yaz…") },
-                    placeholder = { Text("Metin gir") },
+                    label = { Text("Metin") },
+                    placeholder = { Text("Yaz…") },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Done
                     ),
                     keyboardActions = KeyboardActions(onDone = { submitRemoteKeyboardText() })
                 )
-                FilledTonalIconButton(
-                    onClick = { onCommand("key_backspace", emptyMap()) },
+                FilledTonalButton(
+                    onClick = { keyboardText = keyboardText + " " },
                     enabled = mouseEnabled,
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.height(54.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Bilgisayarda bir karakter sil")
+                    Text("Boşluk")
+                }
+                FilledTonalIconButton(
+                    onClick = {
+                        if (keyboardText.isNotEmpty()) {
+                            keyboardText = keyboardText.dropLast(1)
+                        } else {
+                            onCommand("key_backspace", emptyMap())
+                        }
+                    },
+                    enabled = mouseEnabled,
+                    modifier = Modifier.size(54.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Yazıdan bir karakter sil; alan boşsa bilgisayarda Backspace")
                 }
                 FilledIconButton(
                     onClick = { submitRemoteKeyboardText() },
                     enabled = mouseEnabled,
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(54.dp)
                 ) {
                     Icon(Icons.Default.KeyboardReturn, contentDescription = "Metni yaz ve Enter gönder")
                 }
             }
             Text(
-                if (mouseEnabled) "Metin, Windows bilgisayarında seçili alana yazılır. Enter tuşu metni gönderip satırı onaylar; silme tuşu bilgisayarda Backspace çalıştırır."
+                if (mouseEnabled) "Boşluk metne boşluk ekler. Silme önce yazı alanındaki son karakteri siler; alan boşsa bilgisayarda Backspace gönderir. Enter metni gönderir."
                 else "Klavye girişi Windows Agent bağlantısı aktifken kullanılabilir.",
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
