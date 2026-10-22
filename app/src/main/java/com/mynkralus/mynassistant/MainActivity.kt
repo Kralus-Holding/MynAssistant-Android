@@ -274,13 +274,11 @@ class MainActivity : ComponentActivity() {
     private val deviceHeartbeatHandler = Handler(Looper.getMainLooper())
     private var activityResumed = false
     private var deviceHeartbeatRunnable: Runnable? = null
-    private var lastObservedFirebaseUser: FirebaseUser? = null
 
     private val firebaseAuthStateListener = FirebaseAuth.AuthStateListener { auth ->
         val currentUser = auth.currentUser
         // A sign-out/switch may change Firestore auth before the previous record can be
         // marked offline. The server's three-minute lastSeenAt TTL handles that transition.
-        lastObservedFirebaseUser = currentUser
         if (activityResumed) {
             startAndroidDeviceHeartbeat(currentUser)
         } else {
