@@ -178,7 +178,7 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
     return when {
         code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı deneyebilirsin."
         code.contains("INVALID_EMAIL") -> "Geçerli bir e-posta adresi gir."
-        code.contains("WEAK_PASSWORD") -> "Daha güçlü bir şifre seç. En az 6 karakter kullan."
+        code.contains("WEAK_PASSWORD") -> "Daha güçlü bir şifre seç. En az 8 karakter kullan."
         code.contains("USER_NOT_FOUND") || code.contains("EMAIL_NOT_FOUND") ->
             "Bu e-posta adresiyle hesap bulunamadı. Yeni hesap oluşturmak için 'Kayıt ol' seçeneğini kullan."
         code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
