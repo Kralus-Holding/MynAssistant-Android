@@ -74,6 +74,21 @@ jobs:
           grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Icons.Default.Save' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFFE0F5E8)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Text(if (registerMode) "Google ile kayıt ol" else "Google ile giriş yap")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -q 'Text("Google ile kayıt ol")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt ||
+             grep -q 'Text("Google ile giriş yap")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Both Google auth actions must not be hardcoded into the same form"
+            exit 1
+          fi
+          if grep -q 'Text("Şifre (en az 6 karakter)")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Old 6-character password guidance found"
+            exit 1
+          fi
+          if grep -q 'padding(start = 60.dp, bottom = 4.dp)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Auth warning still leaks into the drawer"
+            exit 1
+          fi
           grep -q 'GoogleAuthMode.REGISTER' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Bu Google hesabıyla kayıtlı bir MynAssistant hesabı bulunamadı' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'sendEmailVerification' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
@@ -81,10 +96,10 @@ jobs:
           grep -q 'profilePhotos/{userId}/{fileName}' storage.rules
           grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml
           grep -q '<adaptive-icon' app/src/main/res/mipmap-anydpi-v26/mynassistant_launcher.xml
-          grep -q 'android:width="72dp"' app/src/main/res/drawable/mynassistant_launcher_foreground.xml
+          grep -q 'android:width="50dp"' app/src/main/res/drawable/mynassistant_launcher_foreground.xml
           VERSION_CODE=$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')
           VERSION_NAME=$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)
-          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 33 ]; then
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 34 ]; then
             echo "Invalid or old Android version"
             exit 1
           fi
