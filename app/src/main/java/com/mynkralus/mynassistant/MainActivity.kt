@@ -1853,15 +1853,6 @@ private fun AssistantScreen(
     var showExitConfirmation by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
     var authRegisterMode by remember { mutableStateOf(false) }
-    var accountPhoneDraft by remember(firebaseUserId, phone) { mutableStateOf(phone) }
-    var phoneVerificationId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
-    var phoneSmsCode by remember { mutableStateOf("") }
-    var accountMessage by remember { mutableStateOf<String?>(null) }
-    val accountPhotoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) uploadProfilePhoto(uri) { accountMessage = it }
-    }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var editingDeviceNameId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -4061,7 +4052,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.5.5", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.5.6", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
