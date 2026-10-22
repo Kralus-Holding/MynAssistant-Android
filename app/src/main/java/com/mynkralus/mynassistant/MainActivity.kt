@@ -3978,8 +3978,8 @@ private fun TvRemotePanel(
                         val visibility = maxOf(upperLeftCluster, lowerRightCluster)
                         if (visibility > .08f) {
                             val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
-                            val radius = (0.55f + visibility * 1.05f + wave * .48f).dp.toPx()
-                            val alpha = (0.035f + visibility * .18f + wave * .025f).coerceIn(.035f, .25f)
+                            val radius = (0.72f + visibility * 1.25f + wave * .52f).dp.toPx()
+                            val alpha = (0.10f + visibility * .25f + wave * .035f).coerceIn(.10f, .38f)
                             drawCircle(
                                 color = Color.White.copy(alpha = alpha),
                                 radius = radius,
