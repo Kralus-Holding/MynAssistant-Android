@@ -31,6 +31,7 @@ import com.google.firebase.firestore.SetOptions
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,6 +43,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -55,6 +57,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -86,6 +89,10 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.KeyboardReturn
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Send
@@ -1579,6 +1586,9 @@ private fun AssistantScreen(
     var accountListExpanded by remember { mutableStateOf(false) }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var editingDeviceNameId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var deviceNameEditError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var deviceNameSaveBusyId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -2558,20 +2568,24 @@ private fun AssistantScreen(
                                 }
                                 devices.forEach { device ->
                                     val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
+                                    val isEditingName = editingDeviceNameId == device.id
+                                    var editedDeviceName by remember(device.id, device.name) {
+                                        mutableStateOf(deviceNameDrafts[device.id] ?: device.name)
+                                    }
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                     ) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                 Icon(
                                                     if (device.isPcTarget) Icons.Default.Computer else Icons.Default.Devices,
                                                     contentDescription = if (device.isPcTarget) "Windows bilgisayar" else "Android telefon",
-                                                    modifier = Modifier.size(32.dp),
+                                                    modifier = Modifier.size(30.dp),
                                                     tint = MaterialTheme.colorScheme.primary
                                                 )
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(device.name, fontWeight = FontWeight.SemiBold)
+                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                                     Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
                                                 }
                                                 Surface(
@@ -2585,48 +2599,101 @@ private fun AssistantScreen(
                                                         color = if (deviceOnlineNow) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface
                                                     )
                                                 }
+                                                IconButton(
+                                                    onClick = {
+                                                        deviceNameEditError = null
+                                                        if (isEditingName) {
+                                                            editingDeviceNameId = null
+                                                            deviceNameDrafts = deviceNameDrafts - device.id
+                                                        } else {
+                                                            editingDeviceNameId = device.id
+                                                            deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
+                                                            editedDeviceName = device.name
+                                                        }
+                                                        feedback = null
+                                                    },
+                                                    modifier = Modifier.size(40.dp)
+                                                ) {
+                                                    Icon(
+                                                        if (isEditingName) Icons.Default.Close else Icons.Default.Edit,
+                                                        contentDescription = if (isEditingName) "Ad düzenlemeyi kapat" else "Cihaz adını düzenle",
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
                                             }
-                                            var editedDeviceName by remember(device.id, device.name) {
-                                                mutableStateOf(deviceNameDrafts[device.id] ?: device.name)
-                                            }
-                                            OutlinedTextField(
-                                                value = editedDeviceName,
-                                                onValueChange = {
-                                                    editedDeviceName = it
-                                                    deviceNameDrafts = deviceNameDrafts + (device.id to it)
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                label = { Text(if (device.isPcTarget) "Bilgisayar adı" else "Cihaz adı") },
-                                                singleLine = true
-                                            )
-                                            OutlinedButton(
-                                                onClick = {
-                                                    val cleanedName = editedDeviceName.trim()
-                                                    if (cleanedName.isBlank()) {
-                                                        feedback = if (device.isPcTarget) "Bilgisayar adı boş olamaz." else "Cihaz adı boş olamaz."
-                                                    } else {
-                                                        FirebaseFirestore.getInstance().collection("devices").document(device.id)
-                                                            .update("name", cleanedName)
-                                                            .addOnSuccessListener {
-                                                                deviceNameDrafts = deviceNameDrafts + (device.id to cleanedName)
-                                                                feedback = if (device.isPcTarget) "Bilgisayar adı kaydedildi." else "Cihaz adı kaydedildi."
-                                                            }
-                                                            .addOnFailureListener {
-                                                                feedback = if (device.isPcTarget) "Bilgisayar adı kaydedilemedi. Hesap izinlerini kontrol edip tekrar dene." else "Cihaz adı kaydedilemedi. Hesap izinlerini kontrol edip tekrar dene."
-                                                            }
+                                            if (isEditingName) {
+                                                OutlinedTextField(
+                                                    value = editedDeviceName,
+                                                    onValueChange = {
+                                                        editedDeviceName = it.take(80)
+                                                        deviceNameDrafts = deviceNameDrafts + (device.id to it.take(80))
+                                                        deviceNameEditError = null
+                                                    },
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    label = { Text(if (device.isPcTarget) "Bilgisayar adı" else "Cihaz adı") },
+                                                    singleLine = true,
+                                                    enabled = deviceNameSaveBusyId != device.id
+                                                )
+                                                deviceNameEditError?.let { error ->
+                                                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                                }
+                                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            editingDeviceNameId = null
+                                                            deviceNameDrafts = deviceNameDrafts - device.id
+                                                            deviceNameEditError = null
+                                                        },
+                                                        modifier = Modifier.weight(1f),
+                                                        enabled = deviceNameSaveBusyId != device.id
+                                                    ) {
+                                                        Text("İptal")
                                                     }
-                                                },
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Icon(Icons.Default.Edit, contentDescription = null)
-                                                Spacer(Modifier.width(8.dp))
-                                                Text("Adı kaydet")
+                                                    Button(
+                                                        onClick = {
+                                                            val cleanedName = editedDeviceName.trim()
+                                                            if (cleanedName.isBlank()) {
+                                                                deviceNameEditError = if (device.isPcTarget) "Bilgisayar adı boş olamaz." else "Cihaz adı boş olamaz."
+                                                            } else if (cleanedName != device.name) {
+                                                                deviceNameSaveBusyId = device.id
+                                                                FirebaseFirestore.getInstance().collection("devices").document(device.id)
+                                                                    .update("name", cleanedName)
+                                                                    .addOnSuccessListener {
+                                                                        deviceNameDrafts = deviceNameDrafts - device.id
+                                                                        editingDeviceNameId = null
+                                                                        deviceNameEditError = null
+                                                                        deviceNameSaveBusyId = null
+                                                                        feedback = null
+                                                                    }
+                                                                    .addOnFailureListener {
+                                                                        deviceNameSaveBusyId = null
+                                                                        deviceNameEditError = "Ad kaydedilemedi. Bağlantıyı ve hesap izinlerini kontrol edip tekrar dene."
+                                                                    }
+                                                            } else {
+                                                                editingDeviceNameId = null
+                                                                deviceNameDrafts = deviceNameDrafts - device.id
+                                                                deviceNameEditError = null
+                                                                feedback = null
+                                                            }
+                                                        },
+                                                        modifier = Modifier.weight(1f),
+                                                        enabled = deviceNameSaveBusyId != device.id
+                                                    ) {
+                                                        if (deviceNameSaveBusyId == device.id) {
+                                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                                        } else {
+                                                            Icon(Icons.Default.Edit, contentDescription = null)
+                                                            Spacer(Modifier.width(6.dp))
+                                                            Text("Kaydet")
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            Text("Cihaz kimliği: " + device.id, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                                             if (device.isPcTarget) {
                                                 Button(
                                                     onClick = {
                                                         selectedDeviceId = device.id
+                                                        feedback = null
                                                         navigateToPage(Page.REMOTE)
                                                     },
                                                     modifier = Modifier.fillMaxWidth()
@@ -2635,7 +2702,7 @@ private fun AssistantScreen(
                                                 }
                                             } else {
                                                 Text(
-                                                    "Bu bir Android telefon. PC kumandası yalnızca Windows bilgisayarlarda çalışır; telefonlar arası kod gönderimi henüz desteklenmiyor.",
+                                                    "Android cihaz • PC kumandası yalnızca Windows bilgisayarlarda kullanılabilir.",
                                                     fontSize = 12.sp,
                                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                                                 )
@@ -3138,7 +3205,7 @@ private fun AssistantScreen(
                                             "power" -> feedback = "Bilgisayarı uzaktan açma özelliği henüz desteklenmiyor."
                                             "mouse_move", "mouse_click", "mouse_right_click" ->
                                                 feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
-                                            else -> feedback = "Bu kumanda işlemi bu bağlantı türünde desteklenmiyor."
+                                            else -> feedback = "Klavye ve fare girişleri bu yerel bağlantı türünde henüz desteklenmiyor."
                                         }
                                     } else if (device == null) {
                                         feedback = "Bilgisayar henüz çevrimiçi değil. Windows uygulaması açıldığında otomatik bağlanacak."
@@ -3693,16 +3760,29 @@ private fun TvRemotePanel(
                 }
             }
         }
-        Column(
-            Modifier.fillMaxWidth().height(250.dp)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
-                .pointerInput(mouseEnabled) {
+        var touchpadEnabled by remember { mutableStateOf(true) }
+        var keyboardText by remember { mutableStateOf("") }
+
+        fun submitRemoteKeyboardText() {
+            if (!mouseEnabled) return
+            val text = keyboardText
+            if (text.isBlank()) {
+                onCommand("key_enter", emptyMap())
+            } else {
+                onCommand("type_text", mapOf("text" to text, "pressEnter" to true))
+                keyboardText = ""
+            }
+        }
+
+        val touchpadGestureModifier = if (mouseEnabled && touchpadEnabled) {
+            Modifier
+                .pointerInput(mouseEnabled, touchpadEnabled) {
                     var deltaX = 0f
                     var deltaY = 0f
                     detectDragGestures(
                         onDragStart = { deltaX = 0f; deltaY = 0f },
                         onDragEnd = {
-                            if (mouseEnabled && (deltaX != 0f || deltaY != 0f)) {
+                            if (deltaX != 0f || deltaY != 0f) {
                                 onCommand("mouse_move", mapOf("dx" to deltaX.roundToInt(), "dy" to deltaY.roundToInt()))
                             }
                         },
@@ -3713,31 +3793,165 @@ private fun TvRemotePanel(
                         }
                     )
                 }
-                 .pointerInput(mouseEnabled) {
+                .pointerInput(mouseEnabled, touchpadEnabled) {
                     detectTapGestures(
-                        onTap = { if (mouseEnabled) onCommand("mouse_click", emptyMap()) },
-                        onLongPress = { if (mouseEnabled) onCommand("mouse_right_click", emptyMap()) }
+                        onTap = { onCommand("mouse_click", emptyMap()) },
+                        onLongPress = { onCommand("mouse_right_click", emptyMap()) }
                     )
                 }
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp),
-                tint = if (mouseEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f))
-            Spacer(Modifier.height(8.dp))
-            Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        } else {
+            Modifier
+        }
+
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Text(
+                        when {
+                            !mouseEnabled -> "Bilgisayar bağlantısı bekleniyor"
+                            touchpadEnabled -> "Kaydır: fare • Dokun: tık"
+                            else -> "Dokunmatik kapalı • Sayfayı kaydırabilirsin"
+                        },
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                    )
+                }
+                IconButton(
+                    onClick = { touchpadEnabled = !touchpadEnabled },
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        if (touchpadEnabled) Icons.Default.TouchApp else Icons.Default.Block,
+                        contentDescription = if (touchpadEnabled) "Dokunmatiği kapat" else "Dokunmatiği aç",
+                        tint = if (touchpadEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f),
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(250.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .then(touchpadGestureModifier)
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(Color(0xFF3D3D3D))
+                    val spacing = 29.dp.toPx()
+                    var y = spacing * .65f
+                    var rowIndex = 0
+                    while (y < size.height) {
+                        val stagger = (rowIndex % 2) * spacing * .5f
+                        var x = spacing * .35f + stagger
+                        while (x < size.width) {
+                            val diagonal = kotlin.math.sin((x / spacing + rowIndex * .7f) * .32f)
+                            val radius = (1.2f + (diagonal + 1f) * .75f).dp.toPx()
+                            val alpha = (0.12f + (diagonal + 1f) * .055f).coerceIn(.1f, .24f)
+                            drawCircle(
+                                color = Color(0xFFD4D4D4).copy(alpha = alpha),
+                                radius = radius,
+                                center = androidx.compose.ui.geometry.Offset(x, y)
+                            )
+                            x += spacing
+                        }
+                        y += spacing
+                        rowIndex++
+                    }
+                }
+                if (!mouseEnabled || !touchpadEnabled) {
+                    Box(
+                        Modifier.fillMaxSize().background(Color.Black.copy(alpha = .18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                if (touchpadEnabled) Icons.Default.SettingsRemote else Icons.Default.Block,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                                tint = Color.White.copy(alpha = .82f)
+                            )
+                            Text(
+                                if (!mouseEnabled) {
+                                    if (enabled) "Fare kontrolü bu bağlantıda desteklenmiyor" else "Bilgisayar bağlantısı bekleniyor"
+                                } else "Dokunmatik kapalı",
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                if (!mouseEnabled) "Windows Agent bağlantısı kurulduğunda fare kontrolü açılır."
+                                else "Bu alandaki dokunuşlar artık fareye gönderilmez; sayfayı kaydırabilirsin.",
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = .78f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 15.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp), tint = Color.White.copy(alpha = .85f))
+                        Text(
+                            "Sürükle: fareyi hareket ettir • Dokun: sol tık • Basılı tut: sağ tık",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = .85f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedTextField(
+                    value = keyboardText,
+                    onValueChange = { keyboardText = it.take(1000) },
+                    modifier = Modifier.weight(1f),
+                    enabled = mouseEnabled,
+                    singleLine = true,
+                    label = { Text("Bilgisayara yaz…") },
+                    placeholder = { Text("Metin gir") },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { submitRemoteKeyboardText() })
+                )
+                FilledTonalIconButton(
+                    onClick = { onCommand("key_backspace", emptyMap()) },
+                    enabled = mouseEnabled,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Default.Backspace, contentDescription = "Bilgisayarda bir karakter sil")
+                }
+                FilledIconButton(
+                    onClick = { submitRemoteKeyboardText() },
+                    enabled = mouseEnabled,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Default.KeyboardReturn, contentDescription = "Metni yaz ve Enter gönder")
+                }
+            }
             Text(
-                if (mouseEnabled) "Sürükle: fareyi hareket ettir • Dokun: sol tık • Basılı tut: sağ tık"
-                else if (enabled) "Ses ve masaüstü komutları bağlı; fare kontrolü bu bağlantı türünde kullanılamıyor."
-                else "Fare kontrolü bilgisayar bağlandıktan sonra açılır.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (mouseEnabled) "Fare hareketi ve tıklamalar güvenli şekilde oturumunun Windows cihazına gönderilir."
-                else "Çevrimdışıyken tıklama veya fare komutu kuyruğa eklenmez.",
-                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f), textAlign = TextAlign.Center
+                if (mouseEnabled) "Metin, Windows bilgisayarında seçili alana yazılır. Enter tuşu metni gönderip satırı onaylar; silme tuşu bilgisayarda Backspace çalıştırır."
+                else "Klavye girişi Windows Agent bağlantısı aktifken kullanılabilir.",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
             )
         }
     }
