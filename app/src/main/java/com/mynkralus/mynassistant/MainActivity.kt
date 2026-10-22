@@ -3107,6 +3107,9 @@ private fun AssistantScreen(
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
+                            var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
+                                mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
+                            }
                             val screenBitmap = remember(device?.id, device?.screenJpegBase64) {
                                 val encoded = device?.screenJpegBase64.orEmpty()
                                 if (encoded.isBlank()) null else try {
@@ -3139,6 +3142,25 @@ private fun AssistantScreen(
                                         },
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (device != null) {
+                                            editingDeviceNameId = device.id
+                                            deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
+                                            remoteEditedDeviceName = device.name
+                                            deviceNameEditError = null
+                                            feedback = null
+                                        }
+                                    },
+                                    enabled = device != null && deviceNameSaveBusyId != device.id,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Cihaz adını düzenle",
+                                        tint = MaterialTheme.colorScheme.primary
                                     )
                                 }
                                 Surface(shape = CircleShape, color = if (remoteOnline) Color(0xFF49B86E) else Color(0xFFB85C5C)) {
@@ -3219,6 +3241,97 @@ private fun AssistantScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+
+                            if (device != null && editingDeviceNameId == device.id) {
+                                AlertDialog(
+                                    onDismissRequest = {
+                                        if (deviceNameSaveBusyId != device.id) {
+                                            editingDeviceNameId = null
+                                            deviceNameDrafts = deviceNameDrafts - device.id
+                                            deviceNameEditError = null
+                                        }
+                                    },
+                                    title = {
+                                        Text(if (device.isPcTarget) "Bilgisayar adını düzenle" else "Cihaz adını düzenle")
+                                    },
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedTextField(
+                                                value = remoteEditedDeviceName,
+                                                onValueChange = {
+                                                    val limitedName = it.take(80)
+                                                    remoteEditedDeviceName = limitedName
+                                                    deviceNameDrafts = deviceNameDrafts + (device.id to limitedName)
+                                                    deviceNameEditError = null
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                label = {
+                                                    Text(if (device.isPcTarget) "Bilgisayar adı" else "Cihaz adı")
+                                                },
+                                                singleLine = true,
+                                                enabled = deviceNameSaveBusyId != device.id
+                                            )
+                                            deviceNameEditError?.let { error ->
+                                                Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                val cleanedName = remoteEditedDeviceName.trim()
+                                                if (cleanedName.isBlank()) {
+                                                    deviceNameEditError = if (device.isPcTarget) {
+                                                        "Bilgisayar adı boş olamaz."
+                                                    } else {
+                                                        "Cihaz adı boş olamaz."
+                                                    }
+                                                } else if (cleanedName == device.name) {
+                                                    editingDeviceNameId = null
+                                                    deviceNameDrafts = deviceNameDrafts - device.id
+                                                    deviceNameEditError = null
+                                                } else {
+                                                    deviceNameSaveBusyId = device.id
+                                                    FirebaseFirestore.getInstance()
+                                                        .collection("devices")
+                                                        .document(device.id)
+                                                        .update("name", cleanedName)
+                                                        .addOnSuccessListener {
+                                                            deviceNameDrafts = deviceNameDrafts - device.id
+                                                            editingDeviceNameId = null
+                                                            deviceNameEditError = null
+                                                            deviceNameSaveBusyId = null
+                                                            feedback = null
+                                                        }
+                                                        .addOnFailureListener {
+                                                            deviceNameSaveBusyId = null
+                                                            deviceNameEditError = "Ad kaydedilemedi. Bağlantıyı ve hesap izinlerini kontrol edip tekrar dene."
+                                                        }
+                                                }
+                                            },
+                                            enabled = deviceNameSaveBusyId != device.id
+                                        ) {
+                                            if (deviceNameSaveBusyId == device.id) {
+                                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                            } else {
+                                                Text("Kaydet")
+                                            }
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(
+                                            onClick = {
+                                                editingDeviceNameId = null
+                                                deviceNameDrafts = deviceNameDrafts - device.id
+                                                deviceNameEditError = null
+                                            },
+                                            enabled = deviceNameSaveBusyId != device.id
+                                        ) {
+                                            Text("İptal")
+                                        }
+                                    }
+                                )
+                            }
                         }
                         else -> Unit
                     }
