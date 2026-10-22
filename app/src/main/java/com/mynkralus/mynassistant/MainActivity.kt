@@ -1845,6 +1845,16 @@ private fun AssistantScreen(
     var drawer by remember { mutableStateOf(false) }
     var showExitConfirmation by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
+    var authRegisterMode by remember { mutableStateOf(false) }
+    var accountPhoneDraft by remember(firebaseUserId, phone) { mutableStateOf(phone) }
+    var phoneVerificationId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var phoneSmsCode by remember { mutableStateOf("") }
+    var accountMessage by remember { mutableStateOf<String?>(null) }
+    val accountPhotoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) uploadProfilePhoto(uri) { accountMessage = it }
+    }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var editingDeviceNameId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
