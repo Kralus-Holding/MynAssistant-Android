@@ -3917,6 +3917,7 @@ private fun TvRemotePanel(
             Modifier
         }
 
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // The touchpad keeps its controls inside the surface so there is no redundant
         // explanatory overlay over the dotted area. Gestures are attached only to Canvas,
         // allowing the top-right enable/disable control to remain an independent target.
