@@ -5,6 +5,9 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -74,6 +77,8 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
+import java.util.UUID
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
@@ -81,6 +86,8 @@ private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
 private const val PREFS = "mynassistant_prefs"
 private const val GOOGLE_ACCOUNTS_KEY = "saved_google_accounts"
+private const val ANDROID_INSTALLATION_ID_KEY = "android_installation_id"
+private const val ANDROID_DEVICE_HEARTBEAT_MS = 60_000L
 
 private data class SavedGoogleAccount(val email: String, val name: String, val photoUrl: String)
 
@@ -264,6 +271,21 @@ private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls
 private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE }
 
 class MainActivity : ComponentActivity() {
+    private val deviceHeartbeatHandler = Handler(Looper.getMainLooper())
+    private var activityResumed = false
+    private var deviceHeartbeatRunnable: Runnable? = null
+
+    private val firebaseAuthStateListener = FirebaseAuth.AuthStateListener { auth ->
+        val currentUser = auth.currentUser
+        // A sign-out/switch may change Firestore auth before the previous record can be
+        // marked offline. The server's three-minute lastSeenAt TTL handles that transition.
+        if (activityResumed) {
+            startAndroidDeviceHeartbeat(currentUser)
+        } else {
+            stopAndroidDeviceHeartbeat()
+        }
+    }
+
     private val googleSignInClient by lazy {
         val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
@@ -273,6 +295,107 @@ class MainActivity : ComponentActivity() {
         GoogleSignIn.getClient(this, options)
     }
 
+    override fun onResume() {
+        super.onResume()
+        activityResumed = true
+        startAndroidDeviceHeartbeat(FirebaseAuth.getInstance().currentUser)
+    }
+
+    override fun onPause() {
+        activityResumed = false
+        stopAndroidDeviceHeartbeat()
+        FirebaseAuth.getInstance().currentUser?.let { updateAndroidDevicePresence(it, online = false) }
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        stopAndroidDeviceHeartbeat()
+        FirebaseAuth.getInstance().removeAuthStateListener(firebaseAuthStateListener)
+        super.onDestroy()
+    }
+
+    private fun stopAndroidDeviceHeartbeat() {
+        deviceHeartbeatRunnable?.let(deviceHeartbeatHandler::removeCallbacks)
+        deviceHeartbeatRunnable = null
+    }
+
+    private fun startAndroidDeviceHeartbeat(user: FirebaseUser?) {
+        stopAndroidDeviceHeartbeat()
+        if (!activityResumed || user == null) return
+
+        val expectedUid = user.uid
+        val heartbeat = object : Runnable {
+            override fun run() {
+                val activeUser = FirebaseAuth.getInstance().currentUser
+                if (!activityResumed || activeUser?.uid != expectedUid) {
+                    deviceHeartbeatRunnable = null
+                    return
+                }
+                updateAndroidDevicePresence(activeUser, online = true)
+                deviceHeartbeatHandler.postDelayed(this, ANDROID_DEVICE_HEARTBEAT_MS)
+            }
+        }
+        deviceHeartbeatRunnable = heartbeat
+        deviceHeartbeatHandler.post(heartbeat)
+    }
+
+    private fun androidDeviceDocumentId(uid: String): String {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val installationId = prefs.getString(ANDROID_INSTALLATION_ID_KEY, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: UUID.randomUUID().toString().also {
+                prefs.edit().putString(ANDROID_INSTALLATION_ID_KEY, it).apply()
+            }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$uid:$installationId".toByteArray(Charsets.UTF_8))
+        val suffix = digest.take(12).joinToString("") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
+        return "android-$suffix"
+    }
+
+    private fun updateAndroidDevicePresence(user: FirebaseUser, online: Boolean) {
+        val documentId = androidDeviceDocumentId(user.uid)
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val registeredKey = "android_device_registered_$documentId"
+        val model = Build.MODEL?.trim().orEmpty().ifBlank { "Android telefon" }
+        val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
+        val deviceName = if (manufacturer.isNotBlank() &&
+            !model.startsWith(manufacturer, ignoreCase = true)) "$manufacturer $model" else model
+        val versionName = runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+        }.getOrDefault("unknown")
+
+        val fields = hashMapOf<String, Any>(
+            "ownerId" to user.uid,
+            "name" to deviceName,
+            "deviceName" to deviceName,
+            "platform" to "Android",
+            "type" to "Android",
+            "status" to if (online) "online" else "offline",
+            "connectionMode" to "android-app",
+            "agentVersion" to versionName,
+            "lastCheckedAt" to FieldValue.serverTimestamp()
+        )
+        if (online) fields["lastSeenAt"] = FieldValue.serverTimestamp()
+        if (!prefs.getBoolean(registeredKey, false)) {
+            fields["createdAt"] = FieldValue.serverTimestamp()
+        }
+
+        FirebaseFirestore.getInstance()
+            .collection("devices")
+            .document(documentId)
+            .set(fields, SetOptions.merge())
+            .addOnSuccessListener {
+                if (!prefs.getBoolean(registeredKey, false)) {
+                    prefs.edit().putBoolean(registeredKey, true).apply()
+                }
+            }
+            .addOnFailureListener {
+                Log.w("MynAssistantDevice", "Device presence update failed")
+            }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -280,6 +403,7 @@ class MainActivity : ComponentActivity() {
         prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider")
             .remove("name").remove("email").remove("phone").apply()
         val auth = FirebaseAuth.getInstance()
+        auth.addAuthStateListener(firebaseAuthStateListener)
         setContent {
             val context = LocalContext.current
             val profileImageLoader = remember(context) {
