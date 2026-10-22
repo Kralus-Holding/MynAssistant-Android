@@ -423,7 +423,7 @@ def claim_pending_command(session: FirebaseSession, document: dict, device_id: s
     full_name = document.get("name", "")
     marker = "/documents/"
     if not isinstance(update_time, str) or not update_time or marker not in full_name:
-        print("[Komut] Kayıt sürümü bulunamadı; komut güvenlik nedeniyle çalıştırılmadı.")
+        print("[Command] Missing update time; command was not executed.")
         return False
 
     document_path = full_name.split(marker, 1)[1]
@@ -444,7 +444,7 @@ def claim_pending_command(session: FirebaseSession, document: dict, device_id: s
     except Exception as claim_error:
         # A network timeout can happen after Firestore accepted the write. Read back
         # the document and proceed only if this exact claim token won the race.
-        print(f"[Komut] Sahiplenme yanıtı belirsiz; Firestore kaydı doğrulanıyor: {claim_error}")
+        print(f"[Command] Claim response uncertain; verifying Firestore state: {claim_error}")
         try:
             response = requests.get(
                 f"{FIRESTORE}/{document_path}",
@@ -459,7 +459,7 @@ def claim_pending_command(session: FirebaseSession, document: dict, device_id: s
                     and current.get("claimedByDeviceId") == device_id
                 )
         except Exception as read_error:
-            print(f"[Komut] Sahiplenme doğrulanamadı; komut çalıştırılmadı: {read_error}")
+            print(f"[Command] Claim verification failed; command was not executed: {read_error}")
         return False
 
 
