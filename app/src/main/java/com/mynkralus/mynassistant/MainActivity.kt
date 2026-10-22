@@ -122,10 +122,14 @@ private data class PcDevice(
     val platform: String,
     val status: String,
     val connectionMode: String = "",
-    val screenJpegBase64: String = ""
+    val screenJpegBase64: String = "",
+    val lastSeenAtMillis: Long? = null
 ) {
-    val isOnline: Boolean
-        get() = status.trim().lowercase() in setOf("online", "connected", "ready", "active")
+    val isPcTarget: Boolean
+        get() = DevicePresencePolicy.isPcTarget(id, platform, connectionMode)
+
+    fun isOnlineAt(nowMillis: Long): Boolean =
+        DevicePresencePolicy.isOnline(status, lastSeenAtMillis, nowMillis)
 }
 
 private fun loadSavedGoogleAccounts(prefs: android.content.SharedPreferences): List<SavedGoogleAccount> {
@@ -1578,6 +1582,13 @@ private fun AssistantScreen(
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var presenceNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(10_000L)
+            presenceNowMillis = System.currentTimeMillis()
+        }
+    }
     var command by remember { mutableStateOf("") }
     var feedback by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(wakeCommandFromOverlay) {
@@ -2076,17 +2087,20 @@ private fun AssistantScreen(
                                 platform = document.getString("platform")
                                     ?: document.getString("type")
                                     ?: document.getString("os")
-                                    ?: "Windows",
+                                    ?: "Unknown",
                                 status = document.getString("status")
                                     ?: document.getString("connectionStatus")
                                     ?: "offline",
                                 connectionMode = document.getString("connectionMode").orEmpty(),
-                                screenJpegBase64 = document.getString("screenJpegBase64").orEmpty()
+                                screenJpegBase64 = document.getString("screenJpegBase64").orEmpty(),
+                                lastSeenAtMillis = document.getTimestamp("lastSeenAt")?.toDate()?.time
                             )
                         }
                         devicesError = null
                         devicesLoading = false
-                        if (devices.none { it.id == selectedDeviceId }) selectedDeviceId = devices.firstOrNull()?.id
+                        if (devices.none { it.id == selectedDeviceId && it.isPcTarget }) {
+                            selectedDeviceId = devices.firstOrNull { it.isPcTarget }?.id
+                        }
                     }
                 }
         } else {
@@ -2097,7 +2111,10 @@ private fun AssistantScreen(
         }
         onDispose { registration?.remove() }
     }
-    val selectedDevice = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
+    val pcDevices = devices.filter { it.isPcTarget }
+    val selectedDevice = pcDevices.firstOrNull { it.id == selectedDeviceId }
+        ?: pcDevices.firstOrNull { it.isOnlineAt(presenceNowMillis) }
+        ?: pcDevices.firstOrNull()
 
     // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
     // The agent only sends frames while this lease is refreshed, so it does not upload screenshots in the background.
@@ -2124,8 +2141,8 @@ private fun AssistantScreen(
     }
 
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
-    val connectedDevices = devices.filter { device ->
-        if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+    val connectedDevices = pcDevices.filter { device ->
+        if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
     }
     val hasConnectedPc = signedIn && connectedDevices.isNotEmpty()
     val testPcBridgeNow: () -> Unit = {
@@ -2368,7 +2385,7 @@ private fun AssistantScreen(
             }
             routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
             !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
-            selectedDevice?.isOnline == true && selectedDevice.connectionMode == "firebase-agent" -> {
+            selectedDevice?.isOnlineAt(presenceNowMillis) == true && selectedDevice.connectionMode == "firebase-agent" -> {
                 feedback = "Komut bilgisayarına gönderiliyor..."
                 sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
             }
@@ -2524,7 +2541,7 @@ private fun AssistantScreen(
                                 devicesError?.let { error ->
                                     Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                                 }
-                                if (!devicesLoading && devices.isEmpty() && devicesError == null) {
+                                if (!devicesLoading && pcDevices.isEmpty() && devicesError == null) {
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -2540,14 +2557,19 @@ private fun AssistantScreen(
                                     }
                                 }
                                 devices.forEach { device ->
-                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnline
+                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                     ) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+                                                Icon(
+                                                    if (device.isPcTarget) Icons.Default.Computer else Icons.Default.Devices,
+                                                    contentDescription = if (device.isPcTarget) "Windows bilgisayar" else "Android telefon",
+                                                    modifier = Modifier.size(32.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
                                                 Column(Modifier.weight(1f)) {
                                                     Text(device.name, fontWeight = FontWeight.SemiBold)
                                                     Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
@@ -2574,23 +2596,23 @@ private fun AssistantScreen(
                                                     deviceNameDrafts = deviceNameDrafts + (device.id to it)
                                                 },
                                                 modifier = Modifier.fillMaxWidth(),
-                                                label = { Text("Bilgisayar adı") },
+                                                label = { Text(if (device.isPcTarget) "Bilgisayar adı" else "Cihaz adı") },
                                                 singleLine = true
                                             )
                                             OutlinedButton(
                                                 onClick = {
                                                     val cleanedName = editedDeviceName.trim()
                                                     if (cleanedName.isBlank()) {
-                                                        feedback = "Bilgisayar adı boş olamaz."
+                                                        feedback = if (device.isPcTarget) "Bilgisayar adı boş olamaz." else "Cihaz adı boş olamaz."
                                                     } else {
                                                         FirebaseFirestore.getInstance().collection("devices").document(device.id)
                                                             .update("name", cleanedName)
                                                             .addOnSuccessListener {
                                                                 deviceNameDrafts = deviceNameDrafts + (device.id to cleanedName)
-                                                                feedback = "Bilgisayar adı kaydedildi."
+                                                                feedback = if (device.isPcTarget) "Bilgisayar adı kaydedildi." else "Cihaz adı kaydedildi."
                                                             }
                                                             .addOnFailureListener {
-                                                                feedback = "Bilgisayar adı kaydedilemedi. Hesap izinlerini kontrol edip tekrar dene."
+                                                                feedback = if (device.isPcTarget) "Bilgisayar adı kaydedilemedi. Hesap izinlerini kontrol edip tekrar dene." else "Cihaz adı kaydedilemedi. Hesap izinlerini kontrol edip tekrar dene."
                                                             }
                                                     }
                                                 },
@@ -2601,8 +2623,22 @@ private fun AssistantScreen(
                                                 Text("Adı kaydet")
                                             }
                                             Text("Cihaz kimliği: " + device.id, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
-                                            Button(onClick = { selectedDeviceId = device.id; navigateToPage(Page.REMOTE) }, modifier = Modifier.fillMaxWidth()) {
-                                                Text("Bağlan")
+                                            if (device.isPcTarget) {
+                                                Button(
+                                                    onClick = {
+                                                        selectedDeviceId = device.id
+                                                        navigateToPage(Page.REMOTE)
+                                                    },
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text("PC kumandasına bağlan")
+                                                }
+                                            } else {
+                                                Text(
+                                                    "Bu bir Android telefon. PC kumandası yalnızca Windows bilgisayarlarda çalışır; telefonlar arası kod gönderimi henüz desteklenmiyor.",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                                )
                                             }
                                         }
                                     }
@@ -2972,11 +3008,11 @@ private fun AssistantScreen(
                                                 when {
                                                     !signedIn -> "Önce hesabına giriş yap."
                                                     devicesLoading -> "Hesabına bağlı cihazlar aranıyor..."
-                                                    devices.any { it.isOnline } -> "En az bir cihaz çevrimiçi."
+                                                    pcDevices.any { it.isOnlineAt(presenceNowMillis) } -> "En az bir cihaz çevrimiçi."
                                                     else -> "Henüz çevrimiçi bilgisayar yok."
                                                 },
                                                 fontSize = 12.sp,
-                                                color = if (devices.any { it.isOnline }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                                color = if (pcDevices.any { it.isOnlineAt(presenceNowMillis) }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
                                             )
                                         }
                                     }
@@ -3015,7 +3051,7 @@ private fun AssistantScreen(
                             val localBridgeSelected = signedIn && localPcConnected &&
                                 (device == null || device.id == localPcDeviceId)
                             val remoteOnline = localBridgeSelected ||
-                                (device?.isOnline == true && signedIn && device.id != localPcDeviceId)
+                                (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
