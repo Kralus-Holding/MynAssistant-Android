@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- A slight zoom makes the existing MynAssistant mark fill the rounded app tile more like the reference icon. -->
+    <!-- Center the complete source mark inside Android's adaptive-icon safe area. -->
     <item
-        android:left="-8dp"
-        android:top="-8dp"
-        android:right="-8dp"
-        android:bottom="-8dp">
+        android:width="72dp"
+        android:height="72dp"
+        android:gravity="center">
         <bitmap
             android:src="@drawable/mynassistant_launcher"
             android:gravity="fill" />
