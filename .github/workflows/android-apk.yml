@@ -80,7 +80,7 @@ jobs:
       - name: Upload APK build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MynAssistant-Android-\${{ github.sha }}
+          name: MynAssistant-Android-full-feature
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
