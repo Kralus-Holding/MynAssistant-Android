@@ -1485,6 +1485,8 @@ class MainActivity : ComponentActivity() {
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
+                    emailVerified = emailVerified,
+                    googleLinked = googleLinked,
                     firebaseUserId = auth.currentUser?.uid,
                     initialPcBridgeUrl = prefs.getString("pc_bridge_url_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
                     initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "meyene") ?: "meyene",
@@ -1571,6 +1573,8 @@ class MainActivity : ComponentActivity() {
                                             email = user.email.orEmpty()
                                             phone = user.phoneNumber.orEmpty()
                                             photoUrl = user.photoUrl?.toString().orEmpty()
+                                            emailVerified = user.isEmailVerified
+                                            googleLinked = user.providerData.any { it.providerId == "google.com" }
                                             signedIn = true
                                             saveFirebaseProfile(user, "password", false) { firestoreError ->
                                                 val message = if (firestoreError == null) {
@@ -1616,6 +1620,8 @@ class MainActivity : ComponentActivity() {
                                                 email = activeUser.email.orEmpty()
                                                 phone = activeUser.phoneNumber.orEmpty()
                                                 photoUrl = activeUser.photoUrl?.toString().orEmpty()
+                                                emailVerified = activeUser.isEmailVerified
+                                                googleLinked = activeUser.providerData.any { it.providerId == "google.com" }
                                                 signedIn = true
                                                 activeUser.sendEmailVerification().addOnCompleteListener { verifyTask ->
                                                     saveFirebaseProfile(
@@ -1653,9 +1659,16 @@ class MainActivity : ComponentActivity() {
                         email = ""
                         phone = ""
                         photoUrl = ""
+                        emailVerified = false
+                        googleLinked = false
                         googleStatus = null
                     },
                     googleLogin = startGoogleSignIn,
+                    refreshEmailVerification = refreshEmailVerification,
+                    resendEmailVerification = resendEmailVerification,
+                    uploadProfilePhoto = uploadProfilePhoto,
+                    requestPhoneVerification = requestPhoneVerification,
+                    confirmPhoneVerification = confirmPhoneVerification,
                     selectSavedGoogleAccount = selectSavedGoogleAccount,
                     savedGoogleAccounts = savedGoogleAccounts,
                     googleStatus = googleStatus,
@@ -1805,7 +1818,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, photoUrl: String, firebaseUserId: String?,
+    email: String, phone: String, photoUrl: String, emailVerified: Boolean, googleLinked: Boolean,
+    firebaseUserId: String?,
     initialPcBridgeUrl: String,
     initialPcBridgeToken: String,
     savePcBridgeSettings: (String, String) -> Unit,
@@ -1814,7 +1828,12 @@ private fun AssistantScreen(
     sendRemoteCommand: (String, String, Map<String, Any>, (String, String?) -> Unit) -> Unit,
     photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
-    googleLogin: () -> Unit,
+    googleLogin: (GoogleAuthMode) -> Unit,
+    refreshEmailVerification: ((String) -> Unit) -> Unit,
+    resendEmailVerification: ((String) -> Unit) -> Unit,
+    uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
+    requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
+    confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
     selectSavedGoogleAccount: (String) -> Unit,
     savedGoogleAccounts: List<SavedGoogleAccount>,
     googleStatus: String?,
