@@ -13,8 +13,8 @@ android {
         applicationId = "com.mynkralus.mynassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 32
-        versionName = "0.5.5"
+        versionCode = 33
+        versionName = "0.5.6"
 
         // Include both ARM ABIs so the test APK also installs on devices whose
         // Android userspace is 32-bit, while avoiding unrelated x86 emulator runtimes.
@@ -53,6 +53,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:35.0.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-analytics")
 
     implementation("io.coil-kt:coil-compose:2.7.0")

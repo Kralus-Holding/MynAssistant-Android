@@ -24,6 +24,19 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
+import com.google.firebase.FirebaseException
+import com.google.firebase.storage.FirebaseStorage
+import java.util.concurrent.TimeUnit
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Verified
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -166,7 +179,9 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
         code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı deneyebilirsin."
         code.contains("INVALID_EMAIL") -> "Geçerli bir e-posta adresi gir."
         code.contains("WEAK_PASSWORD") -> "Daha güçlü bir şifre seç. En az 6 karakter kullan."
-        code.contains("USER_NOT_FOUND") || code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
+        code.contains("USER_NOT_FOUND") || code.contains("EMAIL_NOT_FOUND") ->
+            "Bu e-posta adresiyle hesap bulunamadı. Yeni hesap oluşturmak için 'Kayıt ol' seçeneğini kullan."
+        code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
             "E-posta adresi veya şifre hatalı."
         code.contains("OPERATION_NOT_ALLOWED") -> "Bu giriş yöntemi şu anda kullanılamıyor. Daha sonra tekrar dene."
         code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Bir süre bekleyip tekrar dene."
@@ -189,6 +204,8 @@ private fun saveFirebaseProfile(
         "displayName" to (displayNameOverride?.takeIf { it.isNotBlank() } ?: user.displayName.orEmpty()),
         "email" to user.email.orEmpty(),
         "phoneNumber" to user.phoneNumber.orEmpty(),
+        "photoUrl" to user.photoUrl?.toString().orEmpty(),
+        "emailVerified" to user.isEmailVerified,
         "provider" to provider,
         "lastSignInAt" to FieldValue.serverTimestamp()
     )
@@ -966,7 +983,8 @@ private fun saveWindowsBridgeDevice(
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
-private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
+private enum class Page { HOME, LOGIN, REGISTER, AUTH, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
+private enum class GoogleAuthMode { LOGIN, REGISTER, LINK }
 
 /**
  * Returns true only when Android accepted the start request. Listening becomes active
@@ -1166,6 +1184,9 @@ class MainActivity : ComponentActivity() {
             }
             var signedIn by remember { mutableStateOf(currentUser != null) }
             var photoUrl by remember { mutableStateOf(currentUser?.photoUrl?.toString().orEmpty()) }
+            var emailVerified by remember { mutableStateOf(currentUser?.isEmailVerified == true) }
+            var googleLinked by remember { mutableStateOf(currentUser?.providerData?.any { it.providerId == "google.com" } == true) }
+            var googleAuthMode by remember { mutableStateOf(GoogleAuthMode.LOGIN) }
             var googleStatus by remember { mutableStateOf<String?>(null) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
@@ -1175,34 +1196,94 @@ class MainActivity : ComponentActivity() {
                         .getResult(ApiException::class.java)
                     val idToken = account.idToken
                     if (idToken.isNullOrBlank()) {
-                        googleStatus = "Google ile giriş şu anda tamamlanamıyor. Lütfen tekrar dene."
+                        googleStatus = "Google kimliği alınamadı. Tekrar dene."
                     } else {
                         val credential = GoogleAuthProvider.getCredential(idToken, null)
-                        auth.signInWithCredential(credential).addOnCompleteListener { task ->
-                            if (!task.isSuccessful) {
-                                googleStatus = firebaseAuthErrorMessage(task.exception)
+                        if (googleAuthMode == GoogleAuthMode.LINK) {
+                            val activeUser = auth.currentUser
+                            if (activeUser == null) {
+                                googleStatus = "Google hesabını bağlamak için önce giriş yap."
                             } else {
-                                val user = task.result?.user ?: auth.currentUser
-                                if (user == null) {
-                                    googleStatus = "Giriş tamamlandı ancak hesap bilgileri alınamadı. Lütfen tekrar dene."
-                                } else {
-                                    name = user.displayName?.takeIf { it.isNotBlank() }
-                                        ?: user.email?.substringBefore("@").orEmpty()
-                                    email = user.email.orEmpty()
-                                    phone = user.phoneNumber.orEmpty()
-                                    photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
-                                        ?: account.photoUrl?.toString().orEmpty()
-                                    savedGoogleAccounts = saveGoogleAccount(prefs, SavedGoogleAccount(email, name, photoUrl))
-                                    signedIn = true
-                                    saveFirebaseProfile(
-                                        user = user,
-                                        provider = "google.com",
-                                        isNewUser = task.result?.additionalUserInfo?.isNewUser == true
-                                    ) { firestoreError ->
-                                        googleStatus = if (firestoreError == null) {
-                                            "Google ile giriş yapıldı."
+                                activeUser.linkWithCredential(credential).addOnCompleteListener { task ->
+                                    if (!task.isSuccessful) {
+                                        googleStatus = firebaseAuthErrorMessage(task.exception)
+                                    } else {
+                                        val user = task.result?.user ?: auth.currentUser
+                                        if (user == null) {
+                                            googleStatus = "Google hesabı bağlandı ancak profil alınamadı. Sayfayı yenile."
                                         } else {
-                                            "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
+                                            googleLinked = user.providerData.any { it.providerId == "google.com" }
+                                            name = user.displayName?.takeIf { it.isNotBlank() } ?: name
+                                            email = user.email.orEmpty()
+                                            phone = user.phoneNumber.orEmpty()
+                                            photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
+                                                ?: account.photoUrl?.toString().orEmpty()
+                                            emailVerified = user.isEmailVerified
+                                            savedGoogleAccounts = saveGoogleAccount(
+                                                prefs, SavedGoogleAccount(email, name, photoUrl)
+                                            )
+                                            saveFirebaseProfile(user, "google.com", false) { error ->
+                                                googleStatus = if (error == null) {
+                                                    "Google hesabı başarıyla bağlandı."
+                                                } else {
+                                                    "Google bağlandı ancak profil bilgileri kaydedilemedi."
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            auth.signInWithCredential(credential).addOnCompleteListener { task ->
+                                if (!task.isSuccessful) {
+                                    googleStatus = firebaseAuthErrorMessage(task.exception)
+                                } else {
+                                    val result = task.result
+                                    val user = result?.user ?: auth.currentUser
+                                    val isNewUser = result?.additionalUserInfo?.isNewUser == true
+                                    if (user == null) {
+                                        googleStatus = "Giriş tamamlandı ancak hesap bilgileri alınamadı. Tekrar dene."
+                                    } else if (googleAuthMode == GoogleAuthMode.LOGIN && isNewUser) {
+                                        // Google sign-in can auto-provision a Firebase user. Remove that
+                                        // accidental new account so Login never silently becomes Register.
+                                        user.delete().addOnCompleteListener {
+                                            auth.signOut()
+                                            googleSignInClient.signOut()
+                                            signedIn = false
+                                            googleLinked = false
+                                            emailVerified = false
+                                            googleStatus = "Bu Google hesabıyla kayıtlı bir MynAssistant hesabı bulunamadı. Hesap oluşturmak için 'Google ile kayıt ol' seçeneğini kullan."
+                                        }
+                                    } else if (googleAuthMode == GoogleAuthMode.REGISTER && !isNewUser) {
+                                        auth.signOut()
+                                        googleSignInClient.signOut()
+                                        signedIn = false
+                                        googleLinked = false
+                                        googleStatus = "Bu Google hesabıyla zaten bir hesap var. 'Google ile giriş yap' seçeneğini kullan."
+                                    } else {
+                                        name = user.displayName?.takeIf { it.isNotBlank() }
+                                            ?: user.email?.substringBefore("@").orEmpty()
+                                        email = user.email.orEmpty()
+                                        phone = user.phoneNumber.orEmpty()
+                                        photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
+                                            ?: account.photoUrl?.toString().orEmpty()
+                                        emailVerified = user.isEmailVerified
+                                        googleLinked = user.providerData.any { it.providerId == "google.com" }
+                                        savedGoogleAccounts = saveGoogleAccount(
+                                            prefs, SavedGoogleAccount(email, name, photoUrl)
+                                        )
+                                        signedIn = true
+                                        saveFirebaseProfile(
+                                            user = user,
+                                            provider = "google.com",
+                                            isNewUser = isNewUser
+                                        ) { firestoreError ->
+                                            googleStatus = if (firestoreError == null) {
+                                                if (googleAuthMode == GoogleAuthMode.REGISTER) "Google hesabı oluşturuldu ve giriş yapıldı."
+                                                else "Google ile giriş yapıldı."
+                                            } else {
+                                                "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Tekrar dene."
+                                            }
                                         }
                                     }
                                 }
@@ -1211,15 +1292,16 @@ class MainActivity : ComponentActivity() {
                     }
                 } catch (error: ApiException) {
                     googleStatus = when (error.statusCode) {
-                        10 -> "Google ile giriş şu anda kullanılamıyor. Lütfen daha sonra tekrar dene."
-                        12501 -> "Giriş iptal edildi."
-                        else -> "Google ile giriş tamamlanamadı. Lütfen tekrar dene."
+                        10 -> "Google ile giriş ayarları tamamlanmamış. İstemci kimliğini ve imza SHA-1 değerini kontrol et."
+                        12501 -> "Google girişi iptal edildi."
+                        else -> "Google ile işlem tamamlanamadı. Tekrar dene."
                     }
-                } catch (error: Exception) {
-                    googleStatus = "Bir sorun oluştu. Lütfen tekrar dene."
+                } catch (_: Exception) {
+                    googleStatus = "Bir sorun oluştu. İnternet bağlantını kontrol edip tekrar dene."
                 }
             }
-            val startGoogleSignIn: () -> Unit = {
+            val startGoogleSignIn: (GoogleAuthMode) -> Unit = { mode ->
+                googleAuthMode = mode
                 googleSignInClient.signOut().addOnCompleteListener {
                     googleLauncher.launch(googleSignInClient.signInIntent)
                 }
@@ -1229,8 +1311,173 @@ class MainActivity : ComponentActivity() {
                     .requestEmail().requestProfile().requestIdToken(WEB_CLIENT_ID)
                     .setAccountName(selectedEmail).build()
                 val client = GoogleSignIn.getClient(this@MainActivity, options)
+                googleAuthMode = GoogleAuthMode.LOGIN
                 client.signOut().addOnCompleteListener { googleLauncher.launch(client.signInIntent) }
             }
+            val refreshEmailVerification: ((String) -> Unit) -> Unit = { report ->
+                val user = auth.currentUser
+                if (user == null) {
+                    report("E-posta durumunu kontrol etmek için giriş yap.")
+                } else {
+                    user.reload().addOnCompleteListener { task ->
+                        if (!task.isSuccessful) {
+                            report("E-posta durumu yenilenemedi. İnternet bağlantını kontrol et.")
+                        } else {
+                            val fresh = auth.currentUser ?: user
+                            emailVerified = fresh.isEmailVerified
+                            report(if (emailVerified) "E-posta adresin doğrulanmış." else "E-posta adresin henüz doğrulanmamış.")
+                        }
+                    }
+                }
+            }
+            val resendEmailVerification: ((String) -> Unit) -> Unit = { report ->
+                val user = auth.currentUser
+                if (user == null) {
+                    report("Doğrulama e-postası göndermek için giriş yap.")
+                } else if (user.isEmailVerified) {
+                    emailVerified = true
+                    report("E-posta adresin zaten doğrulanmış.")
+                } else {
+                    user.sendEmailVerification().addOnCompleteListener { task ->
+                        report(if (task.isSuccessful) {
+                            "Yeni doğrulama bağlantısı e-posta adresine gönderildi."
+                        } else {
+                            "Doğrulama e-postası gönderilemedi. Biraz sonra tekrar dene."
+                        })
+                    }
+                }
+            }
+            val uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit = { uri, report ->
+                val user = auth.currentUser
+                if (user == null) {
+                    report("Fotoğraf yüklemek için önce giriş yap.")
+                } else {
+                    val storageRef = FirebaseStorage.getInstance().reference
+                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}")
+                    storageRef.putFile(uri)
+                        .continueWithTask { task ->
+                            if (!task.isSuccessful) {
+                                throw task.exception ?: IllegalStateException("Fotoğraf yüklemesi tamamlanamadı.")
+                            }
+                            storageRef.downloadUrl
+                        }
+                        .addOnSuccessListener { downloadUri ->
+                            user.updateProfile(
+                                UserProfileChangeRequest.Builder().setPhotoUri(downloadUri).build()
+                            ).addOnCompleteListener { updateTask ->
+                                if (!updateTask.isSuccessful) {
+                                    report("Fotoğraf yüklendi ancak profil fotoğrafı güncellenemedi. Tekrar dene.")
+                                } else {
+                                    photoUrl = downloadUri.toString()
+                                    saveFirebaseProfile(
+                                        user = user,
+                                        provider = user.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "profile",
+                                        isNewUser = false
+                                    ) { profileError ->
+                                        report(if (profileError == null) {
+                                            "Profil fotoğrafın güncellendi."
+                                        } else {
+                                            "Fotoğraf güncellendi ancak profil kaydı yenilenemedi."
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                        .addOnFailureListener { error ->
+                            val detail = error.message.orEmpty().lowercase(Locale.ROOT)
+                            report(when {
+                                detail.contains("unauthorized") || detail.contains("permission") ->
+                                    "Fotoğraf yükleme izni yok. Firebase Storage kurallarını profilePhotos/{kullanıcıKimliği} için ayarla."
+                                detail.contains("bucket") || detail.contains("no object") ->
+                                    "Firebase Storage henüz kullanıma hazır değil. Proje depolama alanını kontrol et."
+                                else -> "Fotoğraf yüklenemedi. İnternet bağlantını ve Firebase Storage ayarlarını kontrol et."
+                            })
+                        }
+                }
+            }
+            val updatePhoneCredential: (com.google.firebase.auth.PhoneAuthCredential, (String) -> Unit) -> Unit =
+                { credential, report ->
+                    val user = auth.currentUser
+                    if (user == null) {
+                        report("Telefon numarası eklemek için tekrar giriş yap.")
+                    } else {
+                        user.updatePhoneNumber(credential).addOnCompleteListener { task ->
+                            if (!task.isSuccessful) {
+                                report(when ((task.exception as? FirebaseAuthException)?.errorCode.orEmpty()) {
+                                    "ERROR_INVALID_VERIFICATION_CODE" -> "SMS doğrulama kodu hatalı."
+                                    "ERROR_SESSION_EXPIRED" -> "SMS kodunun süresi doldu. Yeni kod iste."
+                                    "ERROR_REQUIRES_RECENT_LOGIN" -> "Güvenlik için çıkış yapıp yeniden giriş yaptıktan sonra dene."
+                                    else -> "Telefon numarası doğrulanamadı. Kodu ve bağlantını kontrol et."
+                                })
+                            } else {
+                                user.reload().addOnCompleteListener {
+                                    val fresh = auth.currentUser ?: user
+                                    phone = fresh.phoneNumber.orEmpty()
+                                    saveFirebaseProfile(
+                                        user = fresh,
+                                        provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
+                                        isNewUser = false
+                                    ) { profileError ->
+                                        report(if (profileError == null) {
+                                            "Telefon numaran doğrulandı ve hesabına eklendi."
+                                        } else {
+                                            "Telefon doğrulandı ancak profil kaydı yenilenemedi. İnternet bağlantını kontrol et."
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            val requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit = { rawNumber, report ->
+                val number = rawNumber.trim().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                val digitCount = number.count { it.isDigit() }
+                when {
+                    !number.startsWith("+") || digitCount !in 8..15 ->
+                        report(null, "Numarayı uluslararası biçimde gir; ör. +905xxxxxxxxx.")
+                    auth.currentUser == null ->
+                        report(null, "Telefon numarası eklemek için önce giriş yap.")
+                    else -> {
+                        val options = PhoneAuthOptions.newBuilder(auth)
+                            .setPhoneNumber(number)
+                            .setTimeout(60L, TimeUnit.SECONDS)
+                            .setActivity(this@MainActivity)
+                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                                override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
+                                    updatePhoneCredential(credential) { message -> report(null, message) }
+                                }
+
+                                override fun onVerificationFailed(error: FirebaseException) {
+                                    val detail = error.message.orEmpty().lowercase(Locale.ROOT)
+                                    report(null, when {
+                                        detail.contains("quota") -> "SMS kotası aşıldı. Daha sonra tekrar dene."
+                                        detail.contains("invalid phone") -> "Telefon numarası geçersiz."
+                                        detail.contains("billing") -> "Firebase telefon doğrulaması için faturalandırma ayarı gerekiyor."
+                                        else -> "SMS doğrulaması başlatılamadı. Firebase Phone Auth ayarlarını kontrol et."
+                                    })
+                                }
+
+                                override fun onCodeSent(
+                                    verificationId: String,
+                                    token: PhoneAuthProvider.ForceResendingToken
+                                ) {
+                                    report(verificationId, "SMS kodu gönderildi. Mesajdaki kodu gir.")
+                                }
+                            })
+                            .build()
+                        PhoneAuthProvider.verifyPhoneNumber(options)
+                    }
+                }
+            }
+            val confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit =
+                { verificationId, code, report ->
+                    if (code.length !in 4..8 || code.any { !it.isDigit() }) {
+                        report("SMS kodunu doğru biçimde gir.")
+                    } else {
+                        val credential = PhoneAuthProvider.getCredential(verificationId, code)
+                        updatePhoneCredential(credential, report)
+                    }
+                }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
                 background = Color(0xFF0B0D14), surface = Color(0xFF171C2A),
@@ -1245,6 +1492,8 @@ class MainActivity : ComponentActivity() {
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
+                    emailVerified = emailVerified,
+                    googleLinked = googleLinked,
                     firebaseUserId = auth.currentUser?.uid,
                     initialPcBridgeUrl = prefs.getString("pc_bridge_url_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
                     initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "meyene") ?: "meyene",
@@ -1331,6 +1580,8 @@ class MainActivity : ComponentActivity() {
                                             email = user.email.orEmpty()
                                             phone = user.phoneNumber.orEmpty()
                                             photoUrl = user.photoUrl?.toString().orEmpty()
+                                            emailVerified = user.isEmailVerified
+                                            googleLinked = user.providerData.any { it.providerId == "google.com" }
                                             signedIn = true
                                             saveFirebaseProfile(user, "password", false) { firestoreError ->
                                                 val message = if (firestoreError == null) {
@@ -1376,6 +1627,8 @@ class MainActivity : ComponentActivity() {
                                                 email = activeUser.email.orEmpty()
                                                 phone = activeUser.phoneNumber.orEmpty()
                                                 photoUrl = activeUser.photoUrl?.toString().orEmpty()
+                                                emailVerified = activeUser.isEmailVerified
+                                                googleLinked = activeUser.providerData.any { it.providerId == "google.com" }
                                                 signedIn = true
                                                 activeUser.sendEmailVerification().addOnCompleteListener { verifyTask ->
                                                     saveFirebaseProfile(
@@ -1413,9 +1666,16 @@ class MainActivity : ComponentActivity() {
                         email = ""
                         phone = ""
                         photoUrl = ""
+                        emailVerified = false
+                        googleLinked = false
                         googleStatus = null
                     },
                     googleLogin = startGoogleSignIn,
+                    refreshEmailVerification = refreshEmailVerification,
+                    resendEmailVerification = resendEmailVerification,
+                    uploadProfilePhoto = uploadProfilePhoto,
+                    requestPhoneVerification = requestPhoneVerification,
+                    confirmPhoneVerification = confirmPhoneVerification,
                     selectSavedGoogleAccount = selectSavedGoogleAccount,
                     savedGoogleAccounts = savedGoogleAccounts,
                     googleStatus = googleStatus,
@@ -1565,7 +1825,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, photoUrl: String, firebaseUserId: String?,
+    email: String, phone: String, photoUrl: String, emailVerified: Boolean, googleLinked: Boolean,
+    firebaseUserId: String?,
     initialPcBridgeUrl: String,
     initialPcBridgeToken: String,
     savePcBridgeSettings: (String, String) -> Unit,
@@ -1574,7 +1835,12 @@ private fun AssistantScreen(
     sendRemoteCommand: (String, String, Map<String, Any>, (String, String?) -> Unit) -> Unit,
     photoImageLoader: ImageLoader, login: (String, String, (String) -> Unit) -> Unit,
     register: (String, String, String, (String) -> Unit) -> Unit, logout: () -> Unit,
-    googleLogin: () -> Unit,
+    googleLogin: (GoogleAuthMode) -> Unit,
+    refreshEmailVerification: ((String) -> Unit) -> Unit,
+    resendEmailVerification: ((String) -> Unit) -> Unit,
+    uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
+    requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
+    confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
     selectSavedGoogleAccount: (String) -> Unit,
     savedGoogleAccounts: List<SavedGoogleAccount>,
     googleStatus: String?,
@@ -1586,6 +1852,14 @@ private fun AssistantScreen(
     var drawer by remember { mutableStateOf(false) }
     var showExitConfirmation by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
+    var authRegisterMode by remember { mutableStateOf(false) }
+    LaunchedEffect(googleStatus) {
+        val authMessage = googleStatus.orEmpty()
+        if (authMessage.contains("hesap bulunamadı", ignoreCase = true) ||
+            authMessage.contains("kayıtlı bir MynAssistant hesabı bulunamadı", ignoreCase = true)) {
+            authRegisterMode = true
+        }
+    }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var editingDeviceNameId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -2502,8 +2776,9 @@ private fun AssistantScreen(
                     }
                 } else {
                     Text(when (page) {
-                        Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap"
+                        Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol"
                         Page.REGISTER -> "Kayıt ol"
+                        Page.AUTH -> "Hesap ekle"
                         Page.DEVICES -> "Cihazlarım"
                         Page.SETTINGS -> "Ayarlar"
                         Page.REMOTE -> "PC Kumandası"
@@ -2513,27 +2788,52 @@ private fun AssistantScreen(
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
                         Page.LOGIN -> if (signedIn) {
-                            Text("Oturum açık", color = MaterialTheme.colorScheme.secondary)
-                            Text("Ad: " + name)
-                            Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-                            OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.REGISTER) })
+                            AccountSettings(
+                                name = name, email = email, phone = phone, photoUrl = photoUrl,
+                                emailVerified = emailVerified, googleLinked = googleLinked,
+                                googleStatus = googleStatus,
+                                photoImageLoader = photoImageLoader, googleLogin = googleLogin,
+                                refreshEmailVerification = refreshEmailVerification,
+                                resendEmailVerification = resendEmailVerification,
+                                uploadProfilePhoto = uploadProfilePhoto,
+                                requestPhoneVerification = requestPhoneVerification,
+                                confirmPhoneVerification = confirmPhoneVerification,
+                                logout = logout
+                            )
+                        } else {
+                            AuthForm(
+                                registerMode = authRegisterMode, login = login, register = register,
+                                googleLogin = googleLogin, googleStatus = googleStatus,
+                                onRegisterModeChange = { authRegisterMode = it }
+                            )
+                        }
                         Page.REGISTER -> if (signedIn) {
-                            Text("Oturum açık.", color = MaterialTheme.colorScheme.secondary)
-                            Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-                            OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.LOGIN) })
+                            AccountSettings(
+                                name = name, email = email, phone = phone, photoUrl = photoUrl,
+                                emailVerified = emailVerified, googleLinked = googleLinked,
+                                googleStatus = googleStatus,
+                                photoImageLoader = photoImageLoader, googleLogin = googleLogin,
+                                refreshEmailVerification = refreshEmailVerification,
+                                resendEmailVerification = resendEmailVerification,
+                                uploadProfilePhoto = uploadProfilePhoto,
+                                requestPhoneVerification = requestPhoneVerification,
+                                confirmPhoneVerification = confirmPhoneVerification,
+                                logout = logout
+                            )
+                        } else {
+                            AuthForm(
+                                registerMode = true, login = login, register = register,
+                                googleLogin = googleLogin, googleStatus = googleStatus,
+                                onRegisterModeChange = { authRegisterMode = it }
+                            )
+                        }
+                        Page.AUTH -> {
+                            AuthForm(
+                                registerMode = authRegisterMode, login = login, register = register,
+                                googleLogin = googleLogin, googleStatus = googleStatus,
+                                onRegisterModeChange = { authRegisterMode = it }
+                            )
+                        }
                         Page.DEVICES -> {
                             Text(
                                 if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
@@ -2542,7 +2842,7 @@ private fun AssistantScreen(
                                 fontSize = 14.sp
                             )
                             if (!signedIn) {
-                                Button(onClick = { navigateToPage(Page.LOGIN) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else {
                                 Text(
                                     "Windows uygulaması aynı hesapla giriş yaptığında bilgisayarın burada otomatik görünür. Ek bağlantı bilgisi girmen gerekmez.",
@@ -2808,7 +3108,7 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
                             if (!signedIn) {
-                                Button(onClick = { navigateToPage(Page.LOGIN) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
                             } else if (connectedDevices.isEmpty()) {
@@ -3728,7 +4028,7 @@ private fun AssistantScreen(
                                         }
                                     }
                                     HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                                    TextButton(onClick = { accountListExpanded = false; googleLogin() },
+                                    TextButton(onClick = { accountListExpanded = false; navigateToPage(Page.AUTH) },
                                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                                         Icon(Icons.Default.PersonAdd, contentDescription = null)
                                         Spacer(Modifier.width(8.dp))
@@ -3751,15 +4051,17 @@ private fun AssistantScreen(
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         DrawerItem("Ana sayfa") { navigateToPage(Page.HOME) }
-                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap") { navigateToPage(Page.LOGIN); drawer = false }
-                        if (!signedIn) DrawerItem("Kayıt ol") { navigateToPage(Page.REGISTER); drawer = false }
+                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol") {
+                            navigateToPage(if (signedIn) Page.LOGIN else Page.AUTH)
+                            drawer = false
+                        }
                         DrawerItem("Cihazlarım") { navigateToPage(Page.DEVICES); drawer = false }
                         DrawerItem("Ayarlar") { navigateToPage(Page.SETTINGS); drawer = false }
                         DrawerItem("PC Kumandası") { navigateToPage(Page.REMOTE); drawer = false }
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.4.4", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.5.6", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -3787,13 +4089,267 @@ private fun DrawerItem(label: String, action: () -> Unit) {
 }
 
 @Composable
+private fun AccountSettings(
+    name: String,
+    email: String,
+    phone: String,
+    photoUrl: String,
+    emailVerified: Boolean,
+    googleLinked: Boolean,
+    googleStatus: String?,
+    photoImageLoader: ImageLoader,
+    googleLogin: (GoogleAuthMode) -> Unit,
+    refreshEmailVerification: ((String) -> Unit) -> Unit,
+    resendEmailVerification: ((String) -> Unit) -> Unit,
+    uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
+    requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
+    confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
+    logout: () -> Unit
+) {
+    var phoneDraft by remember(phone) { mutableStateOf(phone) }
+    var verificationId by remember { mutableStateOf<String?>(null) }
+    var smsCode by remember { mutableStateOf("") }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) uploadProfilePhoto(uri) { statusMessage = it }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                if (photoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = photoUrl,
+                        imageLoader = photoImageLoader,
+                        contentDescription = "Profil fotoğrafı",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(76.dp).clip(CircleShape)
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier.size(76.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = "Profil fotoğrafı yok",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(56.dp)
+                            )
+                        }
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(name.ifBlank { email.substringBefore("@") }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(email.ifBlank { "E-posta eklenmemiş" }, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                    OutlinedButton(
+                        onClick = {
+                            photoPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Fotoğraf yükle")
+                    }
+                }
+            }
+
+            googleStatus?.let { status ->
+                Text(status, fontSize = 12.sp, color = when {
+                    status.contains("başarı", ignoreCase = true) ||
+                        status.contains("bağlandı", ignoreCase = true) -> Color(0xFF2D9B62)
+                    status.contains("hata", ignoreCase = true) ||
+                        status.contains("kullanılıyor", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.secondary
+                })
+            }
+
+            HorizontalDivider()
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    if (emailVerified) Icons.Default.Verified else Icons.Default.Email,
+                    contentDescription = null,
+                    tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(26.dp)
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("E-posta doğrulaması", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (emailVerified) "E-posta adresi doğrulandı" else "E-posta adresi henüz doğrulanmadı",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                    )
+                }
+                Icon(
+                    if (emailVerified) Icons.Default.CheckCircle else Icons.Default.Refresh,
+                    contentDescription = if (emailVerified) "Doğrulandı" else "Durumu yenile",
+                    tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.primary
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { refreshEmailVerification { statusMessage = it } },
+                    modifier = Modifier.weight(1f)
+                ) { Text("Durumu yenile") }
+                if (!emailVerified) {
+                    Button(
+                        onClick = { resendEmailVerification { statusMessage = it } },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Doğrulama gönder") }
+                }
+            }
+
+            HorizontalDivider()
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                GoogleGLogo(Modifier.size(26.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Google hesabı", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (googleLinked) "Bağlandı" else "Bu hesaba henüz bağlanmadı",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                    )
+                }
+                Icon(
+                    if (googleLinked) Icons.Default.CheckCircle else Icons.Default.LinkOff,
+                    contentDescription = if (googleLinked) "Google bağlı" else "Google bağlı değil",
+                    tint = if (googleLinked) Color(0xFF2D9B62) else MaterialTheme.colorScheme.secondary
+                )
+            }
+            if (!googleLinked) {
+                OutlinedButton(
+                    onClick = { googleLogin(GoogleAuthMode.LINK) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Link, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Google hesabını bağla")
+                }
+            }
+
+            HorizontalDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Telefon numarası", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (phone.isNotBlank()) "Doğrulanmış numara: $phone" else "SMS koduyla doğrulayarak numara ekle.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                )
+                OutlinedTextField(
+                    value = phoneDraft,
+                    onValueChange = { phoneDraft = it.take(22) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = verificationId == null,
+                    label = { Text("Telefon (+90...)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                )
+                if (verificationId == null) {
+                    Button(
+                        onClick = {
+                            requestPhoneVerification(phoneDraft) { id, message ->
+                                if (!id.isNullOrBlank()) {
+                                    verificationId = id
+                                    smsCode = ""
+                                }
+                                statusMessage = message
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("SMS doğrulama kodu gönder") }
+                } else {
+                    OutlinedTextField(
+                        value = smsCode,
+                        onValueChange = { smsCode = it.filter(Char::isDigit).take(8) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("SMS doğrulama kodu") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { verificationId = null; smsCode = ""; statusMessage = null },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("İptal") }
+                        Button(
+                            onClick = {
+                                confirmPhoneVerification(verificationId.orEmpty(), smsCode) {
+                                    statusMessage = it
+                                    if (it.contains("doğrulandı", ignoreCase = true)) {
+                                        verificationId = null
+                                        smsCode = ""
+                                    }
+                                }
+                            },
+                            enabled = smsCode.length in 4..8,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Kodu doğrula") }
+                    }
+                }
+            }
+
+            statusMessage?.let {
+                Text(
+                    it,
+                    fontSize = 13.sp,
+                    color = if (it.contains("başarı", ignoreCase = true) ||
+                        it.contains("doğrulandı", ignoreCase = true) ||
+                        it.contains("gönderildi", ignoreCase = true)) {
+                        Color(0xFF2D9B62)
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    }
+                )
+            }
+
+            OutlinedButton(onClick = logout, modifier = Modifier.fillMaxWidth()) {
+                Text("Çıkış yap")
+            }
+        }
+    }
+}
+
+@Composable
 private fun AuthForm(
     registerMode: Boolean,
-    login: (String, String, (String) -> Unit) -> Unit = { _, _, done -> done("Giriş işlemi yapılandırılmadı.") },
-    register: (String, String, String, (String) -> Unit) -> Unit = { _, _, _, done -> done("Kayıt işlemi yapılandırılmadı.") },
-    googleLogin: () -> Unit = {},
+    login: (String, String, (String) -> Unit) -> Unit,
+    register: (String, String, String, (String) -> Unit) -> Unit,
+    googleLogin: (GoogleAuthMode) -> Unit,
     googleStatus: String? = null,
-    goRegister: () -> Unit
+    onRegisterModeChange: (Boolean) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var identity by remember { mutableStateOf("") }
@@ -3801,36 +4357,94 @@ private fun AuthForm(
     var message by remember { mutableStateOf<String?>(null) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (registerMode) OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Ad soyad") }, singleLine = true)
-            OutlinedTextField(identity, { identity = it }, Modifier.fillMaxWidth(), label = { Text("E-posta adresi") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-            OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Şifre (en az 6 karakter)") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (registerMode) {
+                    OutlinedButton(onClick = { onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
+                        Text("Giriş yap")
+                    }
+                    Button(onClick = { onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
+                        Text("Kayıt ol")
+                    }
+                } else {
+                    Button(onClick = { onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
+                        Text("Giriş yap")
+                    }
+                    OutlinedButton(onClick = { onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
+                        Text("Kayıt ol")
+                    }
+                }
+            }
+            if (registerMode) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.take(80) },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Ad soyad") }, singleLine = true
+                )
+            }
+            OutlinedTextField(
+                value = identity, onValueChange = { identity = it.take(254) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("E-posta adresi") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+            )
+            OutlinedTextField(
+                value = password, onValueChange = { password = it.take(128) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("Şifre (en az 6 karakter)") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
+            )
             Button(
                 onClick = {
-                    message = "İşlem yapılıyor..."
-                    if (registerMode) {
-                        register(name, identity, password) { message = it }
-                    } else {
-                        login(identity, password) { message = it }
-                    }
+                    message = "İşlem başlatıldı…"
+                    if (registerMode) register(name, identity, password) { message = it }
+                    else login(identity, password) { message = it }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (registerMode) "Kayıt ol" else "Giriş yap")
+                Text(if (registerMode) "E-posta ile kayıt ol" else "E-posta ile giriş yap")
             }
-            OutlinedButton(onClick = googleLogin, modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GoogleGLogo(Modifier.size(20.dp))
-                    Text("Google ile devam et")
-                }
+
+            HorizontalDivider()
+
+            OutlinedButton(
+                onClick = { googleLogin(GoogleAuthMode.REGISTER) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                GoogleGLogo(Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Google ile kayıt ol")
             }
-            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-            TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
+            OutlinedButton(
+                onClick = { googleLogin(GoogleAuthMode.LOGIN) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                GoogleGLogo(Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Google ile giriş yap")
+            }
+
+            googleStatus?.let { status ->
+                Text(
+                    status,
+                    color = when {
+                        status.contains("başarı", ignoreCase = true) ||
+                            status.contains("oluşturuldu", ignoreCase = true) ||
+                            status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF2D9B62)
+                        status.contains("hata", ignoreCase = true) ||
+                            status.contains("bulunamadı", ignoreCase = true) ||
+                            status.contains("geçersiz", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
+                    },
+                    fontSize = 12.sp
+                )
+            }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
-            Text("Hesabını tamamlamak için e-posta kutuna gönderilen doğrulama bağlantısını aç.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+            Text(
+                "E-posta ile kayıt olduktan sonra hesabını doğrulamak için gelen bağlantıyı aç.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f)
+            )
         }
     }
 }
@@ -3976,7 +4590,8 @@ private fun TvRemotePanel(
                         val upperLeftCluster = (1f - upperLeftDistance).coerceIn(0f, 1f)
                         val lowerRightCluster = (1f - lowerRightDistance).coerceIn(0f, 1f)
                         val visibility = maxOf(upperLeftCluster, lowerRightCluster)
-                        if (visibility > .08f) {
+                        val behindTitle = x < 112.dp.toPx() && y < 42.dp.toPx()
+                        if (visibility > .08f && !behindTitle) {
                             val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
                             val radius = (0.72f + visibility * 1.25f + wave * .52f).dp.toPx()
                             val alpha = (0.10f + visibility * .25f + wave * .035f).coerceIn(.10f, .38f)
