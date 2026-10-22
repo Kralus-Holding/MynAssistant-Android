@@ -68,8 +68,8 @@ jobs:
           grep -q 'sherpa-onnx' app/build.gradle.kts
           grep -q 'android:name=".MynWakeWordService"' app/src/main/AndroidManifest.xml
           grep -q 'android:name=".MynAssistantAccessibilityService"' app/src/main/AndroidManifest.xml
-          grep -q 'versionCode = 27' app/build.gradle.kts
-          grep -q 'versionName = "0.5.0"' app/build.gradle.kts
+          grep -q 'versionCode = 28' app/build.gradle.kts
+          grep -q 'versionName = "0.5.1"' app/build.gradle.kts
           APK_SIZE=$(stat -c%s app/build/outputs/apk/debug/app-debug.apk)
           echo "Verified APK bytes: $APK_SIZE"
           if [ "$APK_SIZE" -lt 100000000 ]; then
