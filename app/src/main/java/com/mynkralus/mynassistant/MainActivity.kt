@@ -2771,8 +2771,9 @@ private fun AssistantScreen(
                     }
                 } else {
                     Text(when (page) {
-                        Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap"
+                        Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol"
                         Page.REGISTER -> "Kayıt ol"
+                        Page.AUTH -> "Hesap ekle"
                         Page.DEVICES -> "Cihazlarım"
                         Page.SETTINGS -> "Ayarlar"
                         Page.REMOTE -> "PC Kumandası"
@@ -2782,27 +2783,50 @@ private fun AssistantScreen(
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
                         Page.LOGIN -> if (signedIn) {
-                            Text("Oturum açık", color = MaterialTheme.colorScheme.secondary)
-                            Text("Ad: " + name)
-                            Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-                            OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.REGISTER) })
+                            AccountSettings(
+                                name = name, email = email, phone = phone, photoUrl = photoUrl,
+                                emailVerified = emailVerified, googleLinked = googleLinked,
+                                photoImageLoader = photoImageLoader, googleLogin = googleLogin,
+                                refreshEmailVerification = refreshEmailVerification,
+                                resendEmailVerification = resendEmailVerification,
+                                uploadProfilePhoto = uploadProfilePhoto,
+                                requestPhoneVerification = requestPhoneVerification,
+                                confirmPhoneVerification = confirmPhoneVerification,
+                                logout = logout
+                            )
+                        } else {
+                            AuthForm(
+                                registerMode = authRegisterMode, login = login, register = register,
+                                googleLogin = googleLogin, googleStatus = googleStatus,
+                                onRegisterModeChange = { authRegisterMode = it }
+                            )
+                        }
                         Page.REGISTER -> if (signedIn) {
-                            Text("Oturum açık.", color = MaterialTheme.colorScheme.secondary)
-                            Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-                            OutlinedButton(onClick = logout) { Text("Çıkış yap") }
-                        } else AuthForm(true, register = register, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.LOGIN) })
+                            AccountSettings(
+                                name = name, email = email, phone = phone, photoUrl = photoUrl,
+                                emailVerified = emailVerified, googleLinked = googleLinked,
+                                photoImageLoader = photoImageLoader, googleLogin = googleLogin,
+                                refreshEmailVerification = refreshEmailVerification,
+                                resendEmailVerification = resendEmailVerification,
+                                uploadProfilePhoto = uploadProfilePhoto,
+                                requestPhoneVerification = requestPhoneVerification,
+                                confirmPhoneVerification = confirmPhoneVerification,
+                                logout = logout
+                            )
+                        } else {
+                            AuthForm(
+                                registerMode = true, login = login, register = register,
+                                googleLogin = googleLogin, googleStatus = googleStatus,
+                                onRegisterModeChange = { authRegisterMode = it }
+                            )
+                        }
+                        Page.AUTH -> {
+                            AuthForm(
+                                registerMode = authRegisterMode, login = login, register = register,
+                                googleLogin = googleLogin, googleStatus = googleStatus,
+                                onRegisterModeChange = { authRegisterMode = it }
+                            )
+                        }
                         Page.DEVICES -> {
                             Text(
                                 if (signedIn) "Yalnızca bu hesaba ait cihazlar burada görünür."
@@ -2811,7 +2835,7 @@ private fun AssistantScreen(
                                 fontSize = 14.sp
                             )
                             if (!signedIn) {
-                                Button(onClick = { navigateToPage(Page.LOGIN) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else {
                                 Text(
                                     "Windows uygulaması aynı hesapla giriş yaptığında bilgisayarın burada otomatik görünür. Ek bağlantı bilgisi girmen gerekmez.",
@@ -3077,7 +3101,7 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
                             if (!signedIn) {
-                                Button(onClick = { navigateToPage(Page.LOGIN) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap") }
+                                Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
                             } else if (connectedDevices.isEmpty()) {
@@ -3997,7 +4021,7 @@ private fun AssistantScreen(
                                         }
                                     }
                                     HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                                    TextButton(onClick = { accountListExpanded = false; googleLogin() },
+                                    TextButton(onClick = { accountListExpanded = false; navigateToPage(Page.AUTH) },
                                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                                         Icon(Icons.Default.PersonAdd, contentDescription = null)
                                         Spacer(Modifier.width(8.dp))
@@ -4020,15 +4044,17 @@ private fun AssistantScreen(
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         DrawerItem("Ana sayfa") { navigateToPage(Page.HOME) }
-                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap") { navigateToPage(Page.LOGIN); drawer = false }
-                        if (!signedIn) DrawerItem("Kayıt ol") { navigateToPage(Page.REGISTER); drawer = false }
+                        DrawerItem(if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol") {
+                            navigateToPage(if (signedIn) Page.LOGIN else Page.AUTH)
+                            drawer = false
+                        }
                         DrawerItem("Cihazlarım") { navigateToPage(Page.DEVICES); drawer = false }
                         DrawerItem("Ayarlar") { navigateToPage(Page.SETTINGS); drawer = false }
                         DrawerItem("PC Kumandası") { navigateToPage(Page.REMOTE); drawer = false }
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.4.4", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.5.5", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
