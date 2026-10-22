@@ -1309,6 +1309,7 @@ class MainActivity : ComponentActivity() {
                     .requestEmail().requestProfile().requestIdToken(WEB_CLIENT_ID)
                     .setAccountName(selectedEmail).build()
                 val client = GoogleSignIn.getClient(this@MainActivity, options)
+                googleAuthMode = GoogleAuthMode.LOGIN
                 client.signOut().addOnCompleteListener { googleLauncher.launch(client.signInIntent) }
             }
             val refreshEmailVerification: ((String) -> Unit) -> Unit = { report ->
@@ -4572,7 +4573,8 @@ private fun TvRemotePanel(
                         val upperLeftCluster = (1f - upperLeftDistance).coerceIn(0f, 1f)
                         val lowerRightCluster = (1f - lowerRightDistance).coerceIn(0f, 1f)
                         val visibility = maxOf(upperLeftCluster, lowerRightCluster)
-                        if (visibility > .08f) {
+                        val behindTitle = x < 112.dp.toPx() && y < 42.dp.toPx()
+                        if (visibility > .08f && !behindTitle) {
                             val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
                             val radius = (0.72f + visibility * 1.25f + wave * .52f).dp.toPx()
                             val alpha = (0.10f + visibility * .25f + wave * .035f).coerceIn(.10f, .38f)
