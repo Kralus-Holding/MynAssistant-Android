@@ -38,7 +38,7 @@ The release line is based on the 0.4.9 app (versionCode 26) rather than the redu
 
 ## Account and auth polish (Android 0.5.7)
 
-The device-name pencil sits beside the device name; Save uses the proper save icon. Online/offline badges adapt to light and dark themes. Touchpad dots avoid the `Touchpad` title. The launcher foreground is reduced into Android's adaptive safe zone so the full original mark remains visible. The shared auth form shows only one Google action according to the selected mode. Email/password registration requires at least eight characters. Email auth feedback is shown once inside the form, not copied into the navigation drawer. The account page retains Google linking, email verification, SMS-verified phone numbers, and profile photo upload. Existing remote-control, keyboard and wake-word paths remain intact.
+The device-name pencil sits beside the device name; Save uses the proper save icon. Online/offline badges adapt to light and dark themes. Touchpad dots avoid the `Touchpad` title. The launcher foreground is reduced into Android's adaptive safe zone so the full original mark remains visible. The shared auth form shows only one Google action according to the selected mode. Email/password registration requires at least eight characters. Email auth feedback is shown once inside the form, not copied into the navigation drawer. CI asserts that only one mode-specific Google action exists, old six-character guidance is absent, and auth warnings do not render in the drawer. The account page retains Google linking, email verification, SMS-verified phone numbers, and profile photo upload. Existing remote-control, keyboard and wake-word paths remain intact.
 
 ### Firebase setup required for account extras
 
