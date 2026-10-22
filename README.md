@@ -24,3 +24,8 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 ## Current scope
 
 The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands, and an on-demand low-frame-rate JPEG desktop preview. Smooth full-screen remote desktop streaming is a later WebRTC milestone.
+
+
+## Device registration (Android)
+
+Version 0.2.2 registers the signed-in Android installation in Firestore `devices`. The record uses a per-installation ID that is hashed with the Firebase UID (the raw installation identifier is not used as the document ID). The app writes a heartbeat about once per minute while the activity is in the foreground and marks its record offline when the activity is paused or the session changes. The admin server treats records with no recent heartbeat as offline. Android presence registration does not enable Windows remote commands; those remain restricted to the `firebase-agent` connection mode.
