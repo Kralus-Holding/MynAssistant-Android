@@ -179,7 +179,9 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
         code.contains("EMAIL_ALREADY_IN_USE") -> "Bu e-posta adresiyle zaten bir hesap var. Giriş yapmayı deneyebilirsin."
         code.contains("INVALID_EMAIL") -> "Geçerli bir e-posta adresi gir."
         code.contains("WEAK_PASSWORD") -> "Daha güçlü bir şifre seç. En az 6 karakter kullan."
-        code.contains("USER_NOT_FOUND") || code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
+        code.contains("USER_NOT_FOUND") || code.contains("EMAIL_NOT_FOUND") ->
+            "Bu e-posta adresiyle hesap bulunamadı. Yeni hesap oluşturmak için 'Kayıt ol' seçeneğini kullan."
+        code.contains("INVALID_CREDENTIAL") || code.contains("WRONG_PASSWORD") ->
             "E-posta adresi veya şifre hatalı."
         code.contains("OPERATION_NOT_ALLOWED") -> "Bu giriş yöntemi şu anda kullanılamıyor. Daha sonra tekrar dene."
         code.contains("TOO_MANY_REQUESTS") -> "Çok fazla deneme yapıldı. Bir süre bekleyip tekrar dene."
@@ -1415,8 +1417,12 @@ class MainActivity : ComponentActivity() {
                                         user = fresh,
                                         provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
                                         isNewUser = false
-                                    ) {
-                                        report("Telefon numaran doğrulandı ve hesabına eklendi.")
+                                    ) { profileError ->
+                                        report(if (profileError == null) {
+                                            "Telefon numaran doğrulandı ve hesabına eklendi."
+                                        } else {
+                                            "Telefon doğrulandı ancak profil kaydı yenilenemedi. İnternet bağlantını kontrol et."
+                                        })
                                     }
                                 }
                             }
