@@ -2,7 +2,11 @@ name: Build MynAssistant Windows Agent
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "feature/windows-agent-atomic-command-claim"]
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/windows-agent.yml"
+  pull_request:
     paths:
       - "desktop-agent/**"
       - ".github/workflows/windows-agent.yml"
@@ -27,6 +31,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r desktop-agent/requirements.txt
+
+      - name: Test atomic command claiming
+        run: python -m unittest discover -s desktop-agent/tests -p "test_*.py" -v
 
       - name: Build Windows EXE
         run: |
