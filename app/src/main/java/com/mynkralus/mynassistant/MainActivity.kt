@@ -2796,7 +2796,7 @@ private fun AssistantScreen(
                             AuthForm(
                                 registerMode = authRegisterMode, login = login, register = register,
                                 googleLogin = googleLogin, googleStatus = googleStatus,
-                                onRegisterModeChange = { authRegisterMode = it }
+                                onRegisterModeChange = { authRegisterMode = it; googleStatus = null }
                             )
                         }
                         Page.REGISTER -> if (signedIn) {
@@ -2816,14 +2816,14 @@ private fun AssistantScreen(
                             AuthForm(
                                 registerMode = true, login = login, register = register,
                                 googleLogin = googleLogin, googleStatus = googleStatus,
-                                onRegisterModeChange = { authRegisterMode = it }
+                                onRegisterModeChange = { authRegisterMode = it; googleStatus = null }
                             )
                         }
                         Page.AUTH -> {
                             AuthForm(
                                 registerMode = authRegisterMode, login = login, register = register,
                                 googleLogin = googleLogin, googleStatus = googleStatus,
-                                onRegisterModeChange = { authRegisterMode = it }
+                                onRegisterModeChange = { authRegisterMode = it; googleStatus = null }
                             )
                         }
                         Page.DEVICES -> {
