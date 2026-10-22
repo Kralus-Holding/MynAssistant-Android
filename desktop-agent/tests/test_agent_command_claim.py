@@ -48,6 +48,19 @@ def firestore_doc(fields: dict, update_time: str = "2026-10-22T10:00:00.000000Z"
     }
 
 
+class FakeScreenshotImage:
+    def __init__(self, sizes_by_quality: dict[int, int]):
+        self.sizes_by_quality = sizes_by_quality
+        self.qualities_used: list[int] = []
+
+    def thumbnail(self, size: tuple[int, int]) -> None:
+        self.thumbnail_size = size
+
+    def save(self, output, format: str, quality: int, optimize: bool) -> None:
+        self.qualities_used.append(quality)
+        output.write(b"x" * self.sizes_by_quality[quality])
+
+
 class AtomicCommandClaimTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session = FakeSession()
@@ -61,6 +74,23 @@ class AtomicCommandClaimTests(unittest.TestCase):
                 "status": {"stringValue": "pending"},
             },
         }
+
+    def test_screen_frame_compresses_before_base64_firestore_expansion(self) -> None:
+        image = FakeScreenshotImage({45: 600_001, 30: 500_000})
+        with mock.patch.object(agent.pyautogui, "screenshot", return_value=image):
+            encoded = agent.capture_screen_base64()
+
+        import base64
+        self.assertEqual(image.qualities_used, [45, 30])
+        self.assertEqual(len(base64.b64decode(encoded)), 500_000)
+        self.assertLessEqual(len(encoded), 700_000)
+
+    def test_screen_frame_is_rejected_if_low_quality_still_too_large(self) -> None:
+        image = FakeScreenshotImage({45: 800_001, 30: 700_001})
+        with mock.patch.object(agent.pyautogui, "screenshot", return_value=image):
+            with self.assertRaisesRegex(RuntimeError, "Firestore belge boyutu"):
+                agent.capture_screen_base64()
+        self.assertEqual(image.qualities_used, [45, 30])
 
     def test_patch_includes_firestore_update_time_precondition(self) -> None:
         with mock.patch.object(agent.requests, "patch", return_value=FakeResponse(200, {})) as patch:
