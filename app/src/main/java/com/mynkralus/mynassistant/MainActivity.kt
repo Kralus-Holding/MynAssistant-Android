@@ -1853,6 +1853,13 @@ private fun AssistantScreen(
     var showExitConfirmation by remember { mutableStateOf(false) }
     var accountListExpanded by remember { mutableStateOf(false) }
     var authRegisterMode by remember { mutableStateOf(false) }
+    LaunchedEffect(googleStatus) {
+        val authMessage = googleStatus.orEmpty()
+        if (authMessage.contains("hesap bulunamadı", ignoreCase = true) ||
+            authMessage.contains("kayıtlı bir MynAssistant hesabı bulunamadı", ignoreCase = true)) {
+            authRegisterMode = true
+        }
+    }
     var devices by remember(firebaseUserId) { mutableStateOf<List<PcDevice>>(emptyList()) }
     var deviceNameDrafts by remember(firebaseUserId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var editingDeviceNameId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -2784,6 +2791,7 @@ private fun AssistantScreen(
                             AccountSettings(
                                 name = name, email = email, phone = phone, photoUrl = photoUrl,
                                 emailVerified = emailVerified, googleLinked = googleLinked,
+                                googleStatus = googleStatus,
                                 photoImageLoader = photoImageLoader, googleLogin = googleLogin,
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
@@ -2803,6 +2811,7 @@ private fun AssistantScreen(
                             AccountSettings(
                                 name = name, email = email, phone = phone, photoUrl = photoUrl,
                                 emailVerified = emailVerified, googleLinked = googleLinked,
+                                googleStatus = googleStatus,
                                 photoImageLoader = photoImageLoader, googleLogin = googleLogin,
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
@@ -4087,6 +4096,7 @@ private fun AccountSettings(
     photoUrl: String,
     emailVerified: Boolean,
     googleLinked: Boolean,
+    googleStatus: String?,
     photoImageLoader: ImageLoader,
     googleLogin: (GoogleAuthMode) -> Unit,
     refreshEmailVerification: ((String) -> Unit) -> Unit,
@@ -4161,6 +4171,16 @@ private fun AccountSettings(
                         Text("Fotoğraf yükle")
                     }
                 }
+            }
+
+            googleStatus?.let { status ->
+                Text(status, fontSize = 12.sp, color = when {
+                    status.contains("başarı", ignoreCase = true) ||
+                        status.contains("bağlandı", ignoreCase = true) -> Color(0xFF2D9B62)
+                    status.contains("hata", ignoreCase = true) ||
+                        status.contains("kullanılıyor", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.secondary
+                })
             }
 
             HorizontalDivider()
