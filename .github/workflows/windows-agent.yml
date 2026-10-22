@@ -2,18 +2,23 @@ name: Build MynAssistant Windows Agent
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "feature/windows-agent-atomic-command-claim"]
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/windows-agent.yml"
+  pull_request:
     paths:
       - "desktop-agent/**"
       - ".github/workflows/windows-agent.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -28,6 +33,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r desktop-agent/requirements.txt
 
+      - name: Test atomic command claiming
+        run: python -m unittest discover -s desktop-agent/tests -p "test_*.py" -v
+
+      - name: Validate Python syntax
+        run: python -m py_compile desktop-agent/agent.py desktop-agent/tests/test_agent_command_claim.py
+
       - name: Build Windows EXE
         run: |
           pyinstaller --noconfirm --clean --onefile --console --name MynAssistantAgent --collect-all google_auth_oauthlib --collect-all google.auth --hidden-import win32crypt desktop-agent/agent.py
@@ -39,11 +50,25 @@ jobs:
           Copy-Item dist/MynAssistantAgent.exe package/
           Copy-Item desktop-agent/README.md package/README.txt
           Compress-Archive -Path package/* -DestinationPath MynAssistant-Windows-Agent.zip -Force
+          if ((Get-Item MynAssistant-Windows-Agent.zip).Length -lt 1000000) {
+            throw "The Windows Agent package is unexpectedly small."
+          }
+          Get-FileHash MynAssistant-Windows-Agent.zip -Algorithm SHA256 | Format-List
 
-      - name: Upload Windows Agent package
-        uses: actions/upload-artifact@v4
+      - name: Publish test build as a prerelease asset
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
         with:
-          name: MynAssistant-Windows-Agent
-          path: MynAssistant-Windows-Agent.zip
-          if-no-files-found: error
-          retention-days: 7
+          tag_name: mynassistant-windows-agent-${{ github.sha }}
+          name: MynAssistant Windows Agent test ${{ github.sha }}
+          body: |
+            Automated test build from branch: ${{ github.ref_name }}
+
+            This is a prerelease build. Unit tests and PyInstaller packaging completed in GitHub Actions.
+            Download the ZIP asset and review desktop-agent/README.md instructions before using it.
+          prerelease: true
+          make_latest: false
+          files: MynAssistant-Windows-Agent.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

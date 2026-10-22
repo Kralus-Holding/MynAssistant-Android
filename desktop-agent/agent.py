@@ -227,10 +227,19 @@ class FirebaseSession:
         return {"Authorization": f"Bearer {self.id_token}", "Content-Type": "application/json"}
 
 
-def firestore_patch(session: FirebaseSession, document_path: str, fields: dict, update_mask: list[str] | None = None):
+def firestore_patch(
+    session: FirebaseSession,
+    document_path: str,
+    fields: dict,
+    update_mask: list[str] | None = None,
+    current_document_update_time: str | None = None,
+):
     params = []
     if update_mask:
         params.extend(("updateMask.fieldPaths", field) for field in update_mask)
+    if current_document_update_time:
+        # Firestore's updateTime precondition provides compare-and-swap semantics.
+        params.append(("currentDocument.updateTime", current_document_update_time))
     response = requests.patch(
         f"{FIRESTORE}/{document_path}",
         params=params,
@@ -375,7 +384,14 @@ def fetch_owner_commands(session: FirebaseSession) -> list[dict]:
     return documents
 
 
-def update_command(session: FirebaseSession, document: dict, status: str, result: str) -> None:
+def update_command(
+    session: FirebaseSession,
+    document: dict,
+    status: str,
+    result: str,
+    expected_update_time: str | None = None,
+    extra_fields: dict | None = None,
+) -> None:
     full_name = document.get("name", "")
     marker = "/documents/"
     if marker not in full_name:
@@ -386,7 +402,65 @@ def update_command(session: FirebaseSession, document: dict, status: str, result
         "result": encode_string(result[:800]),
         "processedAt": encode_timestamp(),
     }
-    firestore_patch(session, document_path, fields, update_mask=["status", "result", "processedAt"])
+    if extra_fields:
+        fields.update(extra_fields)
+    update_mask = ["status", "result", "processedAt"]
+    if extra_fields:
+        update_mask.extend(extra_fields.keys())
+    firestore_patch(
+        session,
+        document_path,
+        fields,
+        update_mask=update_mask,
+        current_document_update_time=expected_update_time,
+    )
+
+
+def claim_pending_command(session: FirebaseSession, document: dict, device_id: str) -> bool:
+    # Never run a command if its Firestore version cannot be checked. This prevents
+    # a stale "pending" snapshot from overriding a cancellation written by the panel.
+    update_time = document.get("updateTime")
+    full_name = document.get("name", "")
+    marker = "/documents/"
+    if not isinstance(update_time, str) or not update_time or marker not in full_name:
+        print("[Command] Missing update time; command was not executed.")
+        return False
+
+    document_path = full_name.split(marker, 1)[1]
+    claim_token = uuid.uuid4().hex
+    try:
+        update_command(
+            session,
+            document,
+            "running",
+            "Windows Agent komutu güvenli şekilde sahiplendi.",
+            expected_update_time=update_time,
+            extra_fields={
+                "claimToken": encode_string(claim_token),
+                "claimedByDeviceId": encode_string(device_id),
+            },
+        )
+        return True
+    except Exception as claim_error:
+        # A network timeout can happen after Firestore accepted the write. Read back
+        # the document and proceed only if this exact claim token won the race.
+        print(f"[Command] Claim response uncertain; verifying Firestore state: {claim_error}")
+        try:
+            response = requests.get(
+                f"{FIRESTORE}/{document_path}",
+                headers=session.headers(),
+                timeout=15,
+            )
+            if response.status_code < 400:
+                current = decode_document(response.json())
+                return (
+                    current.get("status") == "running"
+                    and current.get("claimToken") == claim_token
+                    and current.get("claimedByDeviceId") == device_id
+                )
+        except Exception as read_error:
+            print(f"[Command] Claim verification failed; command was not executed: {read_error}")
+        return False
 
 
 def press_virtual_key(vk: int, repeat: int = 1) -> None:
@@ -614,9 +688,19 @@ def run_agent() -> int:
                         continue
                     command = str(fields.get("command") or "")
                     if not command_is_supported(command):
-                        update_command(session, document, "failed", "Desteklenmeyen komut.")
+                        try:
+                            update_command(
+                                session,
+                                document,
+                                "failed",
+                                "Desteklenmeyen komut.",
+                                expected_update_time=document.get("updateTime"),
+                            )
+                        except Exception as claim_error:
+                            print(f"[Komut] Geçersiz komutun durumu değişmiş olabilir; kayıt güncellenmedi: {claim_error}")
                         continue
-                    update_command(session, document, "running", "Windows Agent komutu çalıştırıyor.")
+                    if not claim_pending_command(session, document, device_id):
+                        continue
                     try:
                         result = execute_command(command, fields)
                         status = "failed" if result.startswith("Desteklenmeyen komut") else "completed"
