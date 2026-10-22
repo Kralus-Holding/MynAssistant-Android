@@ -319,12 +319,15 @@ def capture_screen_base64() -> str:
     output = io.BytesIO()
     image.save(output, format="JPEG", quality=45, optimize=True)
     payload = output.getvalue()
-    if len(payload) > 800_000:
+    # Firestore document size includes base64 expansion (~4/3) and field
+    # overhead. Keep the raw JPEG below 700 KB so the encoded value stays
+    # comfortably under the 1 MiB document limit.
+    if len(payload) > 560_000:
         output = io.BytesIO()
         image.save(output, format="JPEG", quality=30, optimize=True)
         payload = output.getvalue()
-    if len(payload) > 900_000:
-        raise RuntimeError("Ekran görüntüsü Firestore belge sınırına sığmıyor.")
+    if len(payload) > 700_000:
+        raise RuntimeError("Ekran görüntüsü Firestore belge boyutu sınırına yaklaşıyor; kare güvenli boyut sınırının altında üretilmedi.")
     return base64.b64encode(payload).decode("ascii")
 
 
