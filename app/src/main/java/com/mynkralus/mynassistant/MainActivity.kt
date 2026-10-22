@@ -3952,14 +3952,9 @@ private fun TvRemotePanel(
                     y += spacing
                     rowIndex++
                 }
-            }
-
-            if (!mouseEnabled || !touchpadEnabled) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = if (!mouseEnabled) .10f else .14f))
-                )
+                if (!mouseEnabled || !touchpadEnabled) {
+                    drawRect(Color.Black.copy(alpha = if (!mouseEnabled) .10f else .14f))
+                }
             }
 
             Row(
