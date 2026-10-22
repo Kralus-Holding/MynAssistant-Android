@@ -62,7 +62,7 @@ jobs:
           test -s app/build/outputs/apk/debug/app-debug.apk
 
       - name: Publish APK as a prerelease asset
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: mynassistant-android-apk-${{ github.sha }}
