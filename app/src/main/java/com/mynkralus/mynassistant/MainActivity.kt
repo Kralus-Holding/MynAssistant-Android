@@ -3955,27 +3955,31 @@ private fun TvRemotePanel(
                     .fillMaxSize()
                     .then(touchpadGestureModifier)
             ) {
-                drawRect(Color(0xFF424242))
-                val spacing = 17.dp.toPx()
-                var y = spacing * .55f
+                drawRect(Color(0xFF414141))
+                val spacing = 20.dp.toPx()
+                var y = spacing * .58f
                 var rowIndex = 0
                 while (y < size.height) {
-                    val stagger = (rowIndex % 2) * spacing * .5f
+                    val stagger = (rowIndex % 2) * spacing * .48f
                     var x = spacing * .35f + stagger
                     while (x < size.width) {
-                        val wave = kotlin.math.sin((x / spacing + rowIndex * .7f) * .24f)
                         val normalizedX = (x / size.width).coerceIn(0f, 1f)
                         val normalizedY = (y / size.height).coerceIn(0f, 1f)
-                        val upperLeftCluster =
-                            (1f - kotlin.math.abs(normalizedX - .18f) / .50f).coerceIn(0f, 1f) *
-                            (1f - kotlin.math.abs(normalizedY - .20f) / .75f).coerceIn(0f, 1f)
-                        val lowerRightCluster =
-                            (1f - kotlin.math.abs(normalizedX - .90f) / .45f).coerceIn(0f, 1f) *
-                            (1f - kotlin.math.abs(normalizedY - .82f) / .65f).coerceIn(0f, 1f)
+                        val upperLeftDistance = kotlin.math.sqrt(
+                            ((normalizedX - .15f) / .68f) * ((normalizedX - .15f) / .68f) +
+                            ((normalizedY - .16f) / .54f) * ((normalizedY - .16f) / .54f)
+                        )
+                        val lowerRightDistance = kotlin.math.sqrt(
+                            ((normalizedX - .86f) / .67f) * ((normalizedX - .86f) / .67f) +
+                            ((normalizedY - .69f) / .48f) * ((normalizedY - .69f) / .48f)
+                        )
+                        val upperLeftCluster = (1f - upperLeftDistance).coerceIn(0f, 1f)
+                        val lowerRightCluster = (1f - lowerRightDistance).coerceIn(0f, 1f)
                         val visibility = maxOf(upperLeftCluster, lowerRightCluster)
-                        if (visibility > .24f) {
-                            val radius = (0.48f + (wave + 1f) * .16f + visibility * .12f).dp.toPx()
-                            val alpha = ((0.08f + (wave + 1f) * .045f) * visibility).coerceIn(0f, .18f)
+                        if (visibility > .08f) {
+                            val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
+                            val radius = (0.55f + visibility * 1.05f + wave * .48f).dp.toPx()
+                            val alpha = (0.035f + visibility * .18f + wave * .025f).coerceIn(.035f, .25f)
                             drawCircle(
                                 color = Color.White.copy(alpha = alpha),
                                 radius = radius,
