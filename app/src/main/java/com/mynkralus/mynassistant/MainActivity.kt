@@ -24,6 +24,19 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
+import com.google.firebase.FirebaseException
+import com.google.firebase.storage.FirebaseStorage
+import java.util.concurrent.TimeUnit
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Verified
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -189,6 +202,8 @@ private fun saveFirebaseProfile(
         "displayName" to (displayNameOverride?.takeIf { it.isNotBlank() } ?: user.displayName.orEmpty()),
         "email" to user.email.orEmpty(),
         "phoneNumber" to user.phoneNumber.orEmpty(),
+        "photoUrl" to user.photoUrl?.toString().orEmpty(),
+        "emailVerified" to user.isEmailVerified,
         "provider" to provider,
         "lastSignInAt" to FieldValue.serverTimestamp()
     )
@@ -966,7 +981,8 @@ private fun saveWindowsBridgeDevice(
 }
 
 private const val WEB_CLIENT_ID = "994290744643-em1j9c951okq1flhq9n00jcuduqpvjls.apps.googleusercontent.com"
-private enum class Page { HOME, LOGIN, REGISTER, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
+private enum class Page { HOME, LOGIN, REGISTER, AUTH, DEVICES, SETTINGS, REMOTE, FILES, DIAGNOSTICS }
+private enum class GoogleAuthMode { LOGIN, REGISTER, LINK }
 
 /**
  * Returns true only when Android accepted the start request. Listening becomes active
