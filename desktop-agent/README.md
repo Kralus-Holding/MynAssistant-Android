@@ -12,6 +12,7 @@ Bu, Android MynAssistant uygulamasından ayrı çalışan yeni bir Windows yard�
 - Aynı hesaba ve bu cihaza ait commands kuyruğunu okur.
 - Komutu çalıştırmadan önce Firestore updateTime önkoşuluyla atomik olarak sahiplenir. Komut aynı anda panelden iptal edildiyse veya başka Agent aldıysa eski pending kaydını ezmez; sahiplenme sonucu belirsiz ağ hatasında benzersiz claimToken ile sunucudaki durumu doğrular.
 - Ses aç/kapat, ses artırma/azaltma, masaüstünü gösterme, fare hareketi ve tıklama komutlarını işler.
+- PC kumandasında seçili alana Türkçe dâhil Unicode metin yazabilir; Backspace ve Enter tuşlarını çalıştırır. Metin girdisi 1.000 karakterle sınırlıdır ve pano içeriği değiştirilmez.
 - Oturum yenileme anahtarını Windows DPAPI ile şifreleyerek saklar.
 
 Telefon uygulamasına IP adresi veya token girilmez. Android uygulaması, Google hesabının UID'sine ait Firestore cihazlarını anlık dinler.
