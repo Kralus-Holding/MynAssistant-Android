@@ -18,12 +18,12 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 
 ## Build outputs
 
-- Android APK: Android APK workflow artifact MynAssistant-debug-apk.
-- Windows companion: Windows Agent workflow artifact MynAssistant-Windows-Agent.
+- Android APK: published to GitHub Releases only after CI verifies the full-feature APK and its signing certificate. Actions artifact upload is disabled because the repository's Actions storage quota is full.
+- Windows companion: built as a versioned prerelease ZIP through the Windows Agent workflow.
 
 ## Current scope
 
-The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands, and an on-demand low-frame-rate JPEG desktop preview. Smooth full-screen remote desktop streaming is a later WebRTC milestone.
+The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands, Unicode text entry, Backspace/Enter input, and an on-demand low-frame-rate JPEG desktop preview. Smooth full-screen remote desktop streaming is a later WebRTC milestone.
 
 
 ## Device registration (Android)
@@ -34,3 +34,8 @@ Version 0.2.2 registers the signed-in Android installation in Firestore `devices
 ## Full-feature Android APK recovery
 
 The release line is based on the 0.4.9 app (versionCode 26) rather than the reduced 0.2.2 shell. Version 0.5.0 (versionCode 27) restores the Hey Meyene wake-word service, Vosk Turkish recognition, sherpa-onnx keyword spotting, model installers, accessibility integration, diagnostics, and their unit tests while retaining Firebase device registration/heartbeat. CI runs unit tests, verifies the signed APK, rejects unexpectedly small APKs, and publishes a prerelease APK asset on pushes to main. The APK is distributed through GitHub Releases; Actions-artifact upload is intentionally omitted because this repository's Actions storage quota is full.
+
+
+## Remote-control UI (Android 0.5.2)
+
+The PC controller shows the device name once with a pencil action beside its presence badge; the editor opens only when requested and displays save failures inline. The touchpad uses a dark grey dotted surface and has distinct enabled/disabled icons. Disabling it removes pointer gesture handlers from the touchpad surface so swipes can scroll the page. The keyboard row includes a text field, Backspace, and Enter. Text plus Enter are submitted as one queued command so they retain execution order. Phone records do not enter the PC controller selection.
