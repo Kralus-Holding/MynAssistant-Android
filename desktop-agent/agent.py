@@ -529,7 +529,7 @@ def send_unicode_text(text: str) -> None:
     if len(text) > MAX_REMOTE_TEXT_LENGTH:
         raise ValueError(f"Metin en fazla {MAX_REMOTE_TEXT_LENGTH} karakter olabilir.")
 
-    safe_text = "".join(char for char in text if char >= " " and char != "\\x7f")
+    safe_text = "".join(char for char in text if ord(char) >= 32 and ord(char) != 127)
     if not safe_text:
         raise ValueError("Yazılacak metin boş.")
 
