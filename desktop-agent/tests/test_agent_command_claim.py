@@ -170,5 +170,53 @@ class AtomicCommandClaimTests(unittest.TestCase):
         self.assertTrue(claimed)
 
 
+
+class RemoteKeyboardCommandTests(unittest.TestCase):
+    def test_type_text_sends_unicode_without_touching_clipboard_and_can_submit(self) -> None:
+        with mock.patch.object(agent, "send_unicode_text") as send_text, mock.patch.object(
+            agent.pyautogui, "press"
+        ) as press:
+            result = agent.execute_command(
+                "type_text",
+                {"text": "İstanbul – merhaba 👋", "pressEnter": True},
+            )
+
+        send_text.assert_called_once_with("İstanbul – merhaba 👋")
+        press.assert_called_once_with("enter")
+        self.assertIn("Enter gönderildi", result)
+
+    def test_type_text_does_not_press_enter_unless_requested(self) -> None:
+        with mock.patch.object(agent, "send_unicode_text") as send_text, mock.patch.object(
+            agent.pyautogui, "press"
+        ) as press:
+            result = agent.execute_command("type_text", {"text": "MynAssistant"})
+
+        send_text.assert_called_once_with("MynAssistant")
+        press.assert_not_called()
+        self.assertIn("yazıldı", result)
+
+    def test_type_text_rejects_empty_or_oversized_payload(self) -> None:
+        with mock.patch.object(agent, "send_unicode_text") as send_text:
+            empty_result = agent.execute_command("type_text", {"text": "   "})
+            long_result = agent.execute_command(
+                "type_text", {"text": "x" * (agent.MAX_REMOTE_TEXT_LENGTH + 1)}
+            )
+
+        send_text.assert_not_called()
+        self.assertIn("metni gir", empty_result)
+        self.assertIn("karakter", long_result)
+
+    def test_backspace_and_enter_are_supported_keyboard_commands(self) -> None:
+        with mock.patch.object(agent.pyautogui, "press") as press:
+            backspace_result = agent.execute_command("key_backspace", {})
+            enter_result = agent.execute_command("key_enter", {})
+
+        self.assertEqual([call.args[0] for call in press.call_args_list], ["backspace", "enter"])
+        self.assertIn("Backspace", backspace_result)
+        self.assertIn("Enter", enter_result)
+        for command in ("type_text", "key_backspace", "key_enter"):
+            self.assertTrue(agent.command_is_supported(command))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
