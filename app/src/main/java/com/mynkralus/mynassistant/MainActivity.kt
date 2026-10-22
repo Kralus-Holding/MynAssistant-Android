@@ -1311,6 +1311,166 @@ class MainActivity : ComponentActivity() {
                 val client = GoogleSignIn.getClient(this@MainActivity, options)
                 client.signOut().addOnCompleteListener { googleLauncher.launch(client.signInIntent) }
             }
+            val refreshEmailVerification: ((String) -> Unit) -> Unit = { report ->
+                val user = auth.currentUser
+                if (user == null) {
+                    report("E-posta durumunu kontrol etmek için giriş yap.")
+                } else {
+                    user.reload().addOnCompleteListener { task ->
+                        if (!task.isSuccessful) {
+                            report("E-posta durumu yenilenemedi. İnternet bağlantını kontrol et.")
+                        } else {
+                            val fresh = auth.currentUser ?: user
+                            emailVerified = fresh.isEmailVerified
+                            report(if (emailVerified) "E-posta adresin doğrulanmış." else "E-posta adresin henüz doğrulanmamış.")
+                        }
+                    }
+                }
+            }
+            val resendEmailVerification: ((String) -> Unit) -> Unit = { report ->
+                val user = auth.currentUser
+                if (user == null) {
+                    report("Doğrulama e-postası göndermek için giriş yap.")
+                } else if (user.isEmailVerified) {
+                    emailVerified = true
+                    report("E-posta adresin zaten doğrulanmış.")
+                } else {
+                    user.sendEmailVerification().addOnCompleteListener { task ->
+                        report(if (task.isSuccessful) {
+                            "Yeni doğrulama bağlantısı e-posta adresine gönderildi."
+                        } else {
+                            "Doğrulama e-postası gönderilemedi. Biraz sonra tekrar dene."
+                        })
+                    }
+                }
+            }
+            val uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit = { uri, report ->
+                val user = auth.currentUser
+                if (user == null) {
+                    report("Fotoğraf yüklemek için önce giriş yap.")
+                } else {
+                    val storageRef = FirebaseStorage.getInstance().reference
+                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}")
+                    storageRef.putFile(uri)
+                        .continueWithTask { task ->
+                            if (!task.isSuccessful) {
+                                throw task.exception ?: IllegalStateException("Fotoğraf yüklemesi tamamlanamadı.")
+                            }
+                            storageRef.downloadUrl
+                        }
+                        .addOnSuccessListener { downloadUri ->
+                            user.updateProfile(
+                                UserProfileChangeRequest.Builder().setPhotoUri(downloadUri).build()
+                            ).addOnCompleteListener { updateTask ->
+                                if (!updateTask.isSuccessful) {
+                                    report("Fotoğraf yüklendi ancak profil fotoğrafı güncellenemedi. Tekrar dene.")
+                                } else {
+                                    photoUrl = downloadUri.toString()
+                                    saveFirebaseProfile(
+                                        user = user,
+                                        provider = user.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "profile",
+                                        isNewUser = false
+                                    ) { profileError ->
+                                        report(if (profileError == null) {
+                                            "Profil fotoğrafın güncellendi."
+                                        } else {
+                                            "Fotoğraf güncellendi ancak profil kaydı yenilenemedi."
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                        .addOnFailureListener { error ->
+                            val detail = error.message.orEmpty().lowercase(Locale.ROOT)
+                            report(when {
+                                detail.contains("unauthorized") || detail.contains("permission") ->
+                                    "Fotoğraf yükleme izni yok. Firebase Storage kurallarını profilePhotos/{kullanıcıKimliği} için ayarla."
+                                detail.contains("bucket") || detail.contains("no object") ->
+                                    "Firebase Storage henüz kullanıma hazır değil. Proje depolama alanını kontrol et."
+                                else -> "Fotoğraf yüklenemedi. İnternet bağlantını ve Firebase Storage ayarlarını kontrol et."
+                            })
+                        }
+                }
+            }
+            val updatePhoneCredential: (com.google.firebase.auth.PhoneAuthCredential, (String) -> Unit) -> Unit =
+                { credential, report ->
+                    val user = auth.currentUser
+                    if (user == null) {
+                        report("Telefon numarası eklemek için tekrar giriş yap.")
+                    } else {
+                        user.updatePhoneNumber(credential).addOnCompleteListener { task ->
+                            if (!task.isSuccessful) {
+                                report(when ((task.exception as? FirebaseAuthException)?.errorCode.orEmpty()) {
+                                    "ERROR_INVALID_VERIFICATION_CODE" -> "SMS doğrulama kodu hatalı."
+                                    "ERROR_SESSION_EXPIRED" -> "SMS kodunun süresi doldu. Yeni kod iste."
+                                    "ERROR_REQUIRES_RECENT_LOGIN" -> "Güvenlik için çıkış yapıp yeniden giriş yaptıktan sonra dene."
+                                    else -> "Telefon numarası doğrulanamadı. Kodu ve bağlantını kontrol et."
+                                })
+                            } else {
+                                user.reload().addOnCompleteListener {
+                                    val fresh = auth.currentUser ?: user
+                                    phone = fresh.phoneNumber.orEmpty()
+                                    saveFirebaseProfile(
+                                        user = fresh,
+                                        provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
+                                        isNewUser = false
+                                    ) {
+                                        report("Telefon numaran doğrulandı ve hesabına eklendi.")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            val requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit = { rawNumber, report ->
+                val number = rawNumber.trim().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                val digitCount = number.count { it.isDigit() }
+                when {
+                    !number.startsWith("+") || digitCount !in 8..15 ->
+                        report(null, "Numarayı uluslararası biçimde gir; ör. +905xxxxxxxxx.")
+                    auth.currentUser == null ->
+                        report(null, "Telefon numarası eklemek için önce giriş yap.")
+                    else -> {
+                        val options = PhoneAuthOptions.newBuilder(auth)
+                            .setPhoneNumber(number)
+                            .setTimeout(60L, TimeUnit.SECONDS)
+                            .setActivity(this@MainActivity)
+                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                                override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
+                                    updatePhoneCredential(credential) { message -> report(null, message) }
+                                }
+
+                                override fun onVerificationFailed(error: FirebaseException) {
+                                    val detail = error.message.orEmpty().lowercase(Locale.ROOT)
+                                    report(null, when {
+                                        detail.contains("quota") -> "SMS kotası aşıldı. Daha sonra tekrar dene."
+                                        detail.contains("invalid phone") -> "Telefon numarası geçersiz."
+                                        detail.contains("billing") -> "Firebase telefon doğrulaması için faturalandırma ayarı gerekiyor."
+                                        else -> "SMS doğrulaması başlatılamadı. Firebase Phone Auth ayarlarını kontrol et."
+                                    })
+                                }
+
+                                override fun onCodeSent(
+                                    verificationId: String,
+                                    token: PhoneAuthProvider.ForceResendingToken
+                                ) {
+                                    report(verificationId, "SMS kodu gönderildi. Mesajdaki kodu gir.")
+                                }
+                            })
+                            .build()
+                        PhoneAuthProvider.verifyPhoneNumber(options)
+                    }
+                }
+            }
+            val confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit =
+                { verificationId, code, report ->
+                    if (code.length !in 4..8 || code.any { !it.isDigit() }) {
+                        report("SMS kodunu doğru biçimde gir.")
+                    } else {
+                        val credential = PhoneAuthProvider.getCredential(verificationId, code)
+                        updatePhoneCredential(credential, report)
+                    }
+                }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
                 background = Color(0xFF0B0D14), surface = Color(0xFF171C2A),
