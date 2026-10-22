@@ -4082,13 +4082,256 @@ private fun DrawerItem(label: String, action: () -> Unit) {
 }
 
 @Composable
+private fun AccountSettings(
+    name: String,
+    email: String,
+    phone: String,
+    photoUrl: String,
+    emailVerified: Boolean,
+    googleLinked: Boolean,
+    photoImageLoader: ImageLoader,
+    googleLogin: (GoogleAuthMode) -> Unit,
+    refreshEmailVerification: ((String) -> Unit) -> Unit,
+    resendEmailVerification: ((String) -> Unit) -> Unit,
+    uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
+    requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
+    confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
+    logout: () -> Unit
+) {
+    var phoneDraft by remember(phone) { mutableStateOf(phone) }
+    var verificationId by remember { mutableStateOf<String?>(null) }
+    var smsCode by remember { mutableStateOf("") }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) uploadProfilePhoto(uri) { statusMessage = it }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                if (photoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = photoUrl,
+                        imageLoader = photoImageLoader,
+                        contentDescription = "Profil fotoğrafı",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(76.dp).clip(CircleShape)
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier.size(76.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = "Profil fotoğrafı yok",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(56.dp)
+                            )
+                        }
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(name.ifBlank { email.substringBefore("@") }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(email.ifBlank { "E-posta eklenmemiş" }, fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                    OutlinedButton(
+                        onClick = {
+                            photoPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Fotoğraf yükle")
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    if (emailVerified) Icons.Default.Verified else Icons.Default.Email,
+                    contentDescription = null,
+                    tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(26.dp)
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("E-posta doğrulaması", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (emailVerified) "E-posta adresi doğrulandı" else "E-posta adresi henüz doğrulanmadı",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                    )
+                }
+                Icon(
+                    if (emailVerified) Icons.Default.CheckCircle else Icons.Default.Refresh,
+                    contentDescription = if (emailVerified) "Doğrulandı" else "Durumu yenile",
+                    tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.primary
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { refreshEmailVerification { statusMessage = it } },
+                    modifier = Modifier.weight(1f)
+                ) { Text("Durumu yenile") }
+                if (!emailVerified) {
+                    Button(
+                        onClick = { resendEmailVerification { statusMessage = it } },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Doğrulama gönder") }
+                }
+            }
+
+            HorizontalDivider()
+
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                GoogleGLogo(Modifier.size(26.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Google hesabı", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (googleLinked) "Bağlandı" else "Bu hesaba henüz bağlanmadı",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                    )
+                }
+                Icon(
+                    if (googleLinked) Icons.Default.CheckCircle else Icons.Default.LinkOff,
+                    contentDescription = if (googleLinked) "Google bağlı" else "Google bağlı değil",
+                    tint = if (googleLinked) Color(0xFF2D9B62) else MaterialTheme.colorScheme.secondary
+                )
+            }
+            if (!googleLinked) {
+                OutlinedButton(
+                    onClick = { googleLogin(GoogleAuthMode.LINK) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Link, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Google hesabını bağla")
+                }
+            }
+
+            HorizontalDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Telefon numarası", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (phone.isNotBlank()) "Doğrulanmış numara: $phone" else "SMS koduyla doğrulayarak numara ekle.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                )
+                OutlinedTextField(
+                    value = phoneDraft,
+                    onValueChange = { phoneDraft = it.take(22) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = verificationId == null,
+                    label = { Text("Telefon (+90...)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                )
+                if (verificationId == null) {
+                    Button(
+                        onClick = {
+                            requestPhoneVerification(phoneDraft) { id, message ->
+                                if (!id.isNullOrBlank()) {
+                                    verificationId = id
+                                    smsCode = ""
+                                }
+                                statusMessage = message
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("SMS doğrulama kodu gönder") }
+                } else {
+                    OutlinedTextField(
+                        value = smsCode,
+                        onValueChange = { smsCode = it.filter(Char::isDigit).take(8) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("SMS doğrulama kodu") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { verificationId = null; smsCode = ""; statusMessage = null },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("İptal") }
+                        Button(
+                            onClick = {
+                                confirmPhoneVerification(verificationId.orEmpty(), smsCode) {
+                                    statusMessage = it
+                                    if (it.contains("doğrulandı", ignoreCase = true)) {
+                                        verificationId = null
+                                        smsCode = ""
+                                    }
+                                }
+                            },
+                            enabled = smsCode.length in 4..8,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Kodu doğrula") }
+                    }
+                }
+            }
+
+            statusMessage?.let {
+                Text(
+                    it,
+                    fontSize = 13.sp,
+                    color = if (it.contains("başarı", ignoreCase = true) ||
+                        it.contains("doğrulandı", ignoreCase = true) ||
+                        it.contains("gönderildi", ignoreCase = true)) {
+                        Color(0xFF2D9B62)
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    }
+                )
+            }
+
+            OutlinedButton(onClick = logout, modifier = Modifier.fillMaxWidth()) {
+                Text("Çıkış yap")
+            }
+        }
+    }
+}
+
+@Composable
 private fun AuthForm(
     registerMode: Boolean,
-    login: (String, String, (String) -> Unit) -> Unit = { _, _, done -> done("Giriş işlemi yapılandırılmadı.") },
-    register: (String, String, String, (String) -> Unit) -> Unit = { _, _, _, done -> done("Kayıt işlemi yapılandırılmadı.") },
-    googleLogin: () -> Unit = {},
+    login: (String, String, (String) -> Unit) -> Unit,
+    register: (String, String, String, (String) -> Unit) -> Unit,
+    googleLogin: (GoogleAuthMode) -> Unit,
     googleStatus: String? = null,
-    goRegister: () -> Unit
+    onRegisterModeChange: (Boolean) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var identity by remember { mutableStateOf("") }
@@ -4096,36 +4339,94 @@ private fun AuthForm(
     var message by remember { mutableStateOf<String?>(null) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (registerMode) OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Ad soyad") }, singleLine = true)
-            OutlinedTextField(identity, { identity = it }, Modifier.fillMaxWidth(), label = { Text("E-posta adresi") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-            OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Şifre (en az 6 karakter)") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (registerMode) {
+                    OutlinedButton(onClick = { onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
+                        Text("Giriş yap")
+                    }
+                    Button(onClick = { onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
+                        Text("Kayıt ol")
+                    }
+                } else {
+                    Button(onClick = { onRegisterModeChange(false) }, modifier = Modifier.weight(1f)) {
+                        Text("Giriş yap")
+                    }
+                    OutlinedButton(onClick = { onRegisterModeChange(true) }, modifier = Modifier.weight(1f)) {
+                        Text("Kayıt ol")
+                    }
+                }
+            }
+            if (registerMode) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.take(80) },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Ad soyad") }, singleLine = true
+                )
+            }
+            OutlinedTextField(
+                value = identity, onValueChange = { identity = it.take(254) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("E-posta adresi") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+            )
+            OutlinedTextField(
+                value = password, onValueChange = { password = it.take(128) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("Şifre (en az 6 karakter)") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
+            )
             Button(
                 onClick = {
-                    message = "İşlem yapılıyor..."
-                    if (registerMode) {
-                        register(name, identity, password) { message = it }
-                    } else {
-                        login(identity, password) { message = it }
-                    }
+                    message = "İşlem başlatıldı…"
+                    if (registerMode) register(name, identity, password) { message = it }
+                    else login(identity, password) { message = it }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (registerMode) "Kayıt ol" else "Giriş yap")
+                Text(if (registerMode) "E-posta ile kayıt ol" else "E-posta ile giriş yap")
             }
-            OutlinedButton(onClick = googleLogin, modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GoogleGLogo(Modifier.size(20.dp))
-                    Text("Google ile devam et")
-                }
+
+            HorizontalDivider()
+
+            OutlinedButton(
+                onClick = { googleLogin(GoogleAuthMode.REGISTER) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                GoogleGLogo(Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Google ile kayıt ol")
             }
-            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-            TextButton(onClick = goRegister, Modifier.fillMaxWidth()) { Text(if (registerMode) "Zaten hesabın var mı? Giriş yap" else "Hesabın yok mu? Kayıt ol") }
+            OutlinedButton(
+                onClick = { googleLogin(GoogleAuthMode.LOGIN) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                GoogleGLogo(Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Google ile giriş yap")
+            }
+
+            googleStatus?.let { status ->
+                Text(
+                    status,
+                    color = when {
+                        status.contains("başarı", ignoreCase = true) ||
+                            status.contains("oluşturuldu", ignoreCase = true) ||
+                            status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF2D9B62)
+                        status.contains("hata", ignoreCase = true) ||
+                            status.contains("bulunamadı", ignoreCase = true) ||
+                            status.contains("geçersiz", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
+                    },
+                    fontSize = 12.sp
+                )
+            }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp) }
-            Text("Hesabını tamamlamak için e-posta kutuna gönderilen doğrulama bağlantısını aç.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+            Text(
+                "E-posta ile kayıt olduktan sonra hesabını doğrulamak için gelen bağlantıyı aç.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f)
+            )
         }
     }
 }
