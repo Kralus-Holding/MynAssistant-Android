@@ -13,8 +13,8 @@ android {
         applicationId = "com.mynkralus.mynassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "0.5.2"
+        versionCode = 30
+        versionName = "0.5.3"
 
         // Include both ARM ABIs so the test APK also installs on devices whose
         // Android userspace is 32-bit, while avoiding unrelated x86 emulator runtimes.
