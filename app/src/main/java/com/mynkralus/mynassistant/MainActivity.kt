@@ -90,7 +90,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Block
@@ -3938,7 +3938,7 @@ private fun TvRemotePanel(
                     enabled = mouseEnabled,
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(Icons.Default.Backspace, contentDescription = "Bilgisayarda bir karakter sil")
+                    Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Bilgisayarda bir karakter sil")
                 }
                 FilledIconButton(
                     onClick = { submitRemoteKeyboardText() },
