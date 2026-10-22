@@ -10,6 +10,7 @@ Bu, Android MynAssistant uygulamasından ayrı çalışan yeni bir Windows yard�
 - Yaklaşık 25 saniyede bir çevrimiçi durumunu günceller.
 - Android uygulamasındaki PC Kumandası açıkken yaklaşık 1–2 saniyede bir küçültülmüş JPEG masaüstü karesi gönderir. Önizleme isteği süreli olduğundan sayfa kapandığında veya istek yenilenmediğinde kare gönderimi durur.
 - Aynı hesaba ve bu cihaza ait commands kuyruğunu okur.
+- Komutu çalıştırmadan önce Firestore updateTime önkoşuluyla atomik olarak sahiplenir. Komut aynı anda panelden iptal edildiyse veya başka Agent aldıysa eski pending kaydını ezmez; sahiplenme sonucu belirsiz ağ hatasında benzersiz claimToken ile sunucudaki durumu doğrular.
 - Ses aç/kapat, ses artırma/azaltma, masaüstünü gösterme, fare hareketi ve tıklama komutlarını işler.
 - Oturum yenileme anahtarını Windows DPAPI ile şifreleyerek saklar.
 
@@ -32,8 +33,8 @@ client_secret.json dosyasını GitHub'a yükleme. Bu dosya .gitignore ile dışa
     py -m pip install -r requirements.txt
     py agent.py
 
-EXE paketi GitHub Actions'ta windows-latest üzerinde oluşturulur. Artifact ZIP'ine OAuth JSON'u eklenmez.
+EXE paketi GitHub Actions'ta windows-latest üzerinde oluşturulur. Test/feature derlemeleri özel depodaki GitHub Releases bölümünde prerelease olarak yayımlanır; ZIP'in içine OAuth JSON'u eklenmez. Release paketinin yanında README.txt bulunur.
 
 ## Önemli sınırlar
 
-Bu ilk sürüm otomatik cihaz keşfi, çevrimiçi durumu, temel komut/fare kontrolü ve düşük kare hızlı masaüstü önizlemesi sağlar. Önizleme Chrome Uzaktan Masaüstü gibi akıcı bir video oturumu değildir; yaklaşık 1–2 saniyede bir JPEG kare gönderir. Sonraki aşamada WebRTC tabanlı akıcı ekran aktarımı ve güvenli bağlantı pazarlığı gerekir. Bilgisayarın görünmesi için Windows Agent'ın çalışması ve aynı Firebase hesabına kaydolması gerekir.
+Bu ilk sürüm otomatik cihaz keşfi, çevrimiçi durumu, temel komut/fare kontrolü ve düşük kare hızlı masaüstü önizlemesi sağlar. Önizleme Chrome Uzaktan Masaüstü gibi akıcı bir video oturumu değildir; yaklaşık 1–2 saniyede bir JPEG kare gönderir. Komutların aynı anda iki Agent tarafından yürütülmesini önlemek için komut sahiplenme ve iptal işlemleri Firestore sürüm önkoşullarıyla yapılır. Sonraki aşamada WebRTC tabanlı akıcı ekran aktarımı ve güvenli bağlantı pazarlığı gerekir. Bilgisayarın görünmesi için Windows Agent'ın çalışması ve aynı Firebase hesabına kaydolması gerekir.
