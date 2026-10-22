@@ -1182,6 +1182,9 @@ class MainActivity : ComponentActivity() {
             }
             var signedIn by remember { mutableStateOf(currentUser != null) }
             var photoUrl by remember { mutableStateOf(currentUser?.photoUrl?.toString().orEmpty()) }
+            var emailVerified by remember { mutableStateOf(currentUser?.isEmailVerified == true) }
+            var googleLinked by remember { mutableStateOf(currentUser?.providerData?.any { it.providerId == "google.com" } == true) }
+            var googleAuthMode by remember { mutableStateOf(GoogleAuthMode.LOGIN) }
             var googleStatus by remember { mutableStateOf<String?>(null) }
             val googleLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
@@ -1191,34 +1194,94 @@ class MainActivity : ComponentActivity() {
                         .getResult(ApiException::class.java)
                     val idToken = account.idToken
                     if (idToken.isNullOrBlank()) {
-                        googleStatus = "Google ile giriş şu anda tamamlanamıyor. Lütfen tekrar dene."
+                        googleStatus = "Google kimliği alınamadı. Tekrar dene."
                     } else {
                         val credential = GoogleAuthProvider.getCredential(idToken, null)
-                        auth.signInWithCredential(credential).addOnCompleteListener { task ->
-                            if (!task.isSuccessful) {
-                                googleStatus = firebaseAuthErrorMessage(task.exception)
+                        if (googleAuthMode == GoogleAuthMode.LINK) {
+                            val activeUser = auth.currentUser
+                            if (activeUser == null) {
+                                googleStatus = "Google hesabını bağlamak için önce giriş yap."
                             } else {
-                                val user = task.result?.user ?: auth.currentUser
-                                if (user == null) {
-                                    googleStatus = "Giriş tamamlandı ancak hesap bilgileri alınamadı. Lütfen tekrar dene."
-                                } else {
-                                    name = user.displayName?.takeIf { it.isNotBlank() }
-                                        ?: user.email?.substringBefore("@").orEmpty()
-                                    email = user.email.orEmpty()
-                                    phone = user.phoneNumber.orEmpty()
-                                    photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
-                                        ?: account.photoUrl?.toString().orEmpty()
-                                    savedGoogleAccounts = saveGoogleAccount(prefs, SavedGoogleAccount(email, name, photoUrl))
-                                    signedIn = true
-                                    saveFirebaseProfile(
-                                        user = user,
-                                        provider = "google.com",
-                                        isNewUser = task.result?.additionalUserInfo?.isNewUser == true
-                                    ) { firestoreError ->
-                                        googleStatus = if (firestoreError == null) {
-                                            "Google ile giriş yapıldı."
+                                activeUser.linkWithCredential(credential).addOnCompleteListener { task ->
+                                    if (!task.isSuccessful) {
+                                        googleStatus = firebaseAuthErrorMessage(task.exception)
+                                    } else {
+                                        val user = task.result?.user ?: auth.currentUser
+                                        if (user == null) {
+                                            googleStatus = "Google hesabı bağlandı ancak profil alınamadı. Sayfayı yenile."
                                         } else {
-                                            "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
+                                            googleLinked = user.providerData.any { it.providerId == "google.com" }
+                                            name = user.displayName?.takeIf { it.isNotBlank() } ?: name
+                                            email = user.email.orEmpty()
+                                            phone = user.phoneNumber.orEmpty()
+                                            photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
+                                                ?: account.photoUrl?.toString().orEmpty()
+                                            emailVerified = user.isEmailVerified
+                                            savedGoogleAccounts = saveGoogleAccount(
+                                                prefs, SavedGoogleAccount(email, name, photoUrl)
+                                            )
+                                            saveFirebaseProfile(user, "google.com", false) { error ->
+                                                googleStatus = if (error == null) {
+                                                    "Google hesabı başarıyla bağlandı."
+                                                } else {
+                                                    "Google bağlandı ancak profil bilgileri kaydedilemedi."
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            auth.signInWithCredential(credential).addOnCompleteListener { task ->
+                                if (!task.isSuccessful) {
+                                    googleStatus = firebaseAuthErrorMessage(task.exception)
+                                } else {
+                                    val result = task.result
+                                    val user = result?.user ?: auth.currentUser
+                                    val isNewUser = result?.additionalUserInfo?.isNewUser == true
+                                    if (user == null) {
+                                        googleStatus = "Giriş tamamlandı ancak hesap bilgileri alınamadı. Tekrar dene."
+                                    } else if (googleAuthMode == GoogleAuthMode.LOGIN && isNewUser) {
+                                        // Google sign-in can auto-provision a Firebase user. Remove that
+                                        // accidental new account so Login never silently becomes Register.
+                                        user.delete().addOnCompleteListener {
+                                            auth.signOut()
+                                            googleSignInClient.signOut()
+                                            signedIn = false
+                                            googleLinked = false
+                                            emailVerified = false
+                                            googleStatus = "Bu Google hesabıyla kayıtlı bir MynAssistant hesabı bulunamadı. Hesap oluşturmak için 'Google ile kayıt ol' seçeneğini kullan."
+                                        }
+                                    } else if (googleAuthMode == GoogleAuthMode.REGISTER && !isNewUser) {
+                                        auth.signOut()
+                                        googleSignInClient.signOut()
+                                        signedIn = false
+                                        googleLinked = false
+                                        googleStatus = "Bu Google hesabıyla zaten bir hesap var. 'Google ile giriş yap' seçeneğini kullan."
+                                    } else {
+                                        name = user.displayName?.takeIf { it.isNotBlank() }
+                                            ?: user.email?.substringBefore("@").orEmpty()
+                                        email = user.email.orEmpty()
+                                        phone = user.phoneNumber.orEmpty()
+                                        photoUrl = user.photoUrl?.toString()?.takeIf { it.isNotBlank() }
+                                            ?: account.photoUrl?.toString().orEmpty()
+                                        emailVerified = user.isEmailVerified
+                                        googleLinked = user.providerData.any { it.providerId == "google.com" }
+                                        savedGoogleAccounts = saveGoogleAccount(
+                                            prefs, SavedGoogleAccount(email, name, photoUrl)
+                                        )
+                                        signedIn = true
+                                        saveFirebaseProfile(
+                                            user = user,
+                                            provider = "google.com",
+                                            isNewUser = isNewUser
+                                        ) { firestoreError ->
+                                            googleStatus = if (firestoreError == null) {
+                                                if (googleAuthMode == GoogleAuthMode.REGISTER) "Google hesabı oluşturuldu ve giriş yapıldı."
+                                                else "Google ile giriş yapıldı."
+                                            } else {
+                                                "Giriş yapıldı ancak hesap bilgileri kaydedilemedi. Tekrar dene."
+                                            }
                                         }
                                     }
                                 }
@@ -1227,15 +1290,16 @@ class MainActivity : ComponentActivity() {
                     }
                 } catch (error: ApiException) {
                     googleStatus = when (error.statusCode) {
-                        10 -> "Google ile giriş şu anda kullanılamıyor. Lütfen daha sonra tekrar dene."
-                        12501 -> "Giriş iptal edildi."
-                        else -> "Google ile giriş tamamlanamadı. Lütfen tekrar dene."
+                        10 -> "Google ile giriş ayarları tamamlanmamış. İstemci kimliğini ve imza SHA-1 değerini kontrol et."
+                        12501 -> "Google girişi iptal edildi."
+                        else -> "Google ile işlem tamamlanamadı. Tekrar dene."
                     }
-                } catch (error: Exception) {
-                    googleStatus = "Bir sorun oluştu. Lütfen tekrar dene."
+                } catch (_: Exception) {
+                    googleStatus = "Bir sorun oluştu. İnternet bağlantını kontrol edip tekrar dene."
                 }
             }
-            val startGoogleSignIn: () -> Unit = {
+            val startGoogleSignIn: (GoogleAuthMode) -> Unit = { mode ->
+                googleAuthMode = mode
                 googleSignInClient.signOut().addOnCompleteListener {
                     googleLauncher.launch(googleSignInClient.signInIntent)
                 }
