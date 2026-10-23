@@ -1385,11 +1385,40 @@ class MainActivity : ComponentActivity() {
                                 provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
                                 isNewUser = false
                             ) { profileError ->
-                                report(when {
-                                    profileError != null -> "Hesap yenilendi ancak bulut profili kaydedilemedi."
-                                    emailVerified -> "E-posta adresin doğrulanmış."
-                                    else -> "E-posta adresin henüz doğrulanmamış."
-                                })
+                                if (profileError != null) {
+                                    report("Hesap yenilendi ancak bulut profili kaydedilemedi.")
+                                } else {
+                                    FirebaseFirestore.getInstance().collection("users").document(fresh.uid).get()
+                                        .addOnSuccessListener { profileSnapshot ->
+                                            val pendingEmailAddress = profileSnapshot.getString("pendingEmailAddress").orEmpty()
+                                            if (fresh.isEmailVerified && pendingEmailAddress.isNotBlank() &&
+                                                pendingEmailAddress.equals(fresh.email.orEmpty(), ignoreCase = true)) {
+                                                FirebaseFirestore.getInstance().collection("users").document(fresh.uid)
+                                                    .set(
+                                                        mapOf(
+                                                            "pendingEmailAddress" to FieldValue.delete(),
+                                                            "pendingEmailVerified" to FieldValue.delete(),
+                                                            "updatedAt" to FieldValue.serverTimestamp()
+                                                        ),
+                                                        SetOptions.merge()
+                                                    )
+                                                    .addOnCompleteListener { clearTask ->
+                                                        report(if (clearTask.isSuccessful) {
+                                                            "E-posta adresi doğrulandı ve güncellendi."
+                                                        } else {
+                                                            "E-posta doğrulandı ancak bekleyen adres kaydı temizlenemedi."
+                                                        })
+                                                    }
+                                            } else {
+                                                report(if (emailVerified) "E-posta adresin doğrulanmış."
+                                                else "E-posta adresin henüz doğrulanmamış.")
+                                            }
+                                        }
+                                        .addOnFailureListener {
+                                            report(if (emailVerified) "E-posta adresin doğrulanmış."
+                                            else "E-posta kontrol edildi ancak bekleyen adres bilgisi okunamadı.")
+                                        }
+                                }
                             }
                         }
                     }
@@ -1425,7 +1454,21 @@ class MainActivity : ComponentActivity() {
                     else -> {
                         user.verifyBeforeUpdateEmail(cleanedEmail).addOnCompleteListener { task ->
                             if (task.isSuccessful) {
-                                report("Firebase doğrulama isteğini kabul etti. Yeni adresin gelen kutusunu ve spam klasörünü kontrol et; adres bağlantı tamamlanınca değişir.")
+                                FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                                    .set(
+                                        mapOf(
+                                            "pendingEmailAddress" to cleanedEmail,
+                                            "pendingEmailVerified" to false,
+                                            "updatedAt" to FieldValue.serverTimestamp()
+                                        ),
+                                        SetOptions.merge()
+                                    )
+                                    .addOnSuccessListener {
+                                        report("Firebase doğrulama isteğini kabul etti. Yeni adres doğrulanmadı olarak kaydedildi; gelen kutunu ve spam klasörünü kontrol et.")
+                                    }
+                                    .addOnFailureListener { saveError ->
+                                        report("Doğrulama isteği Firebase'e gönderildi ancak bekleyen adres kaydedilemedi: ${saveError.message.orEmpty().take(120)}")
+                                    }
                             } else {
                                 report(firebaseAccountActionError(task.exception, "E-posta değiştirme/doğrulama"))
                             }
@@ -4231,6 +4274,7 @@ private fun AccountSettings(
     var pendingPhone by remember(activeUid) { mutableStateOf("") }
     var phoneExpanded by remember(activeUid) { mutableStateOf(false) }
     var emailDraft by remember(email) { mutableStateOf(email) }
+    var pendingEmailAddress by remember(activeUid) { mutableStateOf("") }
     var editingEmail by remember { mutableStateOf(false) }
     var verificationId by remember { mutableStateOf<String?>(null) }
     var smsCode by remember { mutableStateOf("") }
@@ -4246,6 +4290,12 @@ private fun AccountSettings(
                 .addOnSuccessListener { snapshot ->
                     if (FirebaseAuth.getInstance().currentUser?.uid == activeUid) {
                         pendingPhone = snapshot.getString("pendingPhoneNumber").orEmpty()
+                        val storedPendingEmail = snapshot.getString("pendingEmailAddress").orEmpty()
+                        pendingEmailAddress = if (emailVerified && storedPendingEmail.equals(email, ignoreCase = true)) {
+                            ""
+                        } else {
+                            storedPendingEmail
+                        }
                     }
                 }
                 .addOnFailureListener { error ->
@@ -4418,6 +4468,13 @@ private fun AccountSettings(
                     tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.primary
                 )
             }
+            if (pendingEmailAddress.isNotBlank()) {
+                Text(
+                    "Bekleyen e-posta: $pendingEmailAddress · Doğrulanmadı",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
             if (!emailVerified) {
                 Button(
                     onClick = { resendEmailVerification { statusMessage = it } },
@@ -4449,7 +4506,8 @@ private fun AccountSettings(
                     onClick = {
                         changeEmailAddress(emailDraft) { message ->
                             statusMessage = message
-                            if (message.contains("Firebase doğrulama isteğini kabul etti", ignoreCase = true)) {
+                            if (message.contains("doğrulanmadı olarak kaydedildi", ignoreCase = true)) {
+                                pendingEmailAddress = emailDraft.trim()
                                 editingEmail = false
                             }
                         }
