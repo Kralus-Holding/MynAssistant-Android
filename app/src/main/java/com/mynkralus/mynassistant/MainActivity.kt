@@ -199,7 +199,7 @@ private fun saveFirebaseProfile(
             onComplete("Profil kaydedilemedi.")
         }
 }
-private fun normalizePhoneNumberForVerification(raw: String): String? {
+internal fun normalizePhoneNumberForVerification(raw: String): String? {
     val compact = raw.trim().replace(Regex("[\\s().-]"), "")
     val digits = compact.filter { it.isDigit() }
     val e164Digits = when {
