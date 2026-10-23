@@ -1493,12 +1493,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         user.updatePhoneNumber(credential).addOnCompleteListener { task ->
                             if (!task.isSuccessful) {
-                                report(when ((task.exception as? FirebaseAuthException)?.errorCode.orEmpty()) {
-                                    "ERROR_INVALID_VERIFICATION_CODE" -> "SMS doğrulama kodu hatalı."
-                                    "ERROR_SESSION_EXPIRED" -> "SMS kodunun süresi doldu. Yeni kod iste."
-                                    "ERROR_REQUIRES_RECENT_LOGIN" -> "Güvenlik için çıkış yapıp yeniden giriş yaptıktan sonra dene."
-                                    else -> "Telefon numarası doğrulanamadı. Kodu ve bağlantını kontrol et."
-                                })
+                                report(firebaseAccountActionError(task.exception, "Telefon numarası doğrulaması"))
                             } else {
                                 user.reload().addOnCompleteListener {
                                     val fresh = auth.currentUser ?: user
@@ -1508,11 +1503,27 @@ class MainActivity : ComponentActivity() {
                                         provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
                                         isNewUser = false
                                     ) { profileError ->
-                                        report(if (profileError == null) {
-                                            "Telefon numaran doğrulandı ve hesabına eklendi."
+                                        if (profileError != null) {
+                                            report("Telefon doğrulandı ancak profil kaydı yenilenemedi. İnternet bağlantını kontrol et.")
                                         } else {
-                                            "Telefon doğrulandı ancak profil kaydı yenilenemedi. İnternet bağlantını kontrol et."
-                                        })
+                                            FirebaseFirestore.getInstance().collection("users").document(fresh.uid)
+                                                .set(
+                                                    mapOf(
+                                                        "phoneNumber" to fresh.phoneNumber.orEmpty(),
+                                                        "phoneNumberVerified" to true,
+                                                        "pendingPhoneNumber" to FieldValue.delete(),
+                                                        "pendingPhoneVerified" to false,
+                                                        "updatedAt" to FieldValue.serverTimestamp()
+                                                    ),
+                                                    SetOptions.merge()
+                                                )
+                                                .addOnSuccessListener {
+                                                    report("Telefon numaran doğrulandı ve hesabına eklendi.")
+                                                }
+                                                .addOnFailureListener {
+                                                    report("Telefon doğrulandı; ancak bekleyen numara kaydı temizlenemedi. Hesabını yeniden açıp kontrol et.")
+                                                }
+                                        }
                                     }
                                 }
                             }
@@ -1520,11 +1531,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             val requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit = { rawNumber, report ->
-                val number = rawNumber.trim().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                val number = normalizePendingPhoneNumber(rawNumber).orEmpty()
                 val digitCount = number.count { it.isDigit() }
                 when {
-                    !number.startsWith("+") || digitCount !in 8..15 ->
-                        report(null, "Numarayı uluslararası biçimde gir; ör. +905xxxxxxxxx.")
+                    number.isBlank() || !number.startsWith("+") || digitCount !in 8..15 ->
+                        report(null, "Geçerli bir telefon numarası gir. Örnek: 05XX XXX XX XX veya +905XXXXXXXXX.")
                     auth.currentUser == null ->
                         report(null, "Telefon numarası eklemek için önce giriş yap.")
                     else -> {
@@ -1538,13 +1549,7 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 override fun onVerificationFailed(error: FirebaseException) {
-                                    val detail = error.message.orEmpty().lowercase(Locale.ROOT)
-                                    report(null, when {
-                                        detail.contains("quota") -> "SMS kotası aşıldı. Daha sonra tekrar dene."
-                                        detail.contains("invalid phone") -> "Telefon numarası geçersiz."
-                                        detail.contains("billing") -> "Firebase telefon doğrulaması için faturalandırma ayarı gerekiyor."
-                                        else -> "SMS doğrulaması başlatılamadı. Firebase Phone Auth ayarlarını kontrol et."
-                                    })
+                                    report(null, firebaseAccountActionError(error, "SMS gönderimi"))
                                 }
 
                                 override fun onCodeSent(
@@ -1568,6 +1573,37 @@ class MainActivity : ComponentActivity() {
                         updatePhoneCredential(credential, report)
                     }
                 }
+            val changeDisplayName: (String, (String) -> Unit) -> Unit = { requestedName, report ->
+                val cleanedName = requestedName.trim().replace(Regex("\\s+"), " ")
+                val activeUser = auth.currentUser
+                when {
+                    cleanedName.isBlank() -> report("Kullanıcı adı boş bırakılamaz.")
+                    cleanedName.length !in 2..60 -> report("Kullanıcı adı 2-60 karakter arasında olmalı.")
+                    cleanedName.any { it.isISOControl() } -> report("Kullanıcı adı geçersiz karakter içeriyor.")
+                    activeUser == null -> report("Kullanıcı adını değiştirmek için yeniden giriş yap.")
+                    cleanedName == activeUser.displayName.orEmpty() -> report("Kullanıcı adı değişmedi.")
+                    else -> {
+                        activeUser.updateProfile(
+                            UserProfileChangeRequest.Builder().setDisplayName(cleanedName).build()
+                        ).addOnCompleteListener { updateTask ->
+                            if (!updateTask.isSuccessful) {
+                                report(firebaseAccountActionError(updateTask.exception, "Kullanıcı adı güncellemesi"))
+                            } else {
+                                name = cleanedName
+                                saveFirebaseProfile(
+                                    user = activeUser,
+                                    provider = activeUser.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "profile",
+                                    isNewUser = false,
+                                    displayNameOverride = cleanedName
+                                ) { profileError ->
+                                    report(if (profileError == null) "Kullanıcı adı güncellendi."
+                                    else "Kullanıcı adı Firebase profilinde güncellendi ancak bulut profili kaydedilemedi.")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
                 background = Color(0xFF0B0D14), surface = Color(0xFF171C2A),
@@ -1756,6 +1792,7 @@ class MainActivity : ComponentActivity() {
                     refreshEmailVerification = refreshEmailVerification,
                     resendEmailVerification = resendEmailVerification,
                     changeEmailAddress = changeEmailAddress,
+                    changeDisplayName = changeDisplayName,
                     uploadProfilePhoto = uploadProfilePhoto,
                     requestPhoneVerification = requestPhoneVerification,
                     confirmPhoneVerification = confirmPhoneVerification,
@@ -1923,6 +1960,7 @@ private fun AssistantScreen(
     refreshEmailVerification: ((String) -> Unit) -> Unit,
     resendEmailVerification: ((String) -> Unit) -> Unit,
     changeEmailAddress: (String, (String) -> Unit) -> Unit,
+    changeDisplayName: (String, (String) -> Unit) -> Unit,
     uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
     requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
     confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
@@ -2882,6 +2920,7 @@ private fun AssistantScreen(
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
                                 changeEmailAddress = changeEmailAddress,
+                                changeDisplayName = changeDisplayName,
                                 uploadProfilePhoto = uploadProfilePhoto,
                                 requestPhoneVerification = requestPhoneVerification,
                                 confirmPhoneVerification = confirmPhoneVerification,
@@ -2903,6 +2942,7 @@ private fun AssistantScreen(
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
                                 changeEmailAddress = changeEmailAddress,
+                                changeDisplayName = changeDisplayName,
                                 uploadProfilePhoto = uploadProfilePhoto,
                                 requestPhoneVerification = requestPhoneVerification,
                                 confirmPhoneVerification = confirmPhoneVerification,
@@ -4178,6 +4218,7 @@ private fun AccountSettings(
     refreshEmailVerification: ((String) -> Unit) -> Unit,
     resendEmailVerification: ((String) -> Unit) -> Unit,
     changeEmailAddress: (String, (String) -> Unit) -> Unit,
+    changeDisplayName: (String, (String) -> Unit) -> Unit,
     uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
     requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
     confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
