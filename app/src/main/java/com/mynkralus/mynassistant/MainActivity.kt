@@ -3489,8 +3489,8 @@ private fun AccountProfileSection(
                 accountStatus = "Fotoğraf yüklemek için yeniden giriş yapmalısın."
             } else {
                 val mimeType = context.contentResolver.getType(selectedUri)
-                if (mimeType?.startsWith("image/") != true) {
-                    accountStatus = "Lütfen galeriden geçerli bir görsel dosyası seç."
+                if (mimeType !in setOf("image/jpeg", "image/png", "image/webp")) {
+                    accountStatus = "JPG, PNG veya WebP biçiminde bir fotoğraf seç."
                 } else {
                     accountBusy = true
                     accountStatus = "Fotoğraf yükleniyor…"
