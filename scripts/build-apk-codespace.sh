@@ -11,7 +11,7 @@ fi
 VERSION_CODE="$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')"
 VERSION_NAME="$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)"
 if [[ "$VERSION_CODE" != "36" || "$VERSION_NAME" != "0.5.9" ]]; then
-  echo "ERROR: Expected MynAssistant 0.5.9 / versionCode 35; found $VERSION_NAME / $VERSION_CODE."
+  echo "ERROR: Expected MynAssistant 0.5.9 / versionCode 36; found $VERSION_NAME / $VERSION_CODE."
   exit 2
 fi
 
