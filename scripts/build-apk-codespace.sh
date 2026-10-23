@@ -10,8 +10,8 @@ if [[ ! -f app/build.gradle.kts || ! -s .github/ci-debug-keystore.b64 ]]; then
 fi
 VERSION_CODE="$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')"
 VERSION_NAME="$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)"
-if [[ "$VERSION_CODE" != "34" || "$VERSION_NAME" != "0.5.7" ]]; then
-  echo "ERROR: Expected MynAssistant 0.5.7 / versionCode 34; found $VERSION_NAME / $VERSION_CODE."
+if [[ "$VERSION_CODE" != "35" || "$VERSION_NAME" != "0.5.8" ]]; then
+  echo "ERROR: Expected MynAssistant 0.5.8 / versionCode 35; found $VERSION_NAME / $VERSION_CODE."
   exit 2
 fi
 
@@ -89,7 +89,7 @@ chmod 600 "$HOME/.android/debug.keystore"
 keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep "SHA1:"
 
 echo "== 5/6: Run unit tests and build APK =="
-BUILD_LOG="$ROOT/mynassistant-build-0.5.7.log"
+BUILD_LOG="$ROOT/mynassistant-build-0.5.8.log"
 set +e
 "$GRADLE_BIN" --no-daemon testDebugUnitTest assembleDebug --stacktrace 2>&1 | tee "$BUILD_LOG"
 BUILD_STATUS=${PIPESTATUS[0]}

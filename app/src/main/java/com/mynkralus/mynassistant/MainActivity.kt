@@ -1324,8 +1324,22 @@ class MainActivity : ComponentActivity() {
                             report("E-posta durumu yenilenemedi. İnternet bağlantını kontrol et.")
                         } else {
                             val fresh = auth.currentUser ?: user
+                            email = fresh.email.orEmpty()
+                            phone = fresh.phoneNumber.orEmpty()
+                            photoUrl = fresh.photoUrl?.toString().orEmpty()
                             emailVerified = fresh.isEmailVerified
-                            report(if (emailVerified) "E-posta adresin doğrulanmış." else "E-posta adresin henüz doğrulanmamış.")
+                            googleLinked = fresh.providerData.any { it.providerId == "google.com" }
+                            saveFirebaseProfile(
+                                user = fresh,
+                                provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
+                                isNewUser = false
+                            ) { profileError ->
+                                report(when {
+                                    profileError != null -> "Hesap yenilendi ancak bulut profili kaydedilemedi."
+                                    emailVerified -> "E-posta adresin doğrulanmış."
+                                    else -> "E-posta adresin henüz doğrulanmamış."
+                                })
+                            }
                         }
                     }
                 }
@@ -1344,6 +1358,39 @@ class MainActivity : ComponentActivity() {
                         } else {
                             "Doğrulama e-postası gönderilemedi. Biraz sonra tekrar dene."
                         })
+                    }
+                }
+            }
+            val changeEmailAddress: (String, (String) -> Unit) -> Unit = { requestedEmail, report ->
+                val cleanedEmail = requestedEmail.trim()
+                val user = auth.currentUser
+                when {
+                    !android.util.Patterns.EMAIL_ADDRESS.matcher(cleanedEmail).matches() ->
+                        report("Geçerli bir e-posta adresi gir.")
+                    user != null && cleanedEmail.equals(user.email.orEmpty(), ignoreCase = true) ->
+                        report("Yeni e-posta adresi mevcut adresle aynı.")
+                    user == null ->
+                        report("E-posta adresini değiştirmek için yeniden giriş yap.")
+                    else -> {
+                        user.verifyBeforeUpdateEmail(cleanedEmail).addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                report("Yeni e-posta adresine doğrulama bağlantısı gönderildi. Adres, bağlantıyı onayladığında güncellenecek.")
+                            } else {
+                                val code = (task.exception as? FirebaseAuthException)?.errorCode.orEmpty()
+                                report(when (code) {
+                                    "ERROR_REQUIRES_RECENT_LOGIN" ->
+                                        "Güvenlik nedeniyle yeniden giriş yapıp e-posta değişikliğini tekrar dene."
+                                    "ERROR_INVALID_EMAIL" ->
+                                        "Yeni e-posta adresi geçersiz."
+                                    "ERROR_EMAIL_ALREADY_IN_USE" ->
+                                        "Bu e-posta adresi başka bir hesapta kullanılıyor."
+                                    "ERROR_TOO_MANY_REQUESTS" ->
+                                        "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
+                                    else ->
+                                        "E-posta değişikliği başlatılamadı. İnternet bağlantını ve hesap doğrulamasını kontrol et."
+                                })
+                            }
+                        }
                     }
                 }
             }
@@ -2789,6 +2836,7 @@ private fun AssistantScreen(
                                 photoImageLoader = photoImageLoader, googleLogin = googleLogin,
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
+                                changeEmailAddress = changeEmailAddress,
                                 uploadProfilePhoto = uploadProfilePhoto,
                                 requestPhoneVerification = requestPhoneVerification,
                                 confirmPhoneVerification = confirmPhoneVerification,
@@ -2809,6 +2857,7 @@ private fun AssistantScreen(
                                 photoImageLoader = photoImageLoader, googleLogin = googleLogin,
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
+                                changeEmailAddress = changeEmailAddress,
                                 uploadProfilePhoto = uploadProfilePhoto,
                                 requestPhoneVerification = requestPhoneVerification,
                                 confirmPhoneVerification = confirmPhoneVerification,
@@ -4043,7 +4092,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.5.6", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.5.8", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -4083,12 +4132,15 @@ private fun AccountSettings(
     googleLogin: (GoogleAuthMode) -> Unit,
     refreshEmailVerification: ((String) -> Unit) -> Unit,
     resendEmailVerification: ((String) -> Unit) -> Unit,
+    changeEmailAddress: (String, (String) -> Unit) -> Unit,
     uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
     requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
     confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
     logout: () -> Unit
 ) {
     var phoneDraft by remember(phone) { mutableStateOf(phone) }
+    var emailDraft by remember(email) { mutableStateOf(email) }
+    var editingEmail by remember { mutableStateOf(false) }
     var verificationId by remember { mutableStateOf<String?>(null) }
     var smsCode by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -4117,12 +4169,12 @@ private fun AccountSettings(
                         imageLoader = photoImageLoader,
                         contentDescription = "Profil fotoğrafı",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(76.dp).clip(CircleShape)
+                        modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))
                     )
                 } else {
                     Surface(
                         modifier = Modifier.size(76.dp),
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -4204,7 +4256,42 @@ private fun AccountSettings(
                     Button(
                         onClick = { resendEmailVerification { statusMessage = it } },
                         modifier = Modifier.weight(1f)
-                    ) { Text("Doğrulama gönder") }
+                    ) {
+                        Text("E-posta gönder", maxLines = 1, softWrap = false)
+                    }
+                }
+            }
+
+            TextButton(
+                onClick = {
+                    emailDraft = email
+                    editingEmail = !editingEmail
+                },
+                modifier = Modifier.align(Alignment.Start)
+            ) {
+                Text(if (editingEmail) "E-posta değişikliğini kapat" else "E-posta adresini değiştir")
+            }
+            if (editingEmail) {
+                OutlinedTextField(
+                    value = emailDraft,
+                    onValueChange = { emailDraft = it.take(254) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Yeni e-posta adresi") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+                Button(
+                    onClick = {
+                        changeEmailAddress(emailDraft) { message ->
+                            statusMessage = message
+                            if (message.contains("bağlantısı gönderildi", ignoreCase = true)) {
+                                editingEmail = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Yeni adresi doğrula", maxLines = 1, softWrap = false)
                 }
             }
 
