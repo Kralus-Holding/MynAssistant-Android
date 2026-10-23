@@ -1601,9 +1601,17 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     report(verificationId, "SMS kodu gönderildi. Mesajdaki kodu gir.")
                                 }
+
+                                override fun onCodeAutoRetrievalTimeOut(verificationId: String) {
+                                    report(verificationId, "Otomatik SMS doğrulama süresi doldu. Gelen SMS kodunu elle girebilirsin.")
+                                }
                             })
                             .build()
-                        PhoneAuthProvider.verifyPhoneNumber(options)
+                        try {
+                            PhoneAuthProvider.verifyPhoneNumber(options)
+                        } catch (error: Exception) {
+                            report(null, firebaseAccountActionError(error, "SMS gönderimi"))
+                        }
                     }
                 }
             }
@@ -4277,6 +4285,7 @@ private fun AccountSettings(
     var pendingEmailAddress by remember(activeUid) { mutableStateOf("") }
     var editingEmail by remember { mutableStateOf(false) }
     var verificationId by remember { mutableStateOf<String?>(null) }
+    var phoneVerificationBusy by remember { mutableStateOf(false) }
     var smsCode by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var photoToCrop by remember { mutableStateOf<Uri?>(null) }
@@ -4655,6 +4664,7 @@ private fun AccountSettings(
                     ) { Text("Kaydet") }
                     OutlinedButton(
                         onClick = { phoneExpanded = false; verificationId = null; smsCode = "" },
+                        enabled = !phoneVerificationBusy,
                         modifier = Modifier.weight(1f)
                     ) { Text("Kapat") }
                 }
@@ -4662,20 +4672,31 @@ private fun AccountSettings(
                 if (pendingPhone.isNotBlank() && verificationId.isNullOrBlank()) {
                     Button(
                         onClick = {
-                            requestPhoneVerification(pendingPhone) { id, message ->
-                                if (!id.isNullOrBlank()) {
-                                    verificationId = id
-                                    smsCode = ""
+                            if (phoneVerificationBusy) return@Button
+                            phoneVerificationBusy = true
+                            try {
+                                requestPhoneVerification(pendingPhone) { id, message ->
+                                    phoneVerificationBusy = false
+                                    if (!id.isNullOrBlank()) {
+                                        verificationId = id
+                                        smsCode = ""
+                                    }
+                                    if (message?.contains("doğrulandı", ignoreCase = true) == true) {
+                                        pendingPhone = ""
+                                        phoneExpanded = false
+                                    }
+                                    statusMessage = message
                                 }
-                                if (message?.contains("doğrulandı", ignoreCase = true) == true) {
-                                    pendingPhone = ""
-                                    phoneExpanded = false
-                                }
-                                statusMessage = message
+                            } catch (error: Exception) {
+                                phoneVerificationBusy = false
+                                statusMessage = firebaseAccountActionError(error, "SMS gönderimi")
                             }
                         },
+                        enabled = !phoneVerificationBusy && verificationId.isNullOrBlank(),
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("SMS kodu gönder") }
+                    ) {
+                        Text(if (phoneVerificationBusy) "SMS gönderiliyor…" else "SMS kodu gönder")
+                    }
                 }
 
                 if (!verificationId.isNullOrBlank()) {
