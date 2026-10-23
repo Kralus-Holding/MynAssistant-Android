@@ -1630,7 +1630,7 @@ class MainActivity : ComponentActivity() {
                 when {
                     cleanedName.isBlank() -> report("Kullanıcı adı boş bırakılamaz.")
                     cleanedName.length !in 2..60 -> report("Kullanıcı adı 2-60 karakter arasında olmalı.")
-                    cleanedName.any { it.isISOControl() } -> report("Kullanıcı adı geçersiz karakter içeriyor.")
+                    cleanedName.any { it.code < 32 || it.code in 0x7F..0x9F } -> report("Kullanıcı adı geçersiz karakter içeriyor.")
                     activeUser == null -> report("Kullanıcı adını değiştirmek için yeniden giriş yap.")
                     cleanedName == activeUser.displayName.orEmpty() -> report("Kullanıcı adı değişmedi.")
                     else -> {
