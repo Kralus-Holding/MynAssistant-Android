@@ -4285,7 +4285,17 @@ private fun AccountSettings(
     LaunchedEffect(activeUid) {
         if (activeUid.isBlank()) {
             pendingPhone = ""
+            pendingEmailAddress = ""
         } else {
+            refreshEmailVerification { message ->
+                if (message.contains("doğrulandı ve güncellendi", ignoreCase = true)) {
+                    pendingEmailAddress = ""
+                }
+                if (message.contains("yenilenemedi", ignoreCase = true) ||
+                    message.contains("kaydedilemedi", ignoreCase = true)) {
+                    statusMessage = message
+                }
+            }
             FirebaseFirestore.getInstance().collection("users").document(activeUid).get()
                 .addOnSuccessListener { snapshot ->
                     if (FirebaseAuth.getInstance().currentUser?.uid == activeUid) {
@@ -4299,7 +4309,7 @@ private fun AccountSettings(
                     }
                 }
                 .addOnFailureListener { error ->
-                    statusMessage = "Bekleyen telefon kaydı okunamadı: ${error.message.orEmpty().take(120)}"
+                    statusMessage = "Bekleyen hesap bilgileri okunamadı: ${error.message.orEmpty().take(120)}"
                 }
         }
     }
