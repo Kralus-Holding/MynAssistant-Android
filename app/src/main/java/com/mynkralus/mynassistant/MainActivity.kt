@@ -28,6 +28,7 @@ import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.FirebaseException
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 import java.util.concurrent.TimeUnit
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CheckCircle
@@ -189,6 +190,56 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
         code.contains("ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL") ->
             "Bu e-posta başka bir giriş yöntemiyle kayıtlı. Diğer giriş yöntemini dene."
         else -> "Giriş yapılamadı. Bilgilerini kontrol edip tekrar dene."
+    }
+}
+
+private fun normalizePendingPhoneNumber(raw: String): String? {
+    val compact = raw.trim().replace(Regex("[\\s().-]"), "")
+    if (!compact.matches(Regex("\\+?[0-9]+"))) return null
+    val digits = compact.filter(Char::isDigit)
+    val internationalDigits = when {
+        compact.startsWith("+") -> digits
+        digits.startsWith("00") && digits.length > 9 -> digits.drop(2)
+        digits.startsWith("90") && digits.length == 12 -> digits
+        digits.startsWith("0") && digits.length == 11 -> "90" + digits.drop(1)
+        digits.length == 10 && digits.startsWith("5") -> "90" + digits
+        else -> return null
+    }
+    val normalized = "+$internationalDigits"
+    return normalized.takeIf { it.matches(Regex("\\+[1-9]\\d{7,14}")) }
+}
+
+private fun firebaseAccountActionError(error: Exception?, operation: String): String {
+    val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
+    val detail = error?.message.orEmpty().take(180)
+    val key = (code + " " + detail).lowercase(Locale.ROOT)
+    return when {
+        key.contains("too_many_requests") || key.contains("too many requests") ->
+            "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
+        key.contains("quota_exceeded") || key.contains("quota exceeded") || key.contains("sms quota") ->
+            "Firebase SMS kotası dolmuş. Firebase Console > Authentication > Phone ve proje kotasını kontrol et."
+        key.contains("operation_not_allowed") || key.contains("operation not allowed") ->
+            "Firebase Console > Authentication bölümünde ilgili E-posta/Parola veya Telefon sağlayıcısı etkin değil."
+        key.contains("invalid_phone_number") || key.contains("invalid phone") ->
+            "Telefon numarası geçersiz. Ülke koduyla birlikte kontrol et (ör. +905XXXXXXXXX)."
+        key.contains("app_not_authorized") || key.contains("invalid_app_credential") ||
+            key.contains("captcha") || key.contains("certificate") ->
+            "Firebase cihazın SMS doğrulamasını kabul etmedi. Android SHA-1/SHA-256, uygulama doğrulaması ve SMS bölgelerini kontrol et."
+        key.contains("requires_recent_login") || key.contains("recent login") ->
+            "Güvenlik nedeniyle çıkış yapıp yeniden giriş yaptıktan sonra tekrar dene."
+        key.contains("email_already_in_use") || key.contains("email already in use") ->
+            "Bu e-posta adresi başka bir Firebase hesabında kullanılıyor."
+        key.contains("invalid_email") || key.contains("invalid email") ->
+            "E-posta adresi geçersiz."
+        key.contains("network_request_failed") || key.contains("network error") ||
+            key.contains("unable to resolve host") ->
+            "Firebase servisine ulaşılamadı. İnternet bağlantını kontrol et."
+        key.contains("billing") ->
+            "Firebase projesinin telefon doğrulama faturalandırma ve kota ayarlarını kontrol et."
+        key.contains("session_expired") || key.contains("expired") ->
+            "Doğrulama oturumunun süresi doldu. Yeni kod iste."
+        else -> "$operation tamamlanamadı. Firebase hata kodu: \${code.ifBlank { "UNKNOWN" }}." +
+            if (detail.isNotBlank()) " Ayrıntı: \${detail}" else " Firebase Console ayarlarını kontrol et."
     }
 }
 
@@ -1354,9 +1405,9 @@ class MainActivity : ComponentActivity() {
                 } else {
                     user.sendEmailVerification().addOnCompleteListener { task ->
                         report(if (task.isSuccessful) {
-                            "Yeni doğrulama bağlantısı e-posta adresine gönderildi."
+                            "Firebase doğrulama isteğini kabul etti. Gelen kutunu ve spam klasörünü kontrol et."
                         } else {
-                            "Doğrulama e-postası gönderilemedi. Biraz sonra tekrar dene."
+                            firebaseAccountActionError(task.exception, "Doğrulama e-postası gönderimi")
                         })
                     }
                 }
@@ -1374,21 +1425,9 @@ class MainActivity : ComponentActivity() {
                     else -> {
                         user.verifyBeforeUpdateEmail(cleanedEmail).addOnCompleteListener { task ->
                             if (task.isSuccessful) {
-                                report("Yeni e-posta adresine doğrulama bağlantısı gönderildi. Adres, bağlantıyı onayladığında güncellenecek.")
+                                report("Firebase doğrulama isteğini kabul etti. Yeni adresin gelen kutusunu ve spam klasörünü kontrol et; adres bağlantı tamamlanınca değişir.")
                             } else {
-                                val code = (task.exception as? FirebaseAuthException)?.errorCode.orEmpty()
-                                report(when (code) {
-                                    "ERROR_REQUIRES_RECENT_LOGIN" ->
-                                        "Güvenlik nedeniyle yeniden giriş yapıp e-posta değişikliğini tekrar dene."
-                                    "ERROR_INVALID_EMAIL" ->
-                                        "Yeni e-posta adresi geçersiz."
-                                    "ERROR_EMAIL_ALREADY_IN_USE" ->
-                                        "Bu e-posta adresi başka bir hesapta kullanılıyor."
-                                    "ERROR_TOO_MANY_REQUESTS" ->
-                                        "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
-                                    else ->
-                                        "E-posta değişikliği başlatılamadı. İnternet bağlantını ve hesap doğrulamasını kontrol et."
-                                })
+                                report(firebaseAccountActionError(task.exception, "E-posta değiştirme/doğrulama"))
                             }
                         }
                     }
@@ -1400,8 +1439,9 @@ class MainActivity : ComponentActivity() {
                     report("Fotoğraf yüklemek için önce giriş yap.")
                 } else {
                     val storageRef = FirebaseStorage.getInstance().reference
-                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}")
-                    storageRef.putFile(uri)
+                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}.jpg")
+                    val metadata = StorageMetadata.Builder().setContentType("image/jpeg").build()
+                    storageRef.putFile(uri, metadata)
                         .continueWithTask { task ->
                             if (!task.isSuccessful) {
                                 throw task.exception ?: IllegalStateException("Fotoğraf yüklemesi tamamlanamadı.")
@@ -1434,10 +1474,13 @@ class MainActivity : ComponentActivity() {
                             val detail = error.message.orEmpty().lowercase(Locale.ROOT)
                             report(when {
                                 detail.contains("unauthorized") || detail.contains("permission") ->
-                                    "Fotoğraf yükleme izni yok. Firebase Storage kurallarını profilePhotos/{kullanıcıKimliği} için ayarla."
-                                detail.contains("bucket") || detail.contains("no object") ->
-                                    "Firebase Storage henüz kullanıma hazır değil. Proje depolama alanını kontrol et."
-                                else -> "Fotoğraf yüklenemedi. İnternet bağlantını ve Firebase Storage ayarlarını kontrol et."
+                                    "Fotoğraf yükleme reddedildi. Firebase Console > Storage > Rules bölümünde güncel storage.rules kurallarını yayımla."
+                                detail.contains("bucket") || detail.contains("no object") ||
+                                    detail.contains("object-not-found") || detail.contains("default bucket") ->
+                                    "Firebase Storage bucket hazır değil. Firebase Console > Storage üzerinden myncloud-24.firebasestorage.app deposunu oluştur/başlat."
+                                detail.contains("network") || detail.contains("unavailable") ->
+                                    "Fotoğraf yüklenemedi: ağ bağlantısı kesildi. İnternetini kontrol edip tekrar dene."
+                                else -> "Fotoğraf yüklenemedi. Firebase Storage hata ayrıntısı: ${error.message.orEmpty().take(160)}"
                             })
                         }
                 }
