@@ -148,14 +148,32 @@ BUILD_LOG="$ROOT/mynassistant-build-0.5.8.log"
 set +e
 GRADLE_HEAP="${MYN_GRADLE_HEAP:-2g}"
 GRADLE_METASPACE="${MYN_GRADLE_METASPACE:-512m}"
-"$GRADLE_BIN" --no-daemon --no-parallel --max-workers=2 \
-  -Dorg.gradle.jvmargs="-Xmx$GRADLE_HEAP -XX:MaxMetaspaceSize=$GRADLE_METASPACE -Dfile.encoding=UTF-8" \
+# Codespaces containers can report many host CPUs despite tight per-container
+# thread/memory limits. Cap JVM-visible CPUs and use one Gradle worker.
+# Compile Kotlin in-process so a second Kotlin daemon does not multiply memory use.
+"$GRADLE_BIN" --no-daemon --no-parallel --max-workers=1 \
+  -Dorg.gradle.jvmargs="-Xmx$GRADLE_HEAP -XX:MaxMetaspaceSize=$GRADLE_METASPACE -XX:ActiveProcessorCount=2 -Djava.util.concurrent.ForkJoinPool.common.parallelism=1 -Dfile.encoding=UTF-8" \
+  -Pkotlin.compiler.execution.strategy=in-process \
   testDebugUnitTest assembleDebug --stacktrace 2>&1 | tee "$BUILD_LOG"
 BUILD_STATUS=${PIPESTATUS[0]}
 set -e
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
   echo "ERROR: Gradle build/tests failed (exit $BUILD_STATUS). Log: $BUILD_LOG"
-  tail -100 "$BUILD_LOG"
+  echo
+  echo "== Likely root-cause lines =="
+  grep -n -B 4 -A 12 -E \
+    "What went wrong|Execution failed for task|Caused by:|unable to create native thread|OutOfMemoryError|GC overhead limit exceeded|No space left on device|Could not resolve|Could not find|e: file://|^e: |^\* Exception is:" \
+    "$BUILD_LOG" | tail -160 || true
+  echo
+  echo "== Last 80 Gradle log lines =="
+  tail -80 "$BUILD_LOG"
+  echo
+  echo "== Runner memory and process limits =="
+  free -h 2>/dev/null || true
+  df -h "$ROOT" 2>/dev/null || true
+  printf "process_limit="; ulimit -u || true
+  if [[ -r /sys/fs/cgroup/pids.max ]]; then printf "cgroup_pids_max="; cat /sys/fs/cgroup/pids.max; fi
+  if [[ -r /sys/fs/cgroup/pids.current ]]; then printf "cgroup_pids_current="; cat /sys/fs/cgroup/pids.current; fi
   exit "$BUILD_STATUS"
 fi
 
