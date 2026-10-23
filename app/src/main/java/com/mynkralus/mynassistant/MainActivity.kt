@@ -193,7 +193,7 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
     }
 }
 
-private fun normalizePendingPhoneNumber(raw: String): String? {
+internal fun normalizePendingPhoneNumber(raw: String): String?
     val compact = raw.trim().replace(Regex("[\\s().-]"), "")
     if (!compact.matches(Regex("\\+?[0-9]+"))) return null
     val digits = compact.filter(Char::isDigit)
