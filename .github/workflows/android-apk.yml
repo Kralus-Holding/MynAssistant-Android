@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main", "feature/android-command-status-tracking" ]
+    branches: [ "main", "feature/android-command-status-tracking", "feature/account-profile-verification" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
