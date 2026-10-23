@@ -4413,8 +4413,8 @@ private fun AccountSettings(
                     )
                 }
                 Icon(
-                    if (emailVerified) Icons.Default.CheckCircle else Icons.Default.Refresh,
-                    contentDescription = if (emailVerified) "Doğrulandı" else "Durumu yenile",
+                    if (emailVerified) Icons.Default.CheckCircle else Icons.Default.Email,
+                    contentDescription = if (emailVerified) "E-posta doğrulandı" else "E-posta doğrulanmadı",
                     tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.primary
                 )
             }
@@ -4449,7 +4449,7 @@ private fun AccountSettings(
                     onClick = {
                         changeEmailAddress(emailDraft) { message ->
                             statusMessage = message
-                            if (message.contains("bağlantısı gönderildi", ignoreCase = true)) {
+                            if (message.contains("Firebase doğrulama isteğini kabul etti", ignoreCase = true)) {
                                 editingEmail = false
                             }
                         }
@@ -4647,12 +4647,23 @@ private fun AccountSettings(
                 Text(
                     it,
                     fontSize = 13.sp,
-                    color = if (it.contains("başarı", ignoreCase = true) ||
-                        it.contains("doğrulandı", ignoreCase = true) ||
-                        it.contains("gönderildi", ignoreCase = true)) {
-                        Color(0xFF2D9B62)
-                    } else {
-                        MaterialTheme.colorScheme.secondary
+                    color = when {
+                        it.contains("başarı", ignoreCase = true) ||
+                            it.contains("doğrulandı", ignoreCase = true) ||
+                            it.contains("gönderildi", ignoreCase = true) ||
+                            it.contains("kabul etti", ignoreCase = true) ->
+                            Color(0xFF2D9B62)
+                        it.contains("başarısız", ignoreCase = true) ||
+                            it.contains("tamamlanamadı", ignoreCase = true) ||
+                            it.contains("kaydedilemedi", ignoreCase = true) ||
+                            it.contains("geçersiz", ignoreCase = true) ||
+                            it.contains("kotası", ignoreCase = true) ||
+                            it.contains("etkin değil", ignoreCase = true) ||
+                            it.contains("ulaşılamadı", ignoreCase = true) ||
+                            it.contains("reddedildi", ignoreCase = true) ||
+                            it.contains("hata kodu", ignoreCase = true) ->
+                            MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
                     }
                 )
             }
