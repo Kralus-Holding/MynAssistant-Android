@@ -4224,16 +4224,55 @@ private fun AccountSettings(
     confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
     logout: () -> Unit
 ) {
-    var phoneDraft by remember(phone) { mutableStateOf(phone) }
+    val activeUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    var nameDraft by remember(name) { mutableStateOf(name) }
+    var editingName by remember { mutableStateOf(false) }
+    var phoneDraft by remember(activeUid, phone) { mutableStateOf(phone) }
+    var pendingPhone by remember(activeUid) { mutableStateOf("") }
+    var phoneExpanded by remember(activeUid) { mutableStateOf(false) }
     var emailDraft by remember(email) { mutableStateOf(email) }
     var editingEmail by remember { mutableStateOf(false) }
     var verificationId by remember { mutableStateOf<String?>(null) }
     var smsCode by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var photoToCrop by remember { mutableStateOf<Uri?>(null) }
+    var photoUploading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeUid) {
+        if (activeUid.isBlank()) {
+            pendingPhone = ""
+        } else {
+            FirebaseFirestore.getInstance().collection("users").document(activeUid).get()
+                .addOnSuccessListener { snapshot ->
+                    if (FirebaseAuth.getInstance().currentUser?.uid == activeUid) {
+                        pendingPhone = snapshot.getString("pendingPhoneNumber").orEmpty()
+                    }
+                }
+                .addOnFailureListener { error ->
+                    statusMessage = "Bekleyen telefon kaydı okunamadı: ${error.message.orEmpty().take(120)}"
+                }
+        }
+    }
     val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
-        if (uri != null) uploadProfilePhoto(uri) { statusMessage = it }
+        if (uri != null) photoToCrop = uri
+        else statusMessage = "Fotoğraf seçimi iptal edildi."
+    }
+    photoToCrop?.let { sourceUri ->
+        ProfilePhotoCropDialog(
+            sourceUri = sourceUri,
+            onDismiss = { photoToCrop = null },
+            onConfirm = { croppedUri ->
+                photoToCrop = null
+                photoUploading = true
+                statusMessage = "Profil fotoğrafı yükleniyor…"
+                uploadProfilePhoto(croppedUri) {
+                    photoUploading = false
+                    statusMessage = it
+                }
+            }
+        )
     }
 
     Card(
@@ -4246,7 +4285,7 @@ private fun AccountSettings(
         ) {
             Row(
                 Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (photoUrl.isNotBlank()) {
@@ -4273,10 +4312,58 @@ private fun AccountSettings(
                         }
                     }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(name.ifBlank { email.substringBefore("@") }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text(email.ifBlank { "E-posta eklenmemiş" }, fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (editingName) {
+                            OutlinedTextField(
+                                value = nameDraft,
+                                onValueChange = { nameDraft = it.take(60) },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("Kullanıcı adı") },
+                                singleLine = true
+                            )
+                        } else {
+                            Text(
+                                name.ifBlank { email.substringBefore("@").ifBlank { "Kullanıcı" } },
+                                modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                nameDraft = name
+                                editingName = !editingName
+                            }
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Kullanıcı adını düzenle")
+                        }
+                    }
+                    if (editingName) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { nameDraft = name; editingName = false }) {
+                                Text("Vazgeç")
+                            }
+                            Button(
+                                onClick = {
+                                    changeDisplayName(nameDraft) { message ->
+                                        statusMessage = message
+                                        if (message == "Kullanıcı adı güncellendi.") editingName = false
+                                    }
+                                },
+                                enabled = nameDraft.trim().length in 2..60
+                            ) { Text("Kaydet") }
+                        }
+                    }
+                    Text(
+                        email.ifBlank { "E-posta eklenmemiş" },
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     OutlinedButton(
                         onClick = {
                             photoPicker.launch(
@@ -4284,11 +4371,12 @@ private fun AccountSettings(
                                     ActivityResultContracts.PickVisualMedia.ImageOnly
                                 )
                             )
-                        }
+                        },
+                        enabled = !photoUploading
                     ) {
                         Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Fotoğraf yükle")
+                        Text(if (photoUploading) "Fotoğraf yükleniyor…" else "Fotoğraf yükle")
                     }
                 }
             }
@@ -4330,21 +4418,12 @@ private fun AccountSettings(
                     tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.primary
                 )
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { refreshEmailVerification { statusMessage = it } },
-                    modifier = Modifier.weight(1f)
-                ) { Text("Durumu yenile") }
-                if (!emailVerified) {
-                    Button(
-                        onClick = { resendEmailVerification { statusMessage = it } },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("E-posta gönder", maxLines = 1, softWrap = false)
-                    }
+            if (!emailVerified) {
+                Button(
+                    onClick = { resendEmailVerification { statusMessage = it } },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Doğrulama e-postası gönder", maxLines = 1, softWrap = false)
                 }
             }
 
@@ -4416,36 +4495,122 @@ private fun AccountSettings(
 
             HorizontalDivider()
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Telefon numarası", fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (phone.isNotBlank()) "Doğrulanmış numara: $phone" else "SMS koduyla doğrulayarak numara ekle.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                )
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Telefon numarası", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when {
+                            pendingPhone.isNotBlank() -> "Doğrulanmadı · $pendingPhone"
+                            phone.isNotBlank() -> "Doğrulandı · $phone"
+                            else -> "Henüz belirtilmemiş"
+                        },
+                        fontSize = 12.sp,
+                        color = when {
+                            pendingPhone.isNotBlank() -> MaterialTheme.colorScheme.tertiary
+                            phone.isNotBlank() -> Color(0xFF2D9B62)
+                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        phoneExpanded = !phoneExpanded
+                        if (phoneExpanded) phoneDraft = pendingPhone.ifBlank { phone }
+                    }
+                ) {
+                    Text(
+                        when {
+                            phoneExpanded -> "Kapat"
+                            pendingPhone.isNotBlank() || phone.isNotBlank() -> "Düzenle"
+                            else -> "Ekle"
+                        },
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            if (phoneExpanded) {
                 OutlinedTextField(
                     value = phoneDraft,
                     onValueChange = { phoneDraft = it.take(22) },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = verificationId == null,
-                    label = { Text("Telefon (+90...)") },
+                    label = { Text("Telefon numarası") },
+                    placeholder = { Text("05XX XXX XX XX veya +90...") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                 )
-                if (verificationId == null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            requestPhoneVerification(phoneDraft) { id, message ->
+                            val normalized = normalizePendingPhoneNumber(phoneDraft)
+                            val uid = FirebaseAuth.getInstance().currentUser?.uid
+                            when {
+                                normalized == null ->
+                                    statusMessage = "Geçerli numara gir. Örnek: 05XX XXX XX XX veya +905XXXXXXXXX."
+                                uid.isNullOrBlank() ->
+                                    statusMessage = "Numarayı kaydetmek için yeniden giriş yap."
+                                normalized == phone && pendingPhone.isBlank() ->
+                                    statusMessage = "Bu numara zaten doğrulanmış."
+                                else -> {
+                                    FirebaseFirestore.getInstance().collection("users").document(uid)
+                                        .set(
+                                            mapOf(
+                                                "pendingPhoneNumber" to normalized,
+                                                "pendingPhoneVerified" to false,
+                                                "updatedAt" to FieldValue.serverTimestamp()
+                                            ),
+                                            SetOptions.merge()
+                                        )
+                                        .addOnSuccessListener {
+                                            pendingPhone = normalized
+                                            phoneDraft = normalized
+                                            statusMessage = "Telefon numarası kaydedildi ancak henüz doğrulanmadı. SMS kodu gönderebilirsin."
+                                        }
+                                        .addOnFailureListener { error ->
+                                            statusMessage = "Telefon numarası kaydedilemedi: ${error.message.orEmpty().take(150)}"
+                                        }
+                                }
+                            }
+                        },
+                        enabled = verificationId == null,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Kaydet") }
+                    OutlinedButton(
+                        onClick = { phoneExpanded = false; verificationId = null; smsCode = "" },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Kapat") }
+                }
+
+                if (pendingPhone.isNotBlank() && verificationId.isNullOrBlank()) {
+                    Button(
+                        onClick = {
+                            requestPhoneVerification(pendingPhone) { id, message ->
                                 if (!id.isNullOrBlank()) {
                                     verificationId = id
                                     smsCode = ""
+                                }
+                                if (message?.contains("doğrulandı", ignoreCase = true) == true) {
+                                    pendingPhone = ""
+                                    phoneExpanded = false
                                 }
                                 statusMessage = message
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("SMS doğrulama kodu gönder") }
-                } else {
+                    ) { Text("SMS kodu gönder") }
+                }
+
+                if (!verificationId.isNullOrBlank()) {
                     OutlinedTextField(
                         value = smsCode,
                         onValueChange = { smsCode = it.filter(Char::isDigit).take(8) },
@@ -4466,6 +4631,8 @@ private fun AccountSettings(
                                     if (it.contains("doğrulandı", ignoreCase = true)) {
                                         verificationId = null
                                         smsCode = ""
+                                        pendingPhone = ""
+                                        phoneExpanded = false
                                     }
                                 }
                             },
