@@ -287,11 +287,19 @@ private fun writeSquareCrop(context: Context, source: Bitmap, crop: ProfileCropS
     val square = Bitmap.createBitmap(source, crop.left, crop.top, crop.side, crop.side)
     val file = File(context.cacheDir, "myn-profile-${System.currentTimeMillis()}.jpg")
     try {
-        FileOutputStream(file).use { output ->
-            if (!square.compress(Bitmap.CompressFormat.JPEG, 92, output)) {
-                throw IllegalStateException("JPEG fotoğraf oluşturulamadı.")
+        var quality = 88
+        while (true) {
+            FileOutputStream(file, false).use { output ->
+                if (!square.compress(Bitmap.CompressFormat.JPEG, quality, output)) {
+                    throw IllegalStateException("JPEG fotoğraf oluşturulamadı.")
+                }
+                output.flush()
             }
-            output.flush()
+            if (file.length() < 4_700_000L || quality <= 64) break
+            quality -= 8
+        }
+        if (file.length() >= 5L * 1024L * 1024L) {
+            throw IllegalStateException("Kırpılan fotoğraf Firebase'in 5 MB sınırını aşıyor. Daha küçük bir fotoğraf seç.")
         }
     } finally {
         square.recycle()
