@@ -36,7 +36,7 @@ Version 0.2.2 registers the signed-in Android installation in Firestore `devices
 The release line is based on the 0.4.9 app (versionCode 26) rather than the reduced 0.2.2 shell. Version 0.5.0 (versionCode 27) restores the Hey Meyene wake-word service, Vosk Turkish recognition, sherpa-onnx keyword spotting, model installers, accessibility integration, diagnostics, and their unit tests while retaining Firebase device registration/heartbeat. CI runs unit tests, verifies the signed APK, rejects unexpectedly small APKs, and publishes a prerelease APK asset on pushes to main. The APK is distributed through GitHub Releases; Actions-artifact upload is intentionally omitted because this repository's Actions storage quota is full.
 
 
-## Account and auth polish (Android 0.5.8)
+## Account and auth polish (Android 0.5.9)
 
 The device-name pencil sits beside the device name; Save uses the proper save icon. Online/offline badges adapt to light and dark themes. Touchpad dots avoid the `Touchpad` title. The launcher foreground is reduced into Android's adaptive safe zone so the full original mark remains visible. The shared auth form shows only one Google action according to the selected mode. Email/password registration requires at least eight characters. Email auth feedback is shown once inside the form, not copied into the navigation drawer. CI asserts that only one mode-specific Google action exists, old six-character guidance is absent, and auth warnings do not render in the drawer. The account page retains Google linking, email verification, SMS-verified phone numbers, and profile photo upload. Existing remote-control, keyboard and wake-word paths remain intact.
 
@@ -46,3 +46,13 @@ The Android app already points to the `myncloud-24` Firebase project. Enable **A
 
 
 The 0.5.8 follow-up makes the account avatar square with rounded corners, keeps the email verification action on one line, and lets users request an email address change through Firebase's verification link before the new address becomes active. The drawer version label matches the Gradle app version. Release APKs still require a successful GitHub Actions build and verified release asset.
+
+
+## Account contact updates (Android 0.5.9)
+
+The account page supports display-name editing and a square 1:1 profile-photo crop preview with zoom and position controls before JPEG upload. Email changes are recorded as pending until Firebase verifies the new address. Phone numbers are saved as pending/unverified data before the separate SMS verification action; Firebase Authentication only attaches the phone number after code verification. Delivery errors expose Firebase error codes and actionable setup hints.
+
+Firebase Storage must be initialized for the bucket configured in `app/google-services.json` (`myncloud-24.firebasestorage.app`), and the current repository rules must be deployed by an authorized Firebase CLI session. Firebase Phone Authentication must be enabled in the Firebase Console and also needs valid Android app verification, SMS region policy, quota and any required billing settings. Google sign-in marks the provider's email as verified; the app will not send a verification email for an address Firebase already considers verified. Email-address changes use Firebase Authentication's verification action email, not MynAssistant-Server SMTP, because a custom SMTP sender is not configured in that server.
+
+
+See [docs/ACCOUNT-CONTACT-SETUP-0.5.9.md](docs/ACCOUNT-CONTACT-SETUP-0.5.9.md) for the one-time Firebase Storage deployment and Firebase email/SMS authentication setup required for account verification and profile photos.

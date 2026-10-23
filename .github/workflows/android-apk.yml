@@ -94,16 +94,24 @@ jobs:
           grep -q 'sendEmailVerification' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'PhoneAuthProvider.verifyPhoneNumber' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'verifyBeforeUpdateEmail' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt
+          grep -q 'changeDisplayName = changeDisplayName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'pendingPhoneNumber' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'pendingEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -q 'Text("Durumu yenile")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Removed email refresh button is unexpectedly present"
+            exit 1
+          fi
           grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'MynAssistant • Android 0.5.8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MynAssistant • Android 0.5.9' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'profilePhotos/{userId}/{fileName}' storage.rules
           grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml
           grep -q '<adaptive-icon' app/src/main/res/mipmap-anydpi-v26/mynassistant_launcher.xml
           grep -q 'android:width="50dp"' app/src/main/res/drawable/mynassistant_launcher_foreground.xml
           VERSION_CODE=$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')
           VERSION_NAME=$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)
-          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 35 ] || [ "$VERSION_NAME" != "0.5.8" ]; then
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 36 ] || [ "$VERSION_NAME" != "0.5.9" ]; then
             echo "Invalid or old Android version"
             exit 1
           fi

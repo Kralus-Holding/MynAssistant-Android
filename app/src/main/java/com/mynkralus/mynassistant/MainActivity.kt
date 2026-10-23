@@ -28,6 +28,7 @@ import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.FirebaseException
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 import java.util.concurrent.TimeUnit
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CheckCircle
@@ -189,6 +190,56 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
         code.contains("ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL") ->
             "Bu e-posta başka bir giriş yöntemiyle kayıtlı. Diğer giriş yöntemini dene."
         else -> "Giriş yapılamadı. Bilgilerini kontrol edip tekrar dene."
+    }
+}
+
+internal fun normalizePendingPhoneNumber(raw: String): String?
+    val compact = raw.trim().replace(Regex("[\\s().-]"), "")
+    if (!compact.matches(Regex("\\+?[0-9]+"))) return null
+    val digits = compact.filter(Char::isDigit)
+    val internationalDigits = when {
+        compact.startsWith("+") -> digits
+        digits.startsWith("00") && digits.length > 9 -> digits.drop(2)
+        digits.startsWith("90") && digits.length == 12 -> digits
+        digits.startsWith("0") && digits.length == 11 -> "90" + digits.drop(1)
+        digits.length == 10 && digits.startsWith("5") -> "90" + digits
+        else -> return null
+    }
+    val normalized = "+$internationalDigits"
+    return normalized.takeIf { it.matches(Regex("\\+[1-9]\\d{7,14}")) }
+}
+
+private fun firebaseAccountActionError(error: Exception?, operation: String): String {
+    val code = (error as? FirebaseAuthException)?.errorCode.orEmpty()
+    val detail = error?.message.orEmpty().take(180)
+    val key = (code + " " + detail).lowercase(Locale.ROOT)
+    return when {
+        key.contains("too_many_requests") || key.contains("too many requests") ->
+            "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
+        key.contains("quota_exceeded") || key.contains("quota exceeded") || key.contains("sms quota") ->
+            "Firebase SMS kotası dolmuş. Firebase Console > Authentication > Phone ve proje kotasını kontrol et."
+        key.contains("operation_not_allowed") || key.contains("operation not allowed") ->
+            "Firebase Console > Authentication bölümünde ilgili E-posta/Parola veya Telefon sağlayıcısı etkin değil."
+        key.contains("invalid_phone_number") || key.contains("invalid phone") ->
+            "Telefon numarası geçersiz. Ülke koduyla birlikte kontrol et (ör. +905XXXXXXXXX)."
+        key.contains("app_not_authorized") || key.contains("invalid_app_credential") ||
+            key.contains("captcha") || key.contains("certificate") ->
+            "Firebase cihazın SMS doğrulamasını kabul etmedi. Android SHA-1/SHA-256, uygulama doğrulaması ve SMS bölgelerini kontrol et."
+        key.contains("requires_recent_login") || key.contains("recent login") ->
+            "Güvenlik nedeniyle çıkış yapıp yeniden giriş yaptıktan sonra tekrar dene."
+        key.contains("email_already_in_use") || key.contains("email already in use") ->
+            "Bu e-posta adresi başka bir Firebase hesabında kullanılıyor."
+        key.contains("invalid_email") || key.contains("invalid email") ->
+            "E-posta adresi geçersiz."
+        key.contains("network_request_failed") || key.contains("network error") ||
+            key.contains("unable to resolve host") ->
+            "Firebase servisine ulaşılamadı. İnternet bağlantını kontrol et."
+        key.contains("billing") ->
+            "Firebase projesinin telefon doğrulama faturalandırma ve kota ayarlarını kontrol et."
+        key.contains("session_expired") || key.contains("expired") ->
+            "Doğrulama oturumunun süresi doldu. Yeni kod iste."
+        else -> "$operation tamamlanamadı. Firebase hata kodu: \${code.ifBlank { "UNKNOWN" }}." +
+            if (detail.isNotBlank()) " Ayrıntı: \${detail}" else " Firebase Console ayarlarını kontrol et."
     }
 }
 
@@ -1334,11 +1385,40 @@ class MainActivity : ComponentActivity() {
                                 provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
                                 isNewUser = false
                             ) { profileError ->
-                                report(when {
-                                    profileError != null -> "Hesap yenilendi ancak bulut profili kaydedilemedi."
-                                    emailVerified -> "E-posta adresin doğrulanmış."
-                                    else -> "E-posta adresin henüz doğrulanmamış."
-                                })
+                                if (profileError != null) {
+                                    report("Hesap yenilendi ancak bulut profili kaydedilemedi.")
+                                } else {
+                                    FirebaseFirestore.getInstance().collection("users").document(fresh.uid).get()
+                                        .addOnSuccessListener { profileSnapshot ->
+                                            val pendingEmailAddress = profileSnapshot.getString("pendingEmailAddress").orEmpty()
+                                            if (fresh.isEmailVerified && pendingEmailAddress.isNotBlank() &&
+                                                pendingEmailAddress.equals(fresh.email.orEmpty(), ignoreCase = true)) {
+                                                FirebaseFirestore.getInstance().collection("users").document(fresh.uid)
+                                                    .set(
+                                                        mapOf(
+                                                            "pendingEmailAddress" to FieldValue.delete(),
+                                                            "pendingEmailVerified" to FieldValue.delete(),
+                                                            "updatedAt" to FieldValue.serverTimestamp()
+                                                        ),
+                                                        SetOptions.merge()
+                                                    )
+                                                    .addOnCompleteListener { clearTask ->
+                                                        report(if (clearTask.isSuccessful) {
+                                                            "E-posta adresi doğrulandı ve güncellendi."
+                                                        } else {
+                                                            "E-posta doğrulandı ancak bekleyen adres kaydı temizlenemedi."
+                                                        })
+                                                    }
+                                            } else {
+                                                report(if (emailVerified) "E-posta adresin doğrulanmış."
+                                                else "E-posta adresin henüz doğrulanmamış.")
+                                            }
+                                        }
+                                        .addOnFailureListener {
+                                            report(if (emailVerified) "E-posta adresin doğrulanmış."
+                                            else "E-posta kontrol edildi ancak bekleyen adres bilgisi okunamadı.")
+                                        }
+                                }
                             }
                         }
                     }
@@ -1354,9 +1434,9 @@ class MainActivity : ComponentActivity() {
                 } else {
                     user.sendEmailVerification().addOnCompleteListener { task ->
                         report(if (task.isSuccessful) {
-                            "Yeni doğrulama bağlantısı e-posta adresine gönderildi."
+                            "Firebase doğrulama isteğini kabul etti. Gelen kutunu ve spam klasörünü kontrol et."
                         } else {
-                            "Doğrulama e-postası gönderilemedi. Biraz sonra tekrar dene."
+                            firebaseAccountActionError(task.exception, "Doğrulama e-postası gönderimi")
                         })
                     }
                 }
@@ -1374,21 +1454,23 @@ class MainActivity : ComponentActivity() {
                     else -> {
                         user.verifyBeforeUpdateEmail(cleanedEmail).addOnCompleteListener { task ->
                             if (task.isSuccessful) {
-                                report("Yeni e-posta adresine doğrulama bağlantısı gönderildi. Adres, bağlantıyı onayladığında güncellenecek.")
+                                FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                                    .set(
+                                        mapOf(
+                                            "pendingEmailAddress" to cleanedEmail,
+                                            "pendingEmailVerified" to false,
+                                            "updatedAt" to FieldValue.serverTimestamp()
+                                        ),
+                                        SetOptions.merge()
+                                    )
+                                    .addOnSuccessListener {
+                                        report("Firebase doğrulama isteğini kabul etti. Yeni adres doğrulanmadı olarak kaydedildi; gelen kutunu ve spam klasörünü kontrol et.")
+                                    }
+                                    .addOnFailureListener { saveError ->
+                                        report("Doğrulama isteği Firebase'e gönderildi ancak bekleyen adres kaydedilemedi: ${saveError.message.orEmpty().take(120)}")
+                                    }
                             } else {
-                                val code = (task.exception as? FirebaseAuthException)?.errorCode.orEmpty()
-                                report(when (code) {
-                                    "ERROR_REQUIRES_RECENT_LOGIN" ->
-                                        "Güvenlik nedeniyle yeniden giriş yapıp e-posta değişikliğini tekrar dene."
-                                    "ERROR_INVALID_EMAIL" ->
-                                        "Yeni e-posta adresi geçersiz."
-                                    "ERROR_EMAIL_ALREADY_IN_USE" ->
-                                        "Bu e-posta adresi başka bir hesapta kullanılıyor."
-                                    "ERROR_TOO_MANY_REQUESTS" ->
-                                        "Çok fazla deneme yapıldı. Bir süre sonra tekrar dene."
-                                    else ->
-                                        "E-posta değişikliği başlatılamadı. İnternet bağlantını ve hesap doğrulamasını kontrol et."
-                                })
+                                report(firebaseAccountActionError(task.exception, "E-posta değiştirme/doğrulama"))
                             }
                         }
                     }
@@ -1400,8 +1482,9 @@ class MainActivity : ComponentActivity() {
                     report("Fotoğraf yüklemek için önce giriş yap.")
                 } else {
                     val storageRef = FirebaseStorage.getInstance().reference
-                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}")
-                    storageRef.putFile(uri)
+                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}.jpg")
+                    val metadata = StorageMetadata.Builder().setContentType("image/jpeg").build()
+                    storageRef.putFile(uri, metadata)
                         .continueWithTask { task ->
                             if (!task.isSuccessful) {
                                 throw task.exception ?: IllegalStateException("Fotoğraf yüklemesi tamamlanamadı.")
@@ -1434,10 +1517,13 @@ class MainActivity : ComponentActivity() {
                             val detail = error.message.orEmpty().lowercase(Locale.ROOT)
                             report(when {
                                 detail.contains("unauthorized") || detail.contains("permission") ->
-                                    "Fotoğraf yükleme izni yok. Firebase Storage kurallarını profilePhotos/{kullanıcıKimliği} için ayarla."
-                                detail.contains("bucket") || detail.contains("no object") ->
-                                    "Firebase Storage henüz kullanıma hazır değil. Proje depolama alanını kontrol et."
-                                else -> "Fotoğraf yüklenemedi. İnternet bağlantını ve Firebase Storage ayarlarını kontrol et."
+                                    "Fotoğraf yükleme reddedildi. Firebase Console > Storage > Rules bölümünde güncel storage.rules kurallarını yayımla."
+                                detail.contains("bucket") || detail.contains("no object") ||
+                                    detail.contains("object-not-found") || detail.contains("default bucket") ->
+                                    "Firebase Storage bucket hazır değil. Firebase Console > Storage üzerinden myncloud-24.firebasestorage.app deposunu oluştur/başlat."
+                                detail.contains("network") || detail.contains("unavailable") ->
+                                    "Fotoğraf yüklenemedi: ağ bağlantısı kesildi. İnternetini kontrol edip tekrar dene."
+                                else -> "Fotoğraf yüklenemedi. Firebase Storage hata ayrıntısı: ${error.message.orEmpty().take(160)}"
                             })
                         }
                 }
@@ -1450,12 +1536,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         user.updatePhoneNumber(credential).addOnCompleteListener { task ->
                             if (!task.isSuccessful) {
-                                report(when ((task.exception as? FirebaseAuthException)?.errorCode.orEmpty()) {
-                                    "ERROR_INVALID_VERIFICATION_CODE" -> "SMS doğrulama kodu hatalı."
-                                    "ERROR_SESSION_EXPIRED" -> "SMS kodunun süresi doldu. Yeni kod iste."
-                                    "ERROR_REQUIRES_RECENT_LOGIN" -> "Güvenlik için çıkış yapıp yeniden giriş yaptıktan sonra dene."
-                                    else -> "Telefon numarası doğrulanamadı. Kodu ve bağlantını kontrol et."
-                                })
+                                report(firebaseAccountActionError(task.exception, "Telefon numarası doğrulaması"))
                             } else {
                                 user.reload().addOnCompleteListener {
                                     val fresh = auth.currentUser ?: user
@@ -1465,11 +1546,27 @@ class MainActivity : ComponentActivity() {
                                         provider = fresh.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password",
                                         isNewUser = false
                                     ) { profileError ->
-                                        report(if (profileError == null) {
-                                            "Telefon numaran doğrulandı ve hesabına eklendi."
+                                        if (profileError != null) {
+                                            report("Telefon doğrulandı ancak profil kaydı yenilenemedi. İnternet bağlantını kontrol et.")
                                         } else {
-                                            "Telefon doğrulandı ancak profil kaydı yenilenemedi. İnternet bağlantını kontrol et."
-                                        })
+                                            FirebaseFirestore.getInstance().collection("users").document(fresh.uid)
+                                                .set(
+                                                    mapOf(
+                                                        "phoneNumber" to fresh.phoneNumber.orEmpty(),
+                                                        "phoneNumberVerified" to true,
+                                                        "pendingPhoneNumber" to FieldValue.delete(),
+                                                        "pendingPhoneVerified" to false,
+                                                        "updatedAt" to FieldValue.serverTimestamp()
+                                                    ),
+                                                    SetOptions.merge()
+                                                )
+                                                .addOnSuccessListener {
+                                                    report("Telefon numaran doğrulandı ve hesabına eklendi.")
+                                                }
+                                                .addOnFailureListener {
+                                                    report("Telefon doğrulandı; ancak bekleyen numara kaydı temizlenemedi. Hesabını yeniden açıp kontrol et.")
+                                                }
+                                        }
                                     }
                                 }
                             }
@@ -1477,11 +1574,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             val requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit = { rawNumber, report ->
-                val number = rawNumber.trim().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                val number = normalizePendingPhoneNumber(rawNumber).orEmpty()
                 val digitCount = number.count { it.isDigit() }
                 when {
-                    !number.startsWith("+") || digitCount !in 8..15 ->
-                        report(null, "Numarayı uluslararası biçimde gir; ör. +905xxxxxxxxx.")
+                    number.isBlank() || !number.startsWith("+") || digitCount !in 8..15 ->
+                        report(null, "Geçerli bir telefon numarası gir. Örnek: 05XX XXX XX XX veya +905XXXXXXXXX.")
                     auth.currentUser == null ->
                         report(null, "Telefon numarası eklemek için önce giriş yap.")
                     else -> {
@@ -1495,13 +1592,7 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 override fun onVerificationFailed(error: FirebaseException) {
-                                    val detail = error.message.orEmpty().lowercase(Locale.ROOT)
-                                    report(null, when {
-                                        detail.contains("quota") -> "SMS kotası aşıldı. Daha sonra tekrar dene."
-                                        detail.contains("invalid phone") -> "Telefon numarası geçersiz."
-                                        detail.contains("billing") -> "Firebase telefon doğrulaması için faturalandırma ayarı gerekiyor."
-                                        else -> "SMS doğrulaması başlatılamadı. Firebase Phone Auth ayarlarını kontrol et."
-                                    })
+                                    report(null, firebaseAccountActionError(error, "SMS gönderimi"))
                                 }
 
                                 override fun onCodeSent(
@@ -1510,9 +1601,17 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     report(verificationId, "SMS kodu gönderildi. Mesajdaki kodu gir.")
                                 }
+
+                                override fun onCodeAutoRetrievalTimeOut(verificationId: String) {
+                                    report(verificationId, "Otomatik SMS doğrulama süresi doldu. Gelen SMS kodunu elle girebilirsin.")
+                                }
                             })
                             .build()
-                        PhoneAuthProvider.verifyPhoneNumber(options)
+                        try {
+                            PhoneAuthProvider.verifyPhoneNumber(options)
+                        } catch (error: Exception) {
+                            report(null, firebaseAccountActionError(error, "SMS gönderimi"))
+                        }
                     }
                 }
             }
@@ -1525,6 +1624,37 @@ class MainActivity : ComponentActivity() {
                         updatePhoneCredential(credential, report)
                     }
                 }
+            val changeDisplayName: (String, (String) -> Unit) -> Unit = { requestedName, report ->
+                val cleanedName = requestedName.trim().replace(Regex("\\s+"), " ")
+                val activeUser = auth.currentUser
+                when {
+                    cleanedName.isBlank() -> report("Kullanıcı adı boş bırakılamaz.")
+                    cleanedName.length !in 2..60 -> report("Kullanıcı adı 2-60 karakter arasında olmalı.")
+                    cleanedName.any { it.code < 32 || it.code in 0x7F..0x9F } -> report("Kullanıcı adı geçersiz karakter içeriyor.")
+                    activeUser == null -> report("Kullanıcı adını değiştirmek için yeniden giriş yap.")
+                    cleanedName == activeUser.displayName.orEmpty() -> report("Kullanıcı adı değişmedi.")
+                    else -> {
+                        activeUser.updateProfile(
+                            UserProfileChangeRequest.Builder().setDisplayName(cleanedName).build()
+                        ).addOnCompleteListener { updateTask ->
+                            if (!updateTask.isSuccessful) {
+                                report(firebaseAccountActionError(updateTask.exception, "Kullanıcı adı güncellemesi"))
+                            } else {
+                                name = cleanedName
+                                saveFirebaseProfile(
+                                    user = activeUser,
+                                    provider = activeUser.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "profile",
+                                    isNewUser = false,
+                                    displayNameOverride = cleanedName
+                                ) { profileError ->
+                                    report(if (profileError == null) "Kullanıcı adı güncellendi."
+                                    else "Kullanıcı adı Firebase profilinde güncellendi ancak bulut profili kaydedilemedi.")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             val scheme = if (dark) darkColorScheme(
                 primary = Accent, onPrimary = Color(0xFF10142C), secondary = Mint,
                 background = Color(0xFF0B0D14), surface = Color(0xFF171C2A),
@@ -1713,6 +1843,7 @@ class MainActivity : ComponentActivity() {
                     refreshEmailVerification = refreshEmailVerification,
                     resendEmailVerification = resendEmailVerification,
                     changeEmailAddress = changeEmailAddress,
+                    changeDisplayName = changeDisplayName,
                     uploadProfilePhoto = uploadProfilePhoto,
                     requestPhoneVerification = requestPhoneVerification,
                     confirmPhoneVerification = confirmPhoneVerification,
@@ -1880,6 +2011,7 @@ private fun AssistantScreen(
     refreshEmailVerification: ((String) -> Unit) -> Unit,
     resendEmailVerification: ((String) -> Unit) -> Unit,
     changeEmailAddress: (String, (String) -> Unit) -> Unit,
+    changeDisplayName: (String, (String) -> Unit) -> Unit,
     uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
     requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
     confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
@@ -2839,6 +2971,7 @@ private fun AssistantScreen(
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
                                 changeEmailAddress = changeEmailAddress,
+                                changeDisplayName = changeDisplayName,
                                 uploadProfilePhoto = uploadProfilePhoto,
                                 requestPhoneVerification = requestPhoneVerification,
                                 confirmPhoneVerification = confirmPhoneVerification,
@@ -2860,6 +2993,7 @@ private fun AssistantScreen(
                                 refreshEmailVerification = refreshEmailVerification,
                                 resendEmailVerification = resendEmailVerification,
                                 changeEmailAddress = changeEmailAddress,
+                                changeDisplayName = changeDisplayName,
                                 uploadProfilePhoto = uploadProfilePhoto,
                                 requestPhoneVerification = requestPhoneVerification,
                                 confirmPhoneVerification = confirmPhoneVerification,
@@ -4094,7 +4228,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.5.8", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.5.9", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -4135,21 +4269,79 @@ private fun AccountSettings(
     refreshEmailVerification: ((String) -> Unit) -> Unit,
     resendEmailVerification: ((String) -> Unit) -> Unit,
     changeEmailAddress: (String, (String) -> Unit) -> Unit,
+    changeDisplayName: (String, (String) -> Unit) -> Unit,
     uploadProfilePhoto: (Uri, (String) -> Unit) -> Unit,
     requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit,
     confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit,
     logout: () -> Unit
 ) {
-    var phoneDraft by remember(phone) { mutableStateOf(phone) }
+    val activeUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    var nameDraft by remember(name) { mutableStateOf(name) }
+    var editingName by remember { mutableStateOf(false) }
+    var phoneDraft by remember(activeUid, phone) { mutableStateOf(phone) }
+    var pendingPhone by remember(activeUid) { mutableStateOf("") }
+    var phoneExpanded by remember(activeUid) { mutableStateOf(false) }
     var emailDraft by remember(email) { mutableStateOf(email) }
+    var pendingEmailAddress by remember(activeUid) { mutableStateOf("") }
     var editingEmail by remember { mutableStateOf(false) }
     var verificationId by remember { mutableStateOf<String?>(null) }
+    var phoneVerificationBusy by remember { mutableStateOf(false) }
     var smsCode by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var photoToCrop by remember { mutableStateOf<Uri?>(null) }
+    var photoUploading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeUid) {
+        if (activeUid.isBlank()) {
+            pendingPhone = ""
+            pendingEmailAddress = ""
+        } else {
+            refreshEmailVerification { message ->
+                if (message.contains("doğrulandı ve güncellendi", ignoreCase = true)) {
+                    pendingEmailAddress = ""
+                }
+                if (message.contains("yenilenemedi", ignoreCase = true) ||
+                    message.contains("kaydedilemedi", ignoreCase = true)) {
+                    statusMessage = message
+                }
+            }
+            FirebaseFirestore.getInstance().collection("users").document(activeUid).get()
+                .addOnSuccessListener { snapshot ->
+                    if (FirebaseAuth.getInstance().currentUser?.uid == activeUid) {
+                        pendingPhone = snapshot.getString("pendingPhoneNumber").orEmpty()
+                        val storedPendingEmail = snapshot.getString("pendingEmailAddress").orEmpty()
+                        pendingEmailAddress = if (emailVerified && storedPendingEmail.equals(email, ignoreCase = true)) {
+                            ""
+                        } else {
+                            storedPendingEmail
+                        }
+                    }
+                }
+                .addOnFailureListener { error ->
+                    statusMessage = "Bekleyen hesap bilgileri okunamadı: ${error.message.orEmpty().take(120)}"
+                }
+        }
+    }
     val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
-        if (uri != null) uploadProfilePhoto(uri) { statusMessage = it }
+        if (uri != null) photoToCrop = uri
+        else statusMessage = "Fotoğraf seçimi iptal edildi."
+    }
+    photoToCrop?.let { sourceUri ->
+        ProfilePhotoCropDialog(
+            sourceUri = sourceUri,
+            onDismiss = { photoToCrop = null },
+            onConfirm = { croppedUri ->
+                photoToCrop = null
+                photoUploading = true
+                statusMessage = "Profil fotoğrafı yükleniyor…"
+                uploadProfilePhoto(croppedUri) {
+                    photoUploading = false
+                    statusMessage = it
+                }
+            }
+        )
     }
 
     Card(
@@ -4162,7 +4354,7 @@ private fun AccountSettings(
         ) {
             Row(
                 Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (photoUrl.isNotBlank()) {
@@ -4189,10 +4381,58 @@ private fun AccountSettings(
                         }
                     }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(name.ifBlank { email.substringBefore("@") }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text(email.ifBlank { "E-posta eklenmemiş" }, fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (editingName) {
+                            OutlinedTextField(
+                                value = nameDraft,
+                                onValueChange = { nameDraft = it.take(60) },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("Kullanıcı adı") },
+                                singleLine = true
+                            )
+                        } else {
+                            Text(
+                                name.ifBlank { email.substringBefore("@").ifBlank { "Kullanıcı" } },
+                                modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                nameDraft = name
+                                editingName = !editingName
+                            }
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Kullanıcı adını düzenle")
+                        }
+                    }
+                    if (editingName) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { nameDraft = name; editingName = false }) {
+                                Text("Vazgeç")
+                            }
+                            Button(
+                                onClick = {
+                                    changeDisplayName(nameDraft) { message ->
+                                        statusMessage = message
+                                        if (message == "Kullanıcı adı güncellendi.") editingName = false
+                                    }
+                                },
+                                enabled = nameDraft.trim().length in 2..60
+                            ) { Text("Kaydet") }
+                        }
+                    }
+                    Text(
+                        email.ifBlank { "E-posta eklenmemiş" },
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     OutlinedButton(
                         onClick = {
                             photoPicker.launch(
@@ -4200,11 +4440,12 @@ private fun AccountSettings(
                                     ActivityResultContracts.PickVisualMedia.ImageOnly
                                 )
                             )
-                        }
+                        },
+                        enabled = !photoUploading
                     ) {
                         Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Fotoğraf yükle")
+                        Text(if (photoUploading) "Fotoğraf yükleniyor…" else "Fotoğraf yükle")
                     }
                 }
             }
@@ -4241,26 +4482,24 @@ private fun AccountSettings(
                     )
                 }
                 Icon(
-                    if (emailVerified) Icons.Default.CheckCircle else Icons.Default.Refresh,
-                    contentDescription = if (emailVerified) "Doğrulandı" else "Durumu yenile",
+                    if (emailVerified) Icons.Default.CheckCircle else Icons.Default.Email,
+                    contentDescription = if (emailVerified) "E-posta doğrulandı" else "E-posta doğrulanmadı",
                     tint = if (emailVerified) Color(0xFF2D9B62) else MaterialTheme.colorScheme.primary
                 )
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { refreshEmailVerification { statusMessage = it } },
-                    modifier = Modifier.weight(1f)
-                ) { Text("Durumu yenile") }
-                if (!emailVerified) {
-                    Button(
-                        onClick = { resendEmailVerification { statusMessage = it } },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("E-posta gönder", maxLines = 1, softWrap = false)
-                    }
+            if (pendingEmailAddress.isNotBlank()) {
+                Text(
+                    "Bekleyen e-posta: $pendingEmailAddress · Doğrulanmadı",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            if (!emailVerified) {
+                Button(
+                    onClick = { resendEmailVerification { statusMessage = it } },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Doğrulama e-postası gönder", maxLines = 1, softWrap = false)
                 }
             }
 
@@ -4286,7 +4525,8 @@ private fun AccountSettings(
                     onClick = {
                         changeEmailAddress(emailDraft) { message ->
                             statusMessage = message
-                            if (message.contains("bağlantısı gönderildi", ignoreCase = true)) {
+                            if (message.contains("doğrulanmadı olarak kaydedildi", ignoreCase = true)) {
+                                pendingEmailAddress = emailDraft.trim()
                                 editingEmail = false
                             }
                         }
@@ -4332,36 +4572,134 @@ private fun AccountSettings(
 
             HorizontalDivider()
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Telefon numarası", fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (phone.isNotBlank()) "Doğrulanmış numara: $phone" else "SMS koduyla doğrulayarak numara ekle.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                )
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Telefon numarası", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when {
+                            pendingPhone.isNotBlank() -> "Doğrulanmadı · $pendingPhone"
+                            phone.isNotBlank() -> "Doğrulandı · $phone"
+                            else -> "Henüz belirtilmemiş"
+                        },
+                        fontSize = 12.sp,
+                        color = when {
+                            pendingPhone.isNotBlank() -> MaterialTheme.colorScheme.tertiary
+                            phone.isNotBlank() -> Color(0xFF2D9B62)
+                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        phoneExpanded = !phoneExpanded
+                        if (phoneExpanded) phoneDraft = pendingPhone.ifBlank { phone }
+                    }
+                ) {
+                    Text(
+                        when {
+                            phoneExpanded -> "Kapat"
+                            pendingPhone.isNotBlank() || phone.isNotBlank() -> "Düzenle"
+                            else -> "Ekle"
+                        },
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            if (phoneExpanded) {
                 OutlinedTextField(
                     value = phoneDraft,
                     onValueChange = { phoneDraft = it.take(22) },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = verificationId == null,
-                    label = { Text("Telefon (+90...)") },
+                    label = { Text("Telefon numarası") },
+                    placeholder = { Text("05XX XXX XX XX veya +90...") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                 )
-                if (verificationId == null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            requestPhoneVerification(phoneDraft) { id, message ->
-                                if (!id.isNullOrBlank()) {
-                                    verificationId = id
-                                    smsCode = ""
+                            val normalized = normalizePendingPhoneNumber(phoneDraft)
+                            val uid = FirebaseAuth.getInstance().currentUser?.uid
+                            when {
+                                normalized == null ->
+                                    statusMessage = "Geçerli numara gir. Örnek: 05XX XXX XX XX veya +905XXXXXXXXX."
+                                uid.isNullOrBlank() ->
+                                    statusMessage = "Numarayı kaydetmek için yeniden giriş yap."
+                                normalized == phone && pendingPhone.isBlank() ->
+                                    statusMessage = "Bu numara zaten doğrulanmış."
+                                else -> {
+                                    FirebaseFirestore.getInstance().collection("users").document(uid)
+                                        .set(
+                                            mapOf(
+                                                "pendingPhoneNumber" to normalized,
+                                                "pendingPhoneVerified" to false,
+                                                "updatedAt" to FieldValue.serverTimestamp()
+                                            ),
+                                            SetOptions.merge()
+                                        )
+                                        .addOnSuccessListener {
+                                            pendingPhone = normalized
+                                            phoneDraft = normalized
+                                            statusMessage = "Telefon numarası kaydedildi ancak henüz doğrulanmadı. SMS kodu gönderebilirsin."
+                                        }
+                                        .addOnFailureListener { error ->
+                                            statusMessage = "Telefon numarası kaydedilemedi: ${error.message.orEmpty().take(150)}"
+                                        }
                                 }
-                                statusMessage = message
                             }
                         },
+                        enabled = verificationId == null,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Kaydet") }
+                    OutlinedButton(
+                        onClick = { phoneExpanded = false; verificationId = null; smsCode = "" },
+                        enabled = !phoneVerificationBusy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Kapat") }
+                }
+
+                if (pendingPhone.isNotBlank() && verificationId.isNullOrBlank()) {
+                    Button(
+                        onClick = {
+                            if (phoneVerificationBusy) return@Button
+                            phoneVerificationBusy = true
+                            try {
+                                requestPhoneVerification(pendingPhone) { id, message ->
+                                    phoneVerificationBusy = false
+                                    if (!id.isNullOrBlank()) {
+                                        verificationId = id
+                                        smsCode = ""
+                                    }
+                                    if (message?.contains("doğrulandı", ignoreCase = true) == true) {
+                                        pendingPhone = ""
+                                        phoneExpanded = false
+                                    }
+                                    statusMessage = message
+                                }
+                            } catch (error: Exception) {
+                                phoneVerificationBusy = false
+                                statusMessage = firebaseAccountActionError(error, "SMS gönderimi")
+                            }
+                        },
+                        enabled = !phoneVerificationBusy && verificationId.isNullOrBlank(),
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("SMS doğrulama kodu gönder") }
-                } else {
+                    ) {
+                        Text(if (phoneVerificationBusy) "SMS gönderiliyor…" else "SMS kodu gönder")
+                    }
+                }
+
+                if (!verificationId.isNullOrBlank()) {
                     OutlinedTextField(
                         value = smsCode,
                         onValueChange = { smsCode = it.filter(Char::isDigit).take(8) },
@@ -4382,6 +4720,8 @@ private fun AccountSettings(
                                     if (it.contains("doğrulandı", ignoreCase = true)) {
                                         verificationId = null
                                         smsCode = ""
+                                        pendingPhone = ""
+                                        phoneExpanded = false
                                     }
                                 }
                             },
@@ -4396,12 +4736,23 @@ private fun AccountSettings(
                 Text(
                     it,
                     fontSize = 13.sp,
-                    color = if (it.contains("başarı", ignoreCase = true) ||
-                        it.contains("doğrulandı", ignoreCase = true) ||
-                        it.contains("gönderildi", ignoreCase = true)) {
-                        Color(0xFF2D9B62)
-                    } else {
-                        MaterialTheme.colorScheme.secondary
+                    color = when {
+                        it.contains("başarı", ignoreCase = true) ||
+                            it.contains("doğrulandı", ignoreCase = true) ||
+                            it.contains("gönderildi", ignoreCase = true) ||
+                            it.contains("kabul etti", ignoreCase = true) ->
+                            Color(0xFF2D9B62)
+                        it.contains("başarısız", ignoreCase = true) ||
+                            it.contains("tamamlanamadı", ignoreCase = true) ||
+                            it.contains("kaydedilemedi", ignoreCase = true) ||
+                            it.contains("geçersiz", ignoreCase = true) ||
+                            it.contains("kotası", ignoreCase = true) ||
+                            it.contains("etkin değil", ignoreCase = true) ||
+                            it.contains("ulaşılamadı", ignoreCase = true) ||
+                            it.contains("reddedildi", ignoreCase = true) ||
+                            it.contains("hata kodu", ignoreCase = true) ->
+                            MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
                     }
                 )
             }
