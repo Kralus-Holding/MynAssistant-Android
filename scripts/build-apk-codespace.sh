@@ -146,7 +146,11 @@ keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -a
 echo "== 5/6: Run unit tests and build APK =="
 BUILD_LOG="$ROOT/mynassistant-build-0.5.8.log"
 set +e
-"$GRADLE_BIN" --no-daemon --max-workers=2 testDebugUnitTest assembleDebug --stacktrace 2>&1 | tee "$BUILD_LOG"
+GRADLE_HEAP="${MYN_GRADLE_HEAP:-2g}"
+GRADLE_METASPACE="${MYN_GRADLE_METASPACE:-512m}"
+"$GRADLE_BIN" --no-daemon --no-parallel --max-workers=2 \
+  -Dorg.gradle.jvmargs="-Xmx$GRADLE_HEAP -XX:MaxMetaspaceSize=$GRADLE_METASPACE -Dfile.encoding=UTF-8" \
+  testDebugUnitTest assembleDebug --stacktrace 2>&1 | tee "$BUILD_LOG"
 BUILD_STATUS=${PIPESTATUS[0]}
 set -e
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
