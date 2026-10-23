@@ -1,0 +1,21 @@
+name: Runner diagnostic
+
+on:
+  push:
+    branches:
+      - diagnose/runner-start-20261023
+
+permissions:
+  contents: read
+
+jobs:
+  runner-start:
+    name: Check hosted runner allocation
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Confirm the hosted runner starts
+        run: |
+          echo "GitHub-hosted runner successfully allocated."
+          echo "UTC time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          uname -a
