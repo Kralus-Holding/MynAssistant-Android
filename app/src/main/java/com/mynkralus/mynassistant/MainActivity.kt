@@ -1,5 +1,6 @@
 package com.mynkralus.mynassistant
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -18,13 +19,19 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.FirebaseException
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.PhoneAuthCredential
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -79,6 +86,12 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
@@ -100,6 +113,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import java.util.concurrent.TimeUnit
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
@@ -169,6 +183,8 @@ private fun saveFirebaseProfile(
         "displayName" to (displayNameOverride?.takeIf { it.isNotBlank() } ?: user.displayName.orEmpty()),
         "email" to user.email.orEmpty(),
         "phoneNumber" to user.phoneNumber.orEmpty(),
+        "photoUrl" to user.photoUrl?.toString().orEmpty(),
+        "emailVerified" to user.isEmailVerified,
         "provider" to provider,
         "lastSignInAt" to FieldValue.serverTimestamp()
     )
@@ -183,6 +199,21 @@ private fun saveFirebaseProfile(
             onComplete("Profil kaydedilemedi.")
         }
 }
+internal fun normalizePhoneNumberForVerification(raw: String): String? {
+    val compact = raw.trim().replace(Regex("[\\s().-]"), "")
+    val digits = compact.filter { it.isDigit() }
+    val e164Digits = when {
+        compact.startsWith("+") -> digits
+        digits.startsWith("00") -> digits.drop(2)
+        digits.startsWith("90") && digits.length == 12 -> digits
+        digits.startsWith("0") && digits.length == 11 -> "90" + digits.drop(1)
+        digits.length == 10 -> "90" + digits
+        else -> return null
+    }
+    val normalized = "+" + e164Digits
+    return normalized.takeIf { it.matches(Regex("\\+[1-9]\\d{7,14}")) }
+}
+
 private data class PcBridgeResult(
     val connected: Boolean,
     val success: Boolean,
@@ -1215,6 +1246,7 @@ class MainActivity : ComponentActivity() {
                     dark = dark,
                     toggleTheme = { dark = !dark; prefs.edit().putBoolean("dark", dark).apply() },
                     signedIn = signedIn, name = name, email = email, phone = phone, photoUrl = photoUrl,
+                    firebaseUser = auth.currentUser,
                     firebaseUserId = auth.currentUser?.uid,
                     initialPcBridgeUrl = prefs.getString("pc_bridge_url_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
                     initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "meyene") ?: "meyene",
@@ -1389,6 +1421,12 @@ class MainActivity : ComponentActivity() {
                     selectSavedGoogleAccount = selectSavedGoogleAccount,
                     savedGoogleAccounts = savedGoogleAccounts,
                     googleStatus = googleStatus,
+                    onAccountChanged = { updatedName, updatedEmail, updatedPhone, updatedPhotoUrl ->
+                        name = updatedName
+                        email = updatedEmail
+                        phone = updatedPhone
+                        photoUrl = updatedPhotoUrl
+                    },
                     wakeCommandFromOverlay = incomingWakeCommand.value,
                     onWakeCommandConsumed = { incomingWakeCommand.value = null }
                 )
@@ -1437,7 +1475,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AssistantScreen(
     dark: Boolean, toggleTheme: () -> Unit, signedIn: Boolean, name: String,
-    email: String, phone: String, photoUrl: String, firebaseUserId: String?,
+    email: String, phone: String, photoUrl: String, firebaseUser: FirebaseUser?, firebaseUserId: String?,
     initialPcBridgeUrl: String,
     initialPcBridgeToken: String,
     savePcBridgeSettings: (String, String) -> Unit,
@@ -1450,6 +1488,7 @@ private fun AssistantScreen(
     selectSavedGoogleAccount: (String) -> Unit,
     savedGoogleAccounts: List<SavedGoogleAccount>,
     googleStatus: String?,
+    onAccountChanged: (String, String, String, String) -> Unit,
     wakeCommandFromOverlay: String? = null,
     onWakeCommandConsumed: () -> Unit = {}
 ) {
@@ -2369,16 +2408,17 @@ private fun AssistantScreen(
                     }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     when (page) {
                         Page.LOGIN -> if (signedIn) {
-                            Text("Oturum açık", color = MaterialTheme.colorScheme.secondary)
-                            Text("Ad: " + name)
-                            Text("E-posta: " + email.ifBlank { "Eklenmemiş" })
-                            Text("Telefon: " + phone.ifBlank { "Eklenmemiş" })
-                            googleStatus?.let { status -> Text(status, color = when {
-                                        status.contains("başarılı", ignoreCase = true) || status.contains("oluşturuldu", ignoreCase = true) || status.contains("giriş yapıldı", ignoreCase = true) -> Color(0xFF65D68B)
-                                        status.contains("başarısız", ignoreCase = true) || status.contains("hata", ignoreCase = true) || status.contains("kaydedilemedi", ignoreCase = true) -> Color(0xFFFF7D85)
-                                        else -> MaterialTheme.colorScheme.secondary
-                                    }, fontSize = 12.sp) }
-                            OutlinedButton(onClick = logout) { Text("Çıkış yap") }
+                            AccountProfileSection(
+                                firebaseUser = firebaseUser,
+                                name = name,
+                                email = email,
+                                phone = phone,
+                                photoUrl = photoUrl,
+                                photoImageLoader = photoImageLoader,
+                                onAccountChanged = onAccountChanged,
+                                onGoogleLogin = googleLogin,
+                                onLogout = logout
+                            )
                         } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.REGISTER) })
                         Page.REGISTER -> if (signedIn) {
                             Text("Oturum açık.", color = MaterialTheme.colorScheme.secondary)
@@ -3413,6 +3453,626 @@ private fun AssistantScreen(
     }
 }
 
+
+@Composable
+private fun AccountProfileSection(
+    firebaseUser: FirebaseUser?,
+    name: String,
+    email: String,
+    phone: String,
+    photoUrl: String,
+    photoImageLoader: ImageLoader,
+    onAccountChanged: (String, String, String, String) -> Unit,
+    onGoogleLogin: () -> Unit,
+    onLogout: () -> Unit
+) {
+    val context = LocalContext.current
+    var accountStatus by remember(firebaseUser?.uid) { mutableStateOf<String?>(null) }
+    var accountBusy by remember(firebaseUser?.uid) { mutableStateOf(false) }
+    var editingName by remember(firebaseUser?.uid) { mutableStateOf(false) }
+    var nameDraft by remember(firebaseUser?.uid, name) { mutableStateOf(name) }
+    var editingEmail by remember(firebaseUser?.uid) { mutableStateOf(false) }
+    var emailDraft by remember(firebaseUser?.uid, email) { mutableStateOf(email) }
+    var phoneDraft by remember(firebaseUser?.uid, phone) { mutableStateOf(phone) }
+    var smsCode by remember(firebaseUser?.uid) { mutableStateOf("") }
+    var phoneVerificationId by remember(firebaseUser?.uid) { mutableStateOf<String?>(null) }
+    var emailVerified by remember(firebaseUser?.uid) { mutableStateOf(firebaseUser?.isEmailVerified == true) }
+
+    val profileImagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { selectedUri ->
+        if (selectedUri == null) {
+            accountStatus = "Fotoğraf seçimi iptal edildi."
+        } else {
+            val user = FirebaseAuth.getInstance().currentUser
+            if (user == null) {
+                accountStatus = "Fotoğraf yüklemek için yeniden giriş yapmalısın."
+            } else {
+                val mimeType = context.contentResolver.getType(selectedUri)
+                if (mimeType !in setOf("image/jpeg", "image/png", "image/webp")) {
+                    accountStatus = "JPG, PNG veya WebP biçiminde bir fotoğraf seç."
+                } else {
+                    accountBusy = true
+                    accountStatus = "Fotoğraf yükleniyor…"
+                    try {
+                        val storageRef = FirebaseStorage.getInstance().reference
+                            .child("profileImages/" + user.uid + "/avatar_" + System.currentTimeMillis())
+                        val metadata = StorageMetadata.Builder().setContentType(mimeType).build()
+                        storageRef.putFile(selectedUri, metadata)
+                            .continueWithTask { task ->
+                                if (!task.isSuccessful) {
+                                    throw task.exception ?: IllegalStateException("Fotoğraf yüklemesi başarısız.")
+                                }
+                                storageRef.downloadUrl
+                            }
+                            .addOnSuccessListener { downloadUri ->
+                                val remotePhotoUrl = downloadUri.toString()
+                                val profileRequest = UserProfileChangeRequest.Builder()
+                                    .setPhotoUri(downloadUri)
+                                    .build()
+                                user.updateProfile(profileRequest).addOnCompleteListener { profileTask ->
+                                    if (!profileTask.isSuccessful) {
+                                        accountBusy = false
+                                        accountStatus = "Fotoğraf yüklendi ancak profile bağlanamadı. Yeniden giriş yapıp dene."
+                                    } else {
+                                        FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                                            .set(
+                                                mapOf(
+                                                    "photoUrl" to remotePhotoUrl,
+                                                    "updatedAt" to FieldValue.serverTimestamp()
+                                                ),
+                                                SetOptions.merge()
+                                            )
+                                            .addOnCompleteListener { saveTask ->
+                                                accountBusy = false
+                                                onAccountChanged(name, email, phone, remotePhotoUrl)
+                                                accountStatus = if (saveTask.isSuccessful) {
+                                                    "Profil fotoğrafı yüklendi."
+                                                } else {
+                                                    "Fotoğraf profilinde güncellendi ancak bulut profili kaydedilemedi."
+                                                }
+                                            }
+                                    }
+                                }
+                            }
+                            .addOnFailureListener {
+                                accountBusy = false
+                                accountStatus = "Fotoğraf yüklenemedi. İnterneti ve Firebase Storage kurallarını kontrol edip tekrar dene."
+                            }
+                    } catch (_: Exception) {
+                        accountBusy = false
+                        accountStatus = "Fotoğraf yüklemesi başlatılamadı. Firebase Storage etkin ve yapılandırılmış olmalı."
+                    }
+                }
+            }
+        }
+    }
+
+    val user = firebaseUser
+    val googleLinked = user?.providerData?.any { it.providerId == "google.com" } == true
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (photoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = photoUrl,
+                            imageLoader = photoImageLoader,
+                            contentDescription = "Profil fotoğrafı",
+                            modifier = Modifier.size(82.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.size(82.dp).clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = "Profil fotoğrafı eklenmemiş",
+                                modifier = Modifier.size(56.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (editingName) {
+                            OutlinedTextField(
+                                value = nameDraft,
+                                onValueChange = { nameDraft = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Ad soyad") },
+                                singleLine = true,
+                                enabled = !accountBusy
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        nameDraft = name
+                                        editingName = false
+                                    },
+                                    enabled = !accountBusy
+                                ) { Text("Vazgeç") }
+                                Button(
+                                    onClick = {
+                                        val cleanedName = nameDraft.trim()
+                                        val activeUser = FirebaseAuth.getInstance().currentUser
+                                        if (cleanedName.isBlank()) {
+                                            accountStatus = "Ad soyad boş bırakılamaz."
+                                        } else if (activeUser == null) {
+                                            accountStatus = "Bu işlemi yapmak için yeniden giriş yapmalısın."
+                                        } else {
+                                            accountBusy = true
+                                            activeUser.updateProfile(
+                                                UserProfileChangeRequest.Builder()
+                                                    .setDisplayName(cleanedName)
+                                                    .build()
+                                            ).addOnCompleteListener { updateTask ->
+                                                if (!updateTask.isSuccessful) {
+                                                    accountBusy = false
+                                                    accountStatus = "Ad soyad güncellenemedi. Yeniden giriş yapıp tekrar dene."
+                                                } else {
+                                                    FirebaseFirestore.getInstance().collection("users")
+                                                        .document(activeUser.uid)
+                                                        .set(
+                                                            mapOf(
+                                                                "displayName" to cleanedName,
+                                                                "updatedAt" to FieldValue.serverTimestamp()
+                                                            ),
+                                                            SetOptions.merge()
+                                                        )
+                                                        .addOnCompleteListener { saveTask ->
+                                                            accountBusy = false
+                                                            editingName = false
+                                                            onAccountChanged(cleanedName, email, phone, photoUrl)
+                                                            accountStatus = if (saveTask.isSuccessful) {
+                                                                "Ad soyad güncellendi."
+                                                            } else {
+                                                                "Ad soyad güncellendi ancak bulut profili kaydedilemedi."
+                                                            }
+                                                        }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = !accountBusy && nameDraft.trim().isNotBlank()
+                                ) { Text("Kaydet") }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    name.ifBlank { email.substringBefore("@").ifBlank { "MynAssistant kullanıcısı" } },
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                IconButton(
+                                    onClick = {
+                                        nameDraft = name
+                                        editingName = true
+                                    },
+                                    enabled = !accountBusy
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Ad soyadı düzenle")
+                                }
+                            }
+                        }
+                        Text(
+                            email.ifBlank { "E-posta eklenmemiş" },
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        OutlinedButton(
+                            onClick = { profileImagePicker.launch("image/*") },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !accountBusy
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Fotoğraf yükle", maxLines = 1)
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        if (emailVerified) Icons.Default.Verified else Icons.Default.Email,
+                        contentDescription = null,
+                        modifier = Modifier.size(30.dp),
+                        tint = if (emailVerified) Color(0xFF35B879) else MaterialTheme.colorScheme.secondary
+                    )
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("E-posta doğrulaması", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (emailVerified) "E-posta adresi doğrulandı" else "E-posta adresi henüz doğrulanmadı",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            val activeUser = FirebaseAuth.getInstance().currentUser
+                            if (activeUser == null) {
+                                accountStatus = "Hesap bilgilerini yenilemek için yeniden giriş yapmalısın."
+                            } else {
+                                accountBusy = true
+                                activeUser.reload().addOnCompleteListener { reloadTask ->
+                                    accountBusy = false
+                                    if (!reloadTask.isSuccessful) {
+                                        accountStatus = "Hesap durumu yenilenemedi. İnternet bağlantını kontrol edip tekrar dene."
+                                    } else {
+                                        emailVerified = activeUser.isEmailVerified
+                                        val refreshedName = activeUser.displayName?.takeIf { it.isNotBlank() }
+                                            ?: activeUser.email?.substringBefore("@").orEmpty()
+                                        val refreshedEmail = activeUser.email.orEmpty()
+                                        val refreshedPhone = activeUser.phoneNumber.orEmpty()
+                                        val refreshedPhoto = activeUser.photoUrl?.toString().orEmpty()
+                                        nameDraft = refreshedName
+                                        emailDraft = refreshedEmail
+                                        phoneDraft = refreshedPhone
+                                        onAccountChanged(refreshedName, refreshedEmail, refreshedPhone, refreshedPhoto)
+                                        accountStatus = if (emailVerified) {
+                                            "Hesap durumu yenilendi; e-posta doğrulandı."
+                                        } else {
+                                            "Hesap durumu yenilendi. E-posta henüz doğrulanmamış."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !accountBusy
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Hesap durumunu yenile", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
+                if (!emailVerified) {
+                    Button(
+                        onClick = {
+                            val activeUser = FirebaseAuth.getInstance().currentUser
+                            if (activeUser == null) {
+                                accountStatus = "Doğrulama e-postası göndermek için yeniden giriş yapmalısın."
+                            } else {
+                                accountBusy = true
+                                activeUser.sendEmailVerification().addOnCompleteListener { verifyTask ->
+                                    accountBusy = false
+                                    accountStatus = if (verifyTask.isSuccessful) {
+                                        "Doğrulama bağlantısı kayıtlı e-posta adresine gönderildi."
+                                    } else {
+                                        "Doğrulama e-postası gönderilemedi. Bir süre sonra tekrar dene."
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !accountBusy
+                    ) {
+                        Icon(Icons.Default.Email, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Doğrulama e-postası gönder", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+
+                TextButton(
+                    onClick = {
+                        emailDraft = email
+                        editingEmail = !editingEmail
+                    },
+                    enabled = !accountBusy,
+                    modifier = Modifier.align(Alignment.Start)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (editingEmail) "E-posta değişikliğini kapat" else "E-posta adresini değiştir")
+                }
+
+                if (editingEmail) {
+                    OutlinedTextField(
+                        value = emailDraft,
+                        onValueChange = { emailDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Yeni e-posta adresi") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        enabled = !accountBusy
+                    )
+                    Button(
+                        onClick = {
+                            val cleanedEmail = emailDraft.trim()
+                            val activeUser = FirebaseAuth.getInstance().currentUser
+                            when {
+                                !android.util.Patterns.EMAIL_ADDRESS.matcher(cleanedEmail).matches() ->
+                                    accountStatus = "Geçerli bir e-posta adresi gir."
+                                cleanedEmail.equals(email, ignoreCase = true) ->
+                                    accountStatus = "Yeni e-posta adresi mevcut adresle aynı."
+                                activeUser == null ->
+                                    accountStatus = "E-posta değiştirmek için yeniden giriş yapmalısın."
+                                else -> {
+                                    accountBusy = true
+                                    activeUser.verifyBeforeUpdateEmail(cleanedEmail).addOnCompleteListener { updateTask ->
+                                        accountBusy = false
+                                        if (updateTask.isSuccessful) {
+                                            editingEmail = false
+                                            accountStatus = "Yeni e-posta adresine doğrulama bağlantısı gönderildi. Adres, doğrulama tamamlandıktan sonra güncellenir."
+                                        } else {
+                                            accountStatus = "E-posta değişikliği başlatılamadı. Güvenlik nedeniyle yeniden giriş yapman gerekebilir."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !accountBusy
+                    ) {
+                        Icon(Icons.Default.Email, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Yeni adresi doğrula", maxLines = 1)
+                    }
+                }
+
+                HorizontalDivider()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    GoogleGLogo(Modifier.size(28.dp))
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Google hesabı", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (googleLinked) "Bağlandı" else "Bu hesap Google ile bağlı değil",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                        )
+                    }
+                    Icon(
+                        if (googleLinked) Icons.Default.Verified else Icons.Default.Link,
+                        contentDescription = null,
+                        tint = if (googleLinked) Color(0xFF35B879) else MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(25.dp)
+                    )
+                }
+
+                HorizontalDivider()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.PhoneAndroid,
+                        contentDescription = null,
+                        modifier = Modifier.size(30.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Telefon numarası", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (phone.isNotBlank()) "Doğrulanmış numara: " + phone else "Numara eklemek için SMS ile doğrula",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = phoneDraft,
+                    onValueChange = { phoneDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Telefon (+90...)") },
+                    placeholder = { Text("5XX XXX XX XX") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    enabled = !accountBusy
+                )
+                Button(
+                    onClick = {
+                        val normalized = normalizePhoneNumberForVerification(phoneDraft)
+                        val activeUser = FirebaseAuth.getInstance().currentUser
+                        val activity = context as? Activity
+                        when {
+                            normalized == null ->
+                                accountStatus = "Geçerli bir telefon numarası gir. Türkiye numaraları için 5XXXXXXXXX veya +90 ile başlayabilirsin."
+                            activeUser == null ->
+                                accountStatus = "Telefon numarası eklemek için yeniden giriş yapmalısın."
+                            activity == null ->
+                                accountStatus = "SMS doğrulaması bu ekrandan başlatılamadı. Uygulamayı yeniden açıp dene."
+                            else -> {
+                                accountBusy = true
+                                accountStatus = "SMS doğrulaması başlatılıyor…"
+                                val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                                    override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                                        activeUser.updatePhoneNumber(credential).addOnCompleteListener { updateTask ->
+                                            accountBusy = false
+                                            if (updateTask.isSuccessful) {
+                                                phoneVerificationId = null
+                                                smsCode = ""
+                                                phoneDraft = normalized
+                                                onAccountChanged(name, email, normalized, photoUrl)
+                                                FirebaseFirestore.getInstance().collection("users")
+                                                    .document(activeUser.uid)
+                                                    .set(
+                                                        mapOf(
+                                                            "phoneNumber" to normalized,
+                                                            "updatedAt" to FieldValue.serverTimestamp()
+                                                        ),
+                                                        SetOptions.merge()
+                                                    )
+                                                accountStatus = "Telefon numarası doğrulandı."
+                                            } else {
+                                                accountStatus = "Telefon doğrulaması tamamlanamadı. Yeniden giriş yapıp tekrar dene."
+                                            }
+                                        }
+                                    }
+
+                                    override fun onVerificationFailed(error: FirebaseException) {
+                                        accountBusy = false
+                                        accountStatus = when ((error as? FirebaseAuthException)?.errorCode) {
+                                            "ERROR_INVALID_PHONE_NUMBER" -> "Telefon numarası geçersiz. Ülke koduyla birlikte kontrol et."
+                                            "ERROR_TOO_MANY_REQUESTS" -> "Çok fazla SMS isteği yapıldı. Bir süre sonra tekrar dene."
+                                            "ERROR_QUOTA_EXCEEDED" -> "SMS kotası doldu. Firebase telefon doğrulama ayarlarını kontrol et."
+                                            else -> "SMS gönderilemedi. Firebase Console'da Telefon sağlayıcısını ve izin verilen bölgeleri kontrol et."
+                                        }
+                                    }
+
+                                    override fun onCodeSent(
+                                        verificationId: String,
+                                        token: PhoneAuthProvider.ForceResendingToken
+                                    ) {
+                                        phoneVerificationId = verificationId
+                                        smsCode = ""
+                                        accountBusy = false
+                                        accountStatus = "SMS kodu gönderildi. Mesajdaki kodu girip numaranı doğrula."
+                                    }
+
+                                    override fun onCodeAutoRetrievalTimeOut(verificationId: String) {
+                                        phoneVerificationId = verificationId
+                                        accountStatus = "Otomatik kod alma süresi doldu. SMS kodunu elle girebilirsin."
+                                    }
+                                }
+                                try {
+                                    val options = PhoneAuthOptions.newBuilder(FirebaseAuth.getInstance())
+                                        .setPhoneNumber(normalized)
+                                        .setTimeout(60L, TimeUnit.SECONDS)
+                                        .setActivity(activity)
+                                        .setCallbacks(callbacks)
+                                        .build()
+                                    PhoneAuthProvider.verifyPhoneNumber(options)
+                                } catch (_: Exception) {
+                                    accountBusy = false
+                                    accountStatus = "SMS doğrulaması başlatılamadı. İnternetini ve Firebase ayarlarını kontrol et."
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !accountBusy
+                ) {
+                    Icon(Icons.Default.PhoneAndroid, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (phoneVerificationId == null) "SMS kodu gönder" else "Yeni SMS kodu gönder", maxLines = 1)
+                }
+
+                if (phoneVerificationId != null) {
+                    OutlinedTextField(
+                        value = smsCode,
+                        onValueChange = { smsCode = it.filter(Char::isDigit).take(8) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("SMS doğrulama kodu") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        enabled = !accountBusy
+                    )
+                    Button(
+                        onClick = {
+                            val verificationId = phoneVerificationId
+                            val code = smsCode.trim()
+                            val activeUser = FirebaseAuth.getInstance().currentUser
+                            when {
+                                verificationId.isNullOrBlank() ->
+                                    accountStatus = "Önce SMS doğrulama kodu iste."
+                                code.length < 4 ->
+                                    accountStatus = "SMS kodunu kontrol edip tekrar gir."
+                                activeUser == null ->
+                                    accountStatus = "Telefon numarasını doğrulamak için yeniden giriş yapmalısın."
+                                else -> {
+                                    accountBusy = true
+                                    val credential = PhoneAuthProvider.getCredential(verificationId, code)
+                                    activeUser.updatePhoneNumber(credential).addOnCompleteListener { updateTask ->
+                                        accountBusy = false
+                                        if (updateTask.isSuccessful) {
+                                            val normalized = normalizePhoneNumberForVerification(phoneDraft).orEmpty()
+                                            phoneVerificationId = null
+                                            smsCode = ""
+                                            phoneDraft = normalized
+                                            onAccountChanged(name, email, normalized, photoUrl)
+                                            FirebaseFirestore.getInstance().collection("users")
+                                                .document(activeUser.uid)
+                                                .set(
+                                                    mapOf(
+                                                        "phoneNumber" to normalized,
+                                                        "updatedAt" to FieldValue.serverTimestamp()
+                                                    ),
+                                                    SetOptions.merge()
+                                                )
+                                            accountStatus = "Telefon numarası doğrulandı ve kaydedildi."
+                                        } else {
+                                            accountStatus = "SMS kodu geçersiz veya süresi dolmuş. Kodu kontrol edip tekrar dene."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !accountBusy
+                    ) {
+                        Icon(Icons.Default.Verified, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Numarayı doğrula", maxLines = 1)
+                    }
+                }
+
+                accountStatus?.let { status ->
+                    Text(
+                        status,
+                        fontSize = 13.sp,
+                        color = when {
+                            status.contains("gönderilemedi", ignoreCase = true) ||
+                                status.contains("başlatılamadı", ignoreCase = true) ||
+                                status.contains("tamamlanamadı", ignoreCase = true) ||
+                                status.contains("geçersiz", ignoreCase = true) ||
+                                status.contains("kaydedilemedi", ignoreCase = true) ||
+                                status.contains("boş bırakılamaz", ignoreCase = true) ->
+                                MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.secondary
+                        }
+                    )
+                }
+                if (accountBusy) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+
+                OutlinedButton(
+                    onClick = onLogout,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !accountBusy
+                ) { Text("Çıkış yap") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DrawerItem(label: String, action: () -> Unit) {
     val icon = when (label) {
@@ -3492,13 +4152,12 @@ private fun GoogleGLogo(modifier: Modifier = Modifier) {
 
 @Composable
 private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
-    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        AsyncImage(
-            model = "https://raw.githubusercontent.com/kralus24/MynConverter/master/app/src/main/res/drawable/splash_logo.png",
-            contentDescription = "MynKralus logosu",
-            modifier = Modifier.fillMaxSize()
-        )
-    }
+    Image(
+        painter = painterResource(id = R.drawable.mynassistant_launcher),
+        contentDescription = "MynAssistant logosu",
+        modifier = Modifier.size(size),
+        contentScale = ContentScale.Fit
+    )
 }
 
 @Composable
