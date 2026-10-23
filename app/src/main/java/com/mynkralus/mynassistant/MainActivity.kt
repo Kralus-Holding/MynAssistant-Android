@@ -2416,7 +2416,6 @@ private fun AssistantScreen(
                                 photoUrl = photoUrl,
                                 photoImageLoader = photoImageLoader,
                                 onAccountChanged = onAccountChanged,
-                                onGoogleLogin = googleLogin,
                                 onLogout = logout
                             )
                         } else AuthForm(false, login = login, googleLogin = googleLogin, googleStatus = googleStatus, goRegister = { navigateToPage(Page.REGISTER) })
@@ -3463,7 +3462,6 @@ private fun AccountProfileSection(
     photoUrl: String,
     photoImageLoader: ImageLoader,
     onAccountChanged: (String, String, String, String) -> Unit,
-    onGoogleLogin: () -> Unit,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -3596,7 +3594,7 @@ private fun AccountProfileSection(
                         if (editingName) {
                             OutlinedTextField(
                                 value = nameDraft,
-                                onValueChange = { nameDraft = it },
+                                onValueChange = { nameDraft = it.take(80) },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("Ad soyad") },
                                 singleLine = true,
@@ -3799,7 +3797,7 @@ private fun AccountProfileSection(
                 if (editingEmail) {
                     OutlinedTextField(
                         value = emailDraft,
-                        onValueChange = { emailDraft = it },
+                        onValueChange = { emailDraft = it.take(254) },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Yeni e-posta adresi") },
                         singleLine = true,
@@ -3888,7 +3886,7 @@ private fun AccountProfileSection(
                 }
                 OutlinedTextField(
                     value = phoneDraft,
-                    onValueChange = { phoneDraft = it },
+                    onValueChange = { phoneDraft = it.take(20) },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Telefon (+90...)") },
                     placeholder = { Text("5XX XXX XX XX") },
@@ -3929,7 +3927,13 @@ private fun AccountProfileSection(
                                                         ),
                                                         SetOptions.merge()
                                                     )
-                                                accountStatus = "Telefon numarası doğrulandı."
+                                                    .addOnCompleteListener { saveTask ->
+                                                        accountStatus = if (saveTask.isSuccessful) {
+                                                            "Telefon numarası doğrulandı."
+                                                        } else {
+                                                            "Telefon doğrulandı ancak bulut profili kaydedilemedi."
+                                                        }
+                                                    }
                                             } else {
                                                 accountStatus = "Telefon doğrulaması tamamlanamadı. Yeniden giriş yapıp tekrar dene."
                                             }
@@ -3987,7 +3991,7 @@ private fun AccountProfileSection(
                 if (phoneVerificationId != null) {
                     OutlinedTextField(
                         value = smsCode,
-                        onValueChange = { smsCode = it.filter(Char::isDigit).take(8) },
+                        onValueChange = { smsCode = it.filter(Char::isDigit).take(6) },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("SMS doğrulama kodu") },
                         singleLine = true,
@@ -4002,8 +4006,8 @@ private fun AccountProfileSection(
                             when {
                                 verificationId.isNullOrBlank() ->
                                     accountStatus = "Önce SMS doğrulama kodu iste."
-                                code.length < 4 ->
-                                    accountStatus = "SMS kodunu kontrol edip tekrar gir."
+                                code.length != 6 ->
+                                    accountStatus = "SMS mesajındaki 6 haneli kodu eksiksiz gir."
                                 activeUser == null ->
                                     accountStatus = "Telefon numarasını doğrulamak için yeniden giriş yapmalısın."
                                 else -> {
@@ -4026,7 +4030,13 @@ private fun AccountProfileSection(
                                                     ),
                                                     SetOptions.merge()
                                                 )
-                                            accountStatus = "Telefon numarası doğrulandı ve kaydedildi."
+                                                .addOnCompleteListener { saveTask ->
+                                                    accountStatus = if (saveTask.isSuccessful) {
+                                                        "Telefon numarası doğrulandı ve kaydedildi."
+                                                    } else {
+                                                        "Telefon doğrulandı ancak bulut profili kaydedilemedi."
+                                                    }
+                                                }
                                         } else {
                                             accountStatus = "SMS kodu geçersiz veya süresi dolmuş. Kodu kontrol edip tekrar dene."
                                         }
