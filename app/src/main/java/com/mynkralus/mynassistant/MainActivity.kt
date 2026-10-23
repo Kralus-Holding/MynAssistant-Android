@@ -1671,6 +1671,7 @@ class MainActivity : ComponentActivity() {
                     selectSavedGoogleAccount = selectSavedGoogleAccount,
                     savedGoogleAccounts = savedGoogleAccounts,
                     googleStatus = googleStatus,
+                    clearGoogleStatus = { googleStatus = null },
                     wakeCommandFromOverlay = incomingWakeCommand.value,
                     onWakeCommandConsumed = { incomingWakeCommand.value = null }
                 )
@@ -1836,6 +1837,7 @@ private fun AssistantScreen(
     selectSavedGoogleAccount: (String) -> Unit,
     savedGoogleAccounts: List<SavedGoogleAccount>,
     googleStatus: String?,
+    clearGoogleStatus: () -> Unit,
     wakeCommandFromOverlay: String? = null,
     onWakeCommandConsumed: () -> Unit = {}
 ) {
@@ -2796,7 +2798,7 @@ private fun AssistantScreen(
                             AuthForm(
                                 registerMode = authRegisterMode, login = login, register = register,
                                 googleLogin = googleLogin, googleStatus = googleStatus,
-                                onRegisterModeChange = { authRegisterMode = it; googleStatus = null }
+                                onRegisterModeChange = { authRegisterMode = it; clearGoogleStatus() }
                             )
                         }
                         Page.REGISTER -> if (signedIn) {
@@ -2816,14 +2818,14 @@ private fun AssistantScreen(
                             AuthForm(
                                 registerMode = true, login = login, register = register,
                                 googleLogin = googleLogin, googleStatus = googleStatus,
-                                onRegisterModeChange = { authRegisterMode = it; googleStatus = null }
+                                onRegisterModeChange = { authRegisterMode = it; clearGoogleStatus() }
                             )
                         }
                         Page.AUTH -> {
                             AuthForm(
                                 registerMode = authRegisterMode, login = login, register = register,
                                 googleLogin = googleLogin, googleStatus = googleStatus,
-                                onRegisterModeChange = { authRegisterMode = it; googleStatus = null }
+                                onRegisterModeChange = { authRegisterMode = it; clearGoogleStatus() }
                             )
                         }
                         Page.DEVICES -> {
