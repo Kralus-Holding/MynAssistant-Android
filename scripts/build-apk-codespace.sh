@@ -21,8 +21,13 @@ if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
   sudo apt-get update
   sudo apt-get install -y curl unzip
 fi
-JAVA_MAJOR="$(java -version 2>&1 | sed -n '1s/.*version "\\([0-9]*\\).*/\\1/p' || true)"
+JAVA_MAJOR="$(java -version 2>&1 | sed -nE '1s/.*version "([0-9]+).*/\1/p' || true)"
 if [[ "$JAVA_MAJOR" != "17" ]]; then
+  echo "Java 17 not detected (detected: ${JAVA_MAJOR:-unknown}); installing OpenJDK 17."
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "ERROR: Java 17 is required and sudo is unavailable to install it."
+    exit 2
+  fi
   sudo apt-get update
   sudo apt-get install -y openjdk-17-jdk
 fi
@@ -35,14 +40,60 @@ fi
 export PATH="$JAVA_HOME/bin:$PATH"
 java -version
 
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+TMP_DIR="$(mktemp -d -t mynassistant-build-0.5.8.XXXXXX)"
+cleanup_tmp() {
+  local exit_code=$?
+  if [[ "$exit_code" -eq 0 ]]; then
+    rm -rf "$TMP_DIR"
+  else
+    echo "Build failed; keeping temporary diagnostics at: $TMP_DIR"
+    if [[ -f "$TMP_DIR/licenses.log" ]]; then
+      echo "--- Android SDK license log (last 40 lines) ---"
+      tail -40 "$TMP_DIR/licenses.log" || true
+    fi
+    if [[ -f "$BUILD_LOG" ]]; then
+      echo "--- Gradle build log (last 100 lines) ---"
+      tail -100 "$BUILD_LOG" || true
+    fi
+  fi
+}
+trap cleanup_tmp EXIT
 
 echo "== 2/6: Install Android SDK 36 and Build Tools 36.0.0 =="
-export ANDROID_HOME="$HOME/android-sdk"
+echo "== 2/6: Locate or install Android SDK 36 and Build Tools 36.0.0 =="
+SDK_CANDIDATES=(
+  "${ANDROID_HOME:-}"
+  "${ANDROID_SDK_ROOT:-}"
+  "$HOME/android-sdk"
+  "$HOME/Android/Sdk"
+  "/usr/local/lib/android/sdk"
+  "/opt/android-sdk"
+  "/usr/lib/android-sdk"
+)
+SELECTED_SDK=""
+for candidate in "${SDK_CANDIDATES[@]}"; do
+  [[ -n "$candidate" && -d "$candidate" ]] || continue
+  if [[ -x "$candidate/cmdline-tools/latest/bin/sdkmanager" ]] ||
+     compgen -G "$candidate/cmdline-tools/*/bin/sdkmanager" >/dev/null ||
+     [[ -f "$candidate/platforms/android-36/android.jar" ]]; then
+    SELECTED_SDK="$candidate"
+    break
+  fi
+done
+export ANDROID_HOME="${SELECTED_SDK:-${ANDROID_HOME:-$HOME/android-sdk}}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+mkdir -p "$ANDROID_HOME"
 SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+# Reuse a versioned Command-line Tools install instead of downloading a second copy.
+if [[ ! -x "$SDKMANAGER" && -d "$ANDROID_HOME/cmdline-tools" ]]; then
+  for candidate in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+    [[ -x "$candidate" ]] || continue
+    SDKMANAGER="$candidate"
+    break
+  done
+fi
+
 if [[ ! -x "$SDKMANAGER" ]]; then
   SDK_ZIP="$TMP_DIR/commandlinetools-linux.zip"
   SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip"
@@ -80,7 +131,7 @@ else
   unzip -q "$GRADLE_ZIP" -d "$TMP_DIR"
   GRADLE_BIN="$TMP_DIR/gradle-8.13/bin/gradle"
 fi
-"$GRADLE_BIN" --version | head -12
+"$GRADLE_BIN" --version
 
 echo "== 4/6: Restore stable debug signing key =="
 mkdir -p "$HOME/.android"
@@ -91,7 +142,7 @@ keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -a
 echo "== 5/6: Run unit tests and build APK =="
 BUILD_LOG="$ROOT/mynassistant-build-0.5.8.log"
 set +e
-"$GRADLE_BIN" --no-daemon testDebugUnitTest assembleDebug --stacktrace 2>&1 | tee "$BUILD_LOG"
+"$GRADLE_BIN" --no-daemon --max-workers=2 testDebugUnitTest assembleDebug --stacktrace 2>&1 | tee "$BUILD_LOG"
 BUILD_STATUS=${PIPESTATUS[0]}
 set -e
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
@@ -114,6 +165,10 @@ fi
 test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
 grep -q 'sherpa-onnx' app/build.gradle.kts
 grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts
+grep -q 'verifyBeforeUpdateEmail' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistant • Android 0.5.8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'Text(if (registerMode) "Google ile kayıt ol" else "Google ile giriş yap")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 if grep -q 'Text("Şifre (en az 6 karakter)")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then echo "ERROR: old password label found."; exit 5; fi
