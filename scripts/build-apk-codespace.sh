@@ -51,7 +51,7 @@ cleanup_tmp() {
       echo "--- Android SDK license log (last 40 lines) ---"
       tail -40 "$TMP_DIR/licenses.log" || true
     fi
-    if [[ -f "$BUILD_LOG" ]]; then
+    if [[ -n "${BUILD_LOG:-}" && -f "$BUILD_LOG" ]]; then
       echo "--- Gradle build log (last 100 lines) ---"
       tail -100 "$BUILD_LOG" || true
     fi
@@ -59,7 +59,6 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
-echo "== 2/6: Install Android SDK 36 and Build Tools 36.0.0 =="
 echo "== 2/6: Locate or install Android SDK 36 and Build Tools 36.0.0 =="
 SDK_CANDIDATES=(
   "${ANDROID_HOME:-}"
@@ -107,8 +106,9 @@ if [[ ! -x "$SDKMANAGER" ]]; then
 fi
 set +e
 yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses > "$TMP_DIR/licenses.log" 2>&1
+LICENSE_PIPE_STATUS=${PIPESTATUS[1]:-1}
 set -e
-if ! grep -q "All SDK package licenses accepted" "$TMP_DIR/licenses.log"; then
+if [[ "$LICENSE_PIPE_STATUS" -ne 0 ]] && ! grep -q "All SDK package licenses accepted" "$TMP_DIR/licenses.log"; then
   cat "$TMP_DIR/licenses.log"
   echo "ERROR: Android SDK licenses were not accepted."
   exit 3
@@ -116,7 +116,11 @@ fi
 "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
 echo "== 3/6: Prepare Gradle 8.13 =="
-if command -v gradle >/dev/null 2>&1 && gradle --version 2>&1 | grep -q "Gradle 8.13"; then
+INSTALLED_GRADLE_VERSION=""
+if command -v gradle >/dev/null 2>&1; then
+  INSTALLED_GRADLE_VERSION="$(gradle --version 2>&1 || true)"
+fi
+if [[ "$INSTALLED_GRADLE_VERSION" == *"Gradle 8.13"* ]]; then
   GRADLE_BIN="$(command -v gradle)"
 else
   GRADLE_ZIP="$TMP_DIR/gradle-8.13-bin.zip"
