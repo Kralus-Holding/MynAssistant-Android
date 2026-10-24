@@ -10,8 +10,8 @@ if [[ ! -f app/build.gradle.kts || ! -s .github/ci-debug-keystore.b64 ]]; then
 fi
 VERSION_CODE="$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')"
 VERSION_NAME="$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)"
-if [[ "$VERSION_CODE" != "36" || "$VERSION_NAME" != "0.5.9" ]]; then
-  echo "ERROR: Expected MynAssistant 0.5.9 / versionCode 36; found $VERSION_NAME / $VERSION_CODE."
+if [[ "$VERSION_CODE" != "37" || "$VERSION_NAME" != "0.6.0" ]]; then
+  echo "ERROR: Expected MynAssistant 0.6.0 / versionCode 37; found $VERSION_NAME / $VERSION_CODE."
   exit 2
 fi
 
@@ -40,7 +40,7 @@ fi
 export PATH="$JAVA_HOME/bin:$PATH"
 java -version
 
-TMP_DIR="$(mktemp -d -t mynassistant-build-0.5.9.XXXXXX)"
+TMP_DIR="$(mktemp -d -t mynassistant-build-0.6.0.XXXXXX)"
 cleanup_tmp() {
   local exit_code=$?
   if [[ "$exit_code" -eq 0 ]]; then
@@ -59,7 +59,7 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
-echo "== 2/6: Locate or install Android SDK 36 and Build Tools 36.0.0 =="
+echo "== 2/6: Locate or install Android SDK 37 and Build Tools 37.0.0 =="
 SDK_CANDIDATES=(
   "${ANDROID_HOME:-}"
   "${ANDROID_SDK_ROOT:-}"
@@ -74,7 +74,7 @@ for candidate in "${SDK_CANDIDATES[@]}"; do
   [[ -n "$candidate" && -d "$candidate" ]] || continue
   if [[ -x "$candidate/cmdline-tools/latest/bin/sdkmanager" ]] ||
      compgen -G "$candidate/cmdline-tools/*/bin/sdkmanager" >/dev/null ||
-     [[ -f "$candidate/platforms/android-36/android.jar" ]]; then
+     [[ -f "$candidate/platforms/android-37/android.jar" ]]; then
     SELECTED_SDK="$candidate"
     break
   fi
@@ -113,7 +113,7 @@ if [[ "$LICENSE_PIPE_STATUS" -ne 0 ]] && ! grep -q "All SDK package licenses acc
   echo "ERROR: Android SDK licenses were not accepted."
   exit 3
 fi
-"$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+"$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-37" "build-tools;37.0.0"
 
 echo "== 3/6: Prepare Gradle 8.13 =="
 INSTALLED_GRADLE_VERSION=""
@@ -144,7 +144,7 @@ chmod 600 "$HOME/.android/debug.keystore"
 keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep "SHA1:"
 
 echo "== 5/6: Run unit tests and build APK =="
-BUILD_LOG="$ROOT/mynassistant-build-0.5.9.log"
+BUILD_LOG="$ROOT/mynassistant-build-0.6.0.log"
 set +e
 GRADLE_HEAP="${MYN_GRADLE_HEAP:-2g}"
 GRADLE_METASPACE="${MYN_GRADLE_METASPACE:-512m}"
@@ -181,17 +181,21 @@ echo "== 6/6: Verify signing, APK size, and regression checks =="
 APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
 if [[ ! -s "$APK" ]]; then echo "ERROR: APK missing after Gradle success."; exit 4; fi
 KEYSTORE_SHA1="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | awk '/SHA1:/ { gsub(":", "", $2); print tolower($2) }')"
-APK_SHA1="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')"
+APK_SHA1="$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$APK" | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')"
 echo "Keystore SHA-1: $KEYSTORE_SHA1"
 echo "APK SHA-1:      $APK_SHA1"
 if [[ -z "$KEYSTORE_SHA1" || -z "$APK_SHA1" || "$KEYSTORE_SHA1" != "$APK_SHA1" ]]; then
   echo "ERROR: APK signing certificate does not match the stable key."; exit 5
 fi
-"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+"$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$APK"
 test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
 grep -q 'sherpa-onnx' app/build.gradle.kts
-grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts
-grep -q 'verifyBeforeUpdateEmail' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+! grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts
+test -s app/src/main/java/com/mynkralus/mynassistant/MynAssistantAccountBackend.kt
+grep -q 'MynAssistantAccountBackend.sendEmailVerification' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistantAccountBackend.changeEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistantAccountBackend.uploadProfilePhoto' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'ProfilePhotoCropDialog' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 test -s app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt
 grep -q 'changeDisplayName = changeDisplayName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
@@ -200,7 +204,7 @@ grep -q 'pendingEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainA
 ! grep -q 'Text("Durumu yenile")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-grep -q 'MynAssistant • Android 0.5.9' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistant • Android 0.6.0' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'Text(if (registerMode) "Google ile kayıt ol" else "Google ile giriş yap")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 if grep -q 'Text("Şifre (en az 6 karakter)")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then echo "ERROR: old password label found."; exit 5; fi
