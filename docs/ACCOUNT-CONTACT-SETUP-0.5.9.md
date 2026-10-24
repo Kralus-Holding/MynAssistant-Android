@@ -1,3 +1,7 @@
+> **Superseded for the strict free-start build:** Android 0.6.0 uses Brevo Free for email delivery and Cloudinary Free for profile photos. Firebase Storage and real SMS sending are not used in that version. Follow [FREE-ACCOUNT-SERVICES-0.6.0.md](FREE-ACCOUNT-SERVICES-0.6.0.md) instead. This page documents the older 0.5.9 architecture only.
+
+---
+
 # MynAssistant Android 0.5.9 — Account, email, SMS and profile-photo setup
 
 ## What the app does
