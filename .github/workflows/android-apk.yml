@@ -96,7 +96,10 @@ jobs:
           grep -q 'GoogleAuthMode.REGISTER' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Bu Google hesabıyla kayıtlı bir MynAssistant hesabı bulunamadı' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'sendEmailVerification' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'PhoneAuthProvider.verifyPhoneNumber' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -q 'PhoneAuthProvider.verifyPhoneNumber' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Real SMS sending must remain disabled in strict free-start mode"
+            exit 1
+          fi
           grep -q 'MynAssistantAccountBackend.sendEmailVerification' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'MynAssistantAccountBackend.changeEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'MynAssistantAccountBackend.uploadProfilePhoto' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
