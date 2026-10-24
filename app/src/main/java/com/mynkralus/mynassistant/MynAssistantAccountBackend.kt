@@ -94,7 +94,7 @@ internal object MynAssistantAccountBackend {
                     }
 
                     val boundary = "MynAssistant-${UUID.randomUUID()}"
-                    connection = (URL("https://api.cloudinary.com/v1_1/$cloudName/image/upload")
+                    val uploadConnection = (URL("https://api.cloudinary.com/v1_1/$cloudName/image/upload")
                         .openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
                         connectTimeout = 15_000
@@ -104,8 +104,9 @@ internal object MynAssistantAccountBackend {
                         setRequestProperty("Accept", "application/json")
                         setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
                     }
+                    connection = uploadConnection
 
-                    connection.outputStream.use { output ->
+                    uploadConnection.outputStream.use { output ->
                         fun writeField(name: String, value: String) {
                             val text = "--$boundary\r\n" +
                                 "Content-Disposition: form-data; name=\"$name\"\r\n\r\n" +
@@ -130,8 +131,8 @@ internal object MynAssistantAccountBackend {
                         output.write("\r\n--$boundary--\r\n".toByteArray(StandardCharsets.UTF_8))
                     }
 
-                    val statusCode = connection.responseCode
-                    val responseBody = readResponse(connection, statusCode)
+                    val statusCode = uploadConnection.responseCode
+                    val responseBody = readResponse(uploadConnection, statusCode)
                     if (statusCode !in 200..299) {
                         val errorJson = try { JSONObject(responseBody) } catch (_: Exception) { JSONObject() }
                         val detail = errorJson.optString("error")
@@ -209,7 +210,7 @@ internal object MynAssistantAccountBackend {
     ): JSONObject {
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL(BASE_URL + path).openConnection() as HttpURLConnection).apply {
+            val apiConnection = (URL(BASE_URL + path).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15_000
                 readTimeout = 70_000
@@ -219,12 +220,13 @@ internal object MynAssistantAccountBackend {
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Authorization", "Bearer $idToken")
             }
-            connection.outputStream.use { output ->
+            connection = apiConnection
+            apiConnection.outputStream.use { output ->
                 output.write(body.toString().toByteArray(StandardCharsets.UTF_8))
             }
 
-            val statusCode = connection.responseCode
-            val responseBody = readResponse(connection, statusCode)
+            val statusCode = apiConnection.responseCode
+            val responseBody = readResponse(apiConnection, statusCode)
             val json = try { JSONObject(responseBody) } catch (_: Exception) { JSONObject() }
             if (statusCode !in 200..299) {
                 val title = json.optString("title")
