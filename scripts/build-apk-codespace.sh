@@ -196,6 +196,7 @@ grep -q 'MynAssistantAccountBackend.sendEmailVerification' app/src/main/java/com
 grep -q 'MynAssistantAccountBackend.changeEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'MynAssistantAccountBackend.uploadProfilePhoto' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+! grep -q 'PhoneAuthProvider.verifyPhoneNumber' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'ProfilePhotoCropDialog' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 test -s app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt
 grep -q 'changeDisplayName = changeDisplayName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
