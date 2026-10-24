@@ -11,7 +11,7 @@ if ! git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-TMP_PARENT="$(mktemp -d -t mynassistant-clean-0.5.9.XXXXXX)"
+TMP_PARENT="$(mktemp -d -t mynassistant-clean-0.6.0.XXXXXX)"
 BUILD_DIR="$TMP_PARENT/source"
 BUILD_STATUS=0
 
@@ -41,20 +41,26 @@ echo
 echo "== 3/5: Confirm the correct source revision and account fix =="
 VERSION_CODE="$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')"
 VERSION_NAME="$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)"
-if [[ "$VERSION_CODE" != "36" || "$VERSION_NAME" != "0.5.9" ]]; then
-  echo "ERROR: Expected MynAssistant 0.5.9 / versionCode 36; found $VERSION_NAME / $VERSION_CODE."
+if [[ "$VERSION_CODE" != "37" || "$VERSION_NAME" != "0.6.0" ]]; then
+  echo "ERROR: Expected MynAssistant 0.6.0 / versionCode 37; found $VERSION_NAME / $VERSION_CODE."
   exit 3
 fi
 
 SOURCE="app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt"
-if ! grep -Fq 'verifyBeforeUpdateEmail' "$SOURCE" ||
-   ! grep -Fq 'MynAssistant • Android 0.5.9' "$SOURCE" ||
-   ! grep -Fq 'changeEmailAddress: (String, (String) -> Unit) -> Unit' "$SOURCE" ||
+ACCOUNT_BACKEND="app/src/main/java/com/mynkralus/mynassistant/MynAssistantAccountBackend.kt"
+if ! grep -Fq 'MynAssistantAccountBackend.sendEmailVerification' "$SOURCE" ||
+   ! grep -Fq 'MynAssistantAccountBackend.changeEmailAddress' "$SOURCE" ||
+   ! grep -Fq 'MynAssistantAccountBackend.uploadProfilePhoto' "$SOURCE" ||
+   ! grep -Fq 'MynAssistant • Android 0.6.0' "$SOURCE" ||
+   ! grep -Fq 'changeDisplayName: (String, (String) -> Unit) -> Unit' "$SOURCE" ||
    ! grep -Fq 'pendingPhoneNumber' "$SOURCE" ||
    ! grep -Fq 'pendingEmailAddress' "$SOURCE" ||
-   ! grep -Fq 'changeDisplayName = changeDisplayName' "$SOURCE" ||
-   [[ ! -s "app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt" ]]; then
-  echo "ERROR: The fetched source is missing required 0.5.9 account changes."
+   ! grep -Fq 'Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı' "$SOURCE" ||
+   grep -Fq 'PhoneAuthProvider.verifyPhoneNumber' "$SOURCE" ||
+   [[ ! -s "$ACCOUNT_BACKEND" ]] ||
+   [[ ! -s "app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt" ]] ||
+   grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts; then
+  echo "ERROR: The fetched source is missing required 0.6.0 account changes."
   exit 4
 fi
 CALLBACK_PASSES="$(grep -F -c 'changeEmailAddress = changeEmailAddress' "$SOURCE")"
@@ -64,7 +70,7 @@ if [[ "$CALLBACK_PASSES" -ne 3 ]]; then
   exit 4
 fi
 bash -n scripts/build-apk-codespace.sh
-echo "Verified: version $VERSION_NAME (versionCode $VERSION_CODE), account contact and cropper changes present."
+echo "Verified: version $VERSION_NAME (versionCode $VERSION_CODE), free account services, pending contacts and cropper changes present."
 
 echo
 echo "== 4/5: Run tests and build from the fetched main revision =="
@@ -76,9 +82,9 @@ set -e
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
   echo
   echo "BUILD FAILED. Your original workspace was not modified."
-  if [[ -f "$BUILD_DIR/mynassistant-build-0.5.9.log" ]]; then
-    LOG_DEST="$ROOT/mynassistant-build-0.5.9-clean-$STAMP.log"
-    cp "$BUILD_DIR/mynassistant-build-0.5.9.log" "$LOG_DEST"
+  if [[ -f "$BUILD_DIR/mynassistant-build-0.6.0.log" ]]; then
+    LOG_DEST="$ROOT/mynassistant-build-0.6.0-clean-$STAMP.log"
+    cp "$BUILD_DIR/mynassistant-build-0.6.0.log" "$LOG_DEST"
     echo "Diagnostic log copied to: $LOG_DEST"
     echo "===== Root-cause lines ====="
     grep -ni -B 3 -A 8 -E 'What went wrong|Execution failed for task|e: file://|Unresolved reference|Type mismatch|Caused by:|unable to create native thread|OutOfMemoryError|Could not resolve|Could not find|No space left on device|BackendException|Internal compiler error' "$LOG_DEST" | tail -120 || true

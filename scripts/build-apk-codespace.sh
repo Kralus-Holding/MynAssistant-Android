@@ -10,8 +10,8 @@ if [[ ! -f app/build.gradle.kts || ! -s .github/ci-debug-keystore.b64 ]]; then
 fi
 VERSION_CODE="$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')"
 VERSION_NAME="$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)"
-if [[ "$VERSION_CODE" != "36" || "$VERSION_NAME" != "0.5.9" ]]; then
-  echo "ERROR: Expected MynAssistant 0.5.9 / versionCode 36; found $VERSION_NAME / $VERSION_CODE."
+if [[ "$VERSION_CODE" != "37" || "$VERSION_NAME" != "0.6.0" ]]; then
+  echo "ERROR: Expected MynAssistant 0.6.0 / versionCode 37; found $VERSION_NAME / $VERSION_CODE."
   exit 2
 fi
 
@@ -40,7 +40,7 @@ fi
 export PATH="$JAVA_HOME/bin:$PATH"
 java -version
 
-TMP_DIR="$(mktemp -d -t mynassistant-build-0.5.9.XXXXXX)"
+TMP_DIR="$(mktemp -d -t mynassistant-build-0.6.0.XXXXXX)"
 cleanup_tmp() {
   local exit_code=$?
   if [[ "$exit_code" -eq 0 ]]; then
@@ -59,7 +59,7 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
-echo "== 2/6: Locate or install Android SDK 36 and Build Tools 36.0.0 =="
+echo "== 2/6: Locate or install Android SDK 37 and Build Tools 36.0.0 =="
 SDK_CANDIDATES=(
   "${ANDROID_HOME:-}"
   "${ANDROID_SDK_ROOT:-}"
@@ -144,7 +144,7 @@ chmod 600 "$HOME/.android/debug.keystore"
 keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep "SHA1:"
 
 echo "== 5/6: Run unit tests and build APK =="
-BUILD_LOG="$ROOT/mynassistant-build-0.5.9.log"
+BUILD_LOG="$ROOT/mynassistant-build-0.6.0.log"
 set +e
 GRADLE_HEAP="${MYN_GRADLE_HEAP:-2g}"
 GRADLE_METASPACE="${MYN_GRADLE_METASPACE:-512m}"
@@ -190,8 +190,13 @@ fi
 "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
 test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
 grep -q 'sherpa-onnx' app/build.gradle.kts
-grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts
-grep -q 'verifyBeforeUpdateEmail' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+! grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts
+test -s app/src/main/java/com/mynkralus/mynassistant/MynAssistantAccountBackend.kt
+grep -q 'MynAssistantAccountBackend.sendEmailVerification' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistantAccountBackend.changeEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistantAccountBackend.uploadProfilePhoto' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+! grep -q 'PhoneAuthProvider.verifyPhoneNumber' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'ProfilePhotoCropDialog' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 test -s app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt
 grep -q 'changeDisplayName = changeDisplayName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
@@ -200,7 +205,7 @@ grep -q 'pendingEmailAddress' app/src/main/java/com/mynkralus/mynassistant/MainA
 ! grep -q 'Text("Durumu yenile")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-grep -q 'MynAssistant • Android 0.5.9' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+grep -q 'MynAssistant • Android 0.6.0' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 grep -q 'Text(if (registerMode) "Google ile kayıt ol" else "Google ile giriş yap")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
 if grep -q 'Text("Şifre (en az 6 karakter)")' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then echo "ERROR: old password label found."; exit 5; fi

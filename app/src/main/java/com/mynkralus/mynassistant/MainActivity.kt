@@ -27,8 +27,6 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.FirebaseException
-import com.google.firebase.storage.FirebaseStorage
-import com.google.firebase.storage.StorageMetadata
 import java.util.concurrent.TimeUnit
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CheckCircle
@@ -1432,11 +1430,11 @@ class MainActivity : ComponentActivity() {
                     emailVerified = true
                     report("E-posta adresin zaten doğrulanmış.")
                 } else {
-                    user.sendEmailVerification().addOnCompleteListener { task ->
-                        report(if (task.isSuccessful) {
-                            "Firebase doğrulama isteğini kabul etti. Gelen kutunu ve spam klasörünü kontrol et."
+                    MynAssistantAccountBackend.sendEmailVerification(user) { success, message ->
+                        report(if (success) {
+                            "Doğrulama e-postası Brevo üzerinden gönderildi. Gelen kutunu ve spam klasörünü kontrol et."
                         } else {
-                            firebaseAccountActionError(task.exception, "Doğrulama e-postası gönderimi")
+                            message
                         })
                     }
                 }
@@ -1452,8 +1450,10 @@ class MainActivity : ComponentActivity() {
                     user == null ->
                         report("E-posta adresini değiştirmek için yeniden giriş yap.")
                     else -> {
-                        user.verifyBeforeUpdateEmail(cleanedEmail).addOnCompleteListener { task ->
-                            if (task.isSuccessful) {
+                        MynAssistantAccountBackend.changeEmailAddress(user, cleanedEmail) { success, message ->
+                            if (!success) {
+                                report(message)
+                            } else {
                                 FirebaseFirestore.getInstance().collection("users").document(user.uid)
                                     .set(
                                         mapOf(
@@ -1464,13 +1464,11 @@ class MainActivity : ComponentActivity() {
                                         SetOptions.merge()
                                     )
                                     .addOnSuccessListener {
-                                        report("Firebase doğrulama isteğini kabul etti. Yeni adres doğrulanmadı olarak kaydedildi; gelen kutunu ve spam klasörünü kontrol et.")
+                                        report("Doğrulama bağlantısı Brevo üzerinden gönderildi. Yeni adres doğrulanmadı olarak kaydedildi; gelen kutunu ve spam klasörünü kontrol et.")
                                     }
                                     .addOnFailureListener { saveError ->
-                                        report("Doğrulama isteği Firebase'e gönderildi ancak bekleyen adres kaydedilemedi: ${saveError.message.orEmpty().take(120)}")
+                                        report("Doğrulama e-postası gönderildi ancak bekleyen adres kaydedilemedi: ${saveError.message.orEmpty().take(120)}")
                                     }
-                            } else {
-                                report(firebaseAccountActionError(task.exception, "E-posta değiştirme/doğrulama"))
                             }
                         }
                     }
@@ -1481,24 +1479,18 @@ class MainActivity : ComponentActivity() {
                 if (user == null) {
                     report("Fotoğraf yüklemek için önce giriş yap.")
                 } else {
-                    val storageRef = FirebaseStorage.getInstance().reference
-                        .child("profilePhotos/${user.uid}/avatar_${System.currentTimeMillis()}.jpg")
-                    val metadata = StorageMetadata.Builder().setContentType("image/jpeg").build()
-                    storageRef.putFile(uri, metadata)
-                        .continueWithTask { task ->
-                            if (!task.isSuccessful) {
-                                throw task.exception ?: IllegalStateException("Fotoğraf yüklemesi tamamlanamadı.")
-                            }
-                            storageRef.downloadUrl
-                        }
-                        .addOnSuccessListener { downloadUri ->
+                    MynAssistantAccountBackend.uploadProfilePhoto(this@MainActivity, user, uri) { downloadUrl, uploadError ->
+                        if (downloadUrl.isNullOrBlank()) {
+                            report(uploadError ?: "Fotoğraf yüklenemedi. Ücretsiz görsel servisi ayarlarını kontrol et.")
+                        } else {
+                            val downloadUri = Uri.parse(downloadUrl)
                             user.updateProfile(
                                 UserProfileChangeRequest.Builder().setPhotoUri(downloadUri).build()
                             ).addOnCompleteListener { updateTask ->
                                 if (!updateTask.isSuccessful) {
-                                    report("Fotoğraf yüklendi ancak profil fotoğrafı güncellenemedi. Tekrar dene.")
+                                    report("Fotoğraf yüklendi ancak Firebase profil fotoğrafı güncellenemedi. Tekrar dene.")
                                 } else {
-                                    photoUrl = downloadUri.toString()
+                                    photoUrl = downloadUrl
                                     saveFirebaseProfile(
                                         user = user,
                                         provider = user.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "profile",
@@ -1507,25 +1499,13 @@ class MainActivity : ComponentActivity() {
                                         report(if (profileError == null) {
                                             "Profil fotoğrafın güncellendi."
                                         } else {
-                                            "Fotoğraf güncellendi ancak profil kaydı yenilenemedi."
+                                            "Fotoğraf güncellendi ancak Firestore profil kaydı yenilenemedi."
                                         })
                                     }
                                 }
                             }
                         }
-                        .addOnFailureListener { error ->
-                            val detail = error.message.orEmpty().lowercase(Locale.ROOT)
-                            report(when {
-                                detail.contains("unauthorized") || detail.contains("permission") ->
-                                    "Fotoğraf yükleme reddedildi. Firebase Console > Storage > Rules bölümünde güncel storage.rules kurallarını yayımla."
-                                detail.contains("bucket") || detail.contains("no object") ||
-                                    detail.contains("object-not-found") || detail.contains("default bucket") ->
-                                    "Firebase Storage bucket hazır değil. Firebase Console > Storage üzerinden myncloud-24.firebasestorage.app deposunu oluştur/başlat."
-                                detail.contains("network") || detail.contains("unavailable") ->
-                                    "Fotoğraf yüklenemedi: ağ bağlantısı kesildi. İnternetini kontrol edip tekrar dene."
-                                else -> "Fotoğraf yüklenemedi. Firebase Storage hata ayrıntısı: ${error.message.orEmpty().take(160)}"
-                            })
-                        }
+                    }
                 }
             }
             val updatePhoneCredential: (com.google.firebase.auth.PhoneAuthCredential, (String) -> Unit) -> Unit =
@@ -1573,46 +1553,17 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            // Strict zero-cost mode: never invoke Firebase's real SMS sender.
+            // Phone numbers remain stored as pending/unverified until an explicitly approved SMS provider is enabled.
             val requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit = { rawNumber, report ->
                 val number = normalizePendingPhoneNumber(rawNumber).orEmpty()
-                val digitCount = number.count { it.isDigit() }
                 when {
-                    number.isBlank() || !number.startsWith("+") || digitCount !in 8..15 ->
+                    number.isBlank() ->
                         report(null, "Geçerli bir telefon numarası gir. Örnek: 05XX XXX XX XX veya +905XXXXXXXXX.")
                     auth.currentUser == null ->
                         report(null, "Telefon numarası eklemek için önce giriş yap.")
-                    else -> {
-                        val options = PhoneAuthOptions.newBuilder(auth)
-                            .setPhoneNumber(number)
-                            .setTimeout(60L, TimeUnit.SECONDS)
-                            .setActivity(this@MainActivity)
-                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                                override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
-                                    updatePhoneCredential(credential) { message -> report(null, message) }
-                                }
-
-                                override fun onVerificationFailed(error: FirebaseException) {
-                                    report(null, firebaseAccountActionError(error, "SMS gönderimi"))
-                                }
-
-                                override fun onCodeSent(
-                                    verificationId: String,
-                                    token: PhoneAuthProvider.ForceResendingToken
-                                ) {
-                                    report(verificationId, "SMS kodu gönderildi. Mesajdaki kodu gir.")
-                                }
-
-                                override fun onCodeAutoRetrievalTimeOut(verificationId: String) {
-                                    report(verificationId, "Otomatik SMS doğrulama süresi doldu. Gelen SMS kodunu elle girebilirsin.")
-                                }
-                            })
-                            .build()
-                        try {
-                            PhoneAuthProvider.verifyPhoneNumber(options)
-                        } catch (error: Exception) {
-                            report(null, firebaseAccountActionError(error, "SMS gönderimi"))
-                        }
-                    }
+                    else ->
+                        report(null, "Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı. Numara kaydedildi ancak doğrulanmadı; SMS gönderilmedi.")
                 }
             }
             val confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit =
@@ -1800,25 +1751,24 @@ class MainActivity : ComponentActivity() {
                                                 emailVerified = activeUser.isEmailVerified
                                                 googleLinked = activeUser.providerData.any { it.providerId == "google.com" }
                                                 signedIn = true
-                                                activeUser.sendEmailVerification().addOnCompleteListener { verifyTask ->
+                                                MynAssistantAccountBackend.sendEmailVerification(activeUser) { verifySuccess, verifyMessage ->
                                                     saveFirebaseProfile(
                                                         user = activeUser,
                                                         provider = "password",
                                                         isNewUser = true,
                                                         displayNameOverride = cleanName
                                                     ) { firestoreError ->
-                                                        val verificationMessage = if (verifyTask.isSuccessful) {
-                                                            " E-posta doğrulama bağlantısı gönderildi."
+                                                        val verificationMessage = if (verifySuccess) {
+                                                            " Doğrulama e-postası Brevo üzerinden gönderildi."
                                                         } else {
-                                                            " Hesap oluşturuldu ancak doğrulama e-postası gönderilemedi."
+                                                            " Hesap oluşturuldu ancak doğrulama e-postası gönderilemedi: $verifyMessage"
                                                         }
                                                         val profileMessage = if (firestoreError == null) {
                                                             ""
                                                         } else {
                                                             " Hesap bilgileri kaydedilemedi. Lütfen tekrar dene."
                                                         }
-                                                        val message = "Hesabın oluşturuldu." + verificationMessage + profileMessage
-                                                        report(message)
+                                                        report("Hesabın oluşturuldu." + verificationMessage + profileMessage)
                                                     }
                                                 }
                                             }
@@ -4228,7 +4178,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.5.9", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.6.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -4669,34 +4619,12 @@ private fun AccountSettings(
                     ) { Text("Kapat") }
                 }
 
-                if (pendingPhone.isNotBlank() && verificationId.isNullOrBlank()) {
-                    Button(
-                        onClick = {
-                            if (phoneVerificationBusy) return@Button
-                            phoneVerificationBusy = true
-                            try {
-                                requestPhoneVerification(pendingPhone) { id, message ->
-                                    phoneVerificationBusy = false
-                                    if (!id.isNullOrBlank()) {
-                                        verificationId = id
-                                        smsCode = ""
-                                    }
-                                    if (message?.contains("doğrulandı", ignoreCase = true) == true) {
-                                        pendingPhone = ""
-                                        phoneExpanded = false
-                                    }
-                                    statusMessage = message
-                                }
-                            } catch (error: Exception) {
-                                phoneVerificationBusy = false
-                                statusMessage = firebaseAccountActionError(error, "SMS gönderimi")
-                            }
-                        },
-                        enabled = !phoneVerificationBusy && verificationId.isNullOrBlank(),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (phoneVerificationBusy) "SMS gönderiliyor…" else "SMS kodu gönder")
-                    }
+                if (pendingPhone.isNotBlank()) {
+                    Text(
+                        "Ücretsiz modda gerçek SMS gönderimi kapalı. Numaran kaydedildi ancak doğrulanmadı; SMS doğrulaması daha sonra etkinleştirilebilir.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
                 }
 
                 if (!verificationId.isNullOrBlank()) {
