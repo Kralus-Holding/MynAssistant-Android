@@ -56,6 +56,7 @@ if ! grep -Fq 'MynAssistantAccountBackend.sendEmailVerification' "$SOURCE" ||
    ! grep -Fq 'pendingPhoneNumber' "$SOURCE" ||
    ! grep -Fq 'pendingEmailAddress' "$SOURCE" ||
    ! grep -Fq 'Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı' "$SOURCE" ||
+   grep -Fq 'PhoneAuthProvider.verifyPhoneNumber' "$SOURCE" ||
    [[ ! -s "$ACCOUNT_BACKEND" ]] ||
    [[ ! -s "app/src/main/java/com/mynkralus/mynassistant/ProfilePhotoCropDialog.kt" ]] ||
    grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts; then
