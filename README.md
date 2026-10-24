@@ -56,3 +56,10 @@ Firebase Storage must be initialized for the bucket configured in `app/google-se
 
 
 See [docs/ACCOUNT-CONTACT-SETUP-0.5.9.md](docs/ACCOUNT-CONTACT-SETUP-0.5.9.md) for the one-time Firebase Storage deployment and Firebase email/SMS authentication setup required for account verification and profile photos.
+
+
+## Free-start account services (Android 0.6.0)
+
+The zero-cost startup path keeps Firebase Authentication for Google sign-in and Firestore for profile metadata, sends Firebase-generated verification/change-email links through Brevo Free on the existing Render backend, and stores cropped profile avatars in Cloudinary Free. Firebase Cloud Storage is no longer a dependency in this release, so avatar uploads do not require upgrading Firebase to Blaze. Real SMS verification is deliberately disabled; a saved phone number remains pending/unverified until an explicitly approved SMS service is configured.
+
+Setup and required Render environment variables: [Free account services setup](docs/FREE-ACCOUNT-SERVICES-0.6.0.md). Secrets must be set in the Render dashboard, never embedded in Kotlin or committed to GitHub.
