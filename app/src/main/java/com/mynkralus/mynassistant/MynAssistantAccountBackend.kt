@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.Looper
 import com.google.firebase.auth.FirebaseUser
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
