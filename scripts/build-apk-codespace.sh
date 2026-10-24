@@ -59,7 +59,7 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
-echo "== 2/6: Locate or install Android SDK 37 and Build Tools 37.0.0 =="
+echo "== 2/6: Locate or install Android SDK 37 and Build Tools 36.0.0 =="
 SDK_CANDIDATES=(
   "${ANDROID_HOME:-}"
   "${ANDROID_SDK_ROOT:-}"
@@ -74,7 +74,7 @@ for candidate in "${SDK_CANDIDATES[@]}"; do
   [[ -n "$candidate" && -d "$candidate" ]] || continue
   if [[ -x "$candidate/cmdline-tools/latest/bin/sdkmanager" ]] ||
      compgen -G "$candidate/cmdline-tools/*/bin/sdkmanager" >/dev/null ||
-     [[ -f "$candidate/platforms/android-37/android.jar" ]]; then
+     [[ -f "$candidate/platforms/android-36/android.jar" ]]; then
     SELECTED_SDK="$candidate"
     break
   fi
@@ -113,7 +113,7 @@ if [[ "$LICENSE_PIPE_STATUS" -ne 0 ]] && ! grep -q "All SDK package licenses acc
   echo "ERROR: Android SDK licenses were not accepted."
   exit 3
 fi
-"$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+"$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
 echo "== 3/6: Prepare Gradle 8.13 =="
 INSTALLED_GRADLE_VERSION=""
@@ -181,13 +181,13 @@ echo "== 6/6: Verify signing, APK size, and regression checks =="
 APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
 if [[ ! -s "$APK" ]]; then echo "ERROR: APK missing after Gradle success."; exit 4; fi
 KEYSTORE_SHA1="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | awk '/SHA1:/ { gsub(":", "", $2); print tolower($2) }')"
-APK_SHA1="$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$APK" | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')"
+APK_SHA1="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | awk '/certificate SHA-1 digest/ { print tolower($NF) }' | tr -d ':')"
 echo "Keystore SHA-1: $KEYSTORE_SHA1"
 echo "APK SHA-1:      $APK_SHA1"
 if [[ -z "$KEYSTORE_SHA1" || -z "$APK_SHA1" || "$KEYSTORE_SHA1" != "$APK_SHA1" ]]; then
   echo "ERROR: APK signing certificate does not match the stable key."; exit 5
 fi
-"$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose "$APK"
+"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
 test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
 grep -q 'sherpa-onnx' app/build.gradle.kts
 ! grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts
