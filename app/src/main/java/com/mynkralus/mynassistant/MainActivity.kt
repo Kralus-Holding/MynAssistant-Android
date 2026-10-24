@@ -1553,46 +1553,17 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            // Strict zero-cost mode: never invoke Firebase's real SMS sender.
+            // Phone numbers remain stored as pending/unverified until an explicitly approved SMS provider is enabled.
             val requestPhoneVerification: (String, (String?, String?) -> Unit) -> Unit = { rawNumber, report ->
                 val number = normalizePendingPhoneNumber(rawNumber).orEmpty()
-                val digitCount = number.count { it.isDigit() }
                 when {
-                    number.isBlank() || !number.startsWith("+") || digitCount !in 8..15 ->
+                    number.isBlank() ->
                         report(null, "Geçerli bir telefon numarası gir. Örnek: 05XX XXX XX XX veya +905XXXXXXXXX.")
                     auth.currentUser == null ->
                         report(null, "Telefon numarası eklemek için önce giriş yap.")
-                    else -> {
-                        val options = PhoneAuthOptions.newBuilder(auth)
-                            .setPhoneNumber(number)
-                            .setTimeout(60L, TimeUnit.SECONDS)
-                            .setActivity(this@MainActivity)
-                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                                override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
-                                    updatePhoneCredential(credential) { message -> report(null, message) }
-                                }
-
-                                override fun onVerificationFailed(error: FirebaseException) {
-                                    report(null, firebaseAccountActionError(error, "SMS gönderimi"))
-                                }
-
-                                override fun onCodeSent(
-                                    verificationId: String,
-                                    token: PhoneAuthProvider.ForceResendingToken
-                                ) {
-                                    report(verificationId, "SMS kodu gönderildi. Mesajdaki kodu gir.")
-                                }
-
-                                override fun onCodeAutoRetrievalTimeOut(verificationId: String) {
-                                    report(verificationId, "Otomatik SMS doğrulama süresi doldu. Gelen SMS kodunu elle girebilirsin.")
-                                }
-                            })
-                            .build()
-                        try {
-                            PhoneAuthProvider.verifyPhoneNumber(options)
-                        } catch (error: Exception) {
-                            report(null, firebaseAccountActionError(error, "SMS gönderimi"))
-                        }
-                    }
+                    else ->
+                        report(null, "Ücretsiz başlangıç modunda gerçek SMS gönderimi kapalı. Numara kaydedildi ancak doğrulanmadı; SMS gönderilmedi.")
                 }
             }
             val confirmPhoneVerification: (String, String, (String) -> Unit) -> Unit =
@@ -4648,34 +4619,12 @@ private fun AccountSettings(
                     ) { Text("Kapat") }
                 }
 
-                if (pendingPhone.isNotBlank() && verificationId.isNullOrBlank()) {
-                    Button(
-                        onClick = {
-                            if (phoneVerificationBusy) return@Button
-                            phoneVerificationBusy = true
-                            try {
-                                requestPhoneVerification(pendingPhone) { id, message ->
-                                    phoneVerificationBusy = false
-                                    if (!id.isNullOrBlank()) {
-                                        verificationId = id
-                                        smsCode = ""
-                                    }
-                                    if (message?.contains("doğrulandı", ignoreCase = true) == true) {
-                                        pendingPhone = ""
-                                        phoneExpanded = false
-                                    }
-                                    statusMessage = message
-                                }
-                            } catch (error: Exception) {
-                                phoneVerificationBusy = false
-                                statusMessage = firebaseAccountActionError(error, "SMS gönderimi")
-                            }
-                        },
-                        enabled = !phoneVerificationBusy && verificationId.isNullOrBlank(),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (phoneVerificationBusy) "SMS gönderiliyor…" else "SMS kodu gönder")
-                    }
+                if (pendingPhone.isNotBlank()) {
+                    Text(
+                        "Ücretsiz modda gerçek SMS gönderimi kapalı. Numaran kaydedildi ancak doğrulanmadı; SMS doğrulaması daha sonra etkinleştirilebilir.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
                 }
 
                 if (!verificationId.isNullOrBlank()) {
