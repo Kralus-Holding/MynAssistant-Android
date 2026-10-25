@@ -1,5 +1,6 @@
 package com.mynkralus.mynassistant
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,5 +54,42 @@ class DevicePresencePolicyTest {
     fun futureHeartbeatIsNotTrustedAsOnline() {
         val now = 1_000_000L
         assertFalse(DevicePresencePolicy.isOnline("online", now + 1_000L, now))
+    }
+
+    @Test
+    fun onlineCloudAgentWinsOverSelectedLegacyLocalBridge() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("windows-user-123", "mynai-local-bridge", true),
+            PcDeviceRouteCandidate("win-agent-123", "firebase-agent", true)
+        )
+        assertEquals(
+            "win-agent-123",
+            DevicePresencePolicy.preferredPcDeviceId(
+                devices, "windows-user-123", "windows-user-123"
+            )
+        )
+    }
+
+    @Test
+    fun explicitlySelectedOnlineCloudAgentStaysSelected() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("win-a", "firebase-agent", true),
+            PcDeviceRouteCandidate("win-b", "firebase-agent", true)
+        )
+        assertEquals("win-b", DevicePresencePolicy.preferredPcDeviceId(devices, "win-b", null))
+    }
+
+    @Test
+    fun onlineCloudAgentWinsOverStaleSelectedLocalRecord() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("windows-user-123", "mynai-local-bridge", false),
+            PcDeviceRouteCandidate("win-agent-123", "firebase-agent", true)
+        )
+        assertEquals(
+            "win-agent-123",
+            DevicePresencePolicy.preferredPcDeviceId(
+                devices, "windows-user-123", "windows-user-123"
+            )
+        )
     }
 }
