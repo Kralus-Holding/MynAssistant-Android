@@ -5,6 +5,8 @@ Bu, Android MynAssistant uygulamasından ayrı çalışan yeni bir Windows yard�
 ## Bu sürüm ne yapar?
 
 - İlk çalıştırmada Google hesabıyla tarayıcı üzerinden giriş yapar.
+- Aynı süreçte Windows'un özel ağ IPv4 adreslerinde 8765 portunda token korumalı yerel `/health` ve `/command` uç noktaları açar. Token Windows kullanıcı profilindeki `%LOCALAPPDATA%\MynAssistant\DesktopAgent\bridge_http.json` dosyasında üretilir; Windows ana uygulaması URL/anahtarı Settings ekranında gösterir.
+- Yerel HTTP modu yalnızca izinli metin komutlarını işler; keyfi komut satırı/PowerShell çalıştırmaz. Port yönlendirme yapma ve token'ı paylaşma.
 - Firebase Authentication üzerinden aynı kullanıcı hesabına bağlanır.
 - Windows cihazını Firestore içindeki devices koleksiyonuna otomatik kaydeder.
 - Yaklaşık 25 saniyede bir çevrimiçi durumunu günceller.
@@ -35,6 +37,10 @@ client_secret.json dosyasını GitHub'a yükleme. Bu dosya .gitignore ile dışa
     py agent.py
 
 EXE paketi GitHub Actions'ta windows-latest üzerinde oluşturulur. Test/feature derlemeleri özel depodaki GitHub Releases bölümünde prerelease olarak yayımlanır; ZIP'in içine OAuth JSON'u eklenmez. Release paketinin yanında README.txt bulunur.
+
+## İsteğe bağlı LAN bağlantısı
+
+Windows ve telefon aynı özel Wi-Fi ağında olmalıdır. Windows Güvenlik Duvarı engellerse yalnızca özel ağlar için izin ver. Telefon tarafında PC URL'si ve token, Android Settings ekranına girilir. Web kontrol paneli bu LAN uç noktasını kullanmaz; panel için aynı hesapla Firebase/Google girişiyle kaydolmuş cloud cihazı gerekir.
 
 ## Önemli sınırlar
 

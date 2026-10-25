@@ -61,6 +61,30 @@ class FakeScreenshotImage:
         output.write(b"x" * self.sizes_by_quality[quality])
 
 
+class LocalBridgeSecurityTests(unittest.TestCase):
+    def test_local_bridge_token_uses_constant_time_comparison_and_rejects_mismatch(self) -> None:
+        token = "a" * 43
+        self.assertTrue(agent.local_bridge_token_matches(token, token))
+        self.assertFalse(agent.local_bridge_token_matches(token, "b" * 43))
+        self.assertFalse(agent.local_bridge_token_matches(token, None))
+
+    def test_local_bridge_config_creates_random_per_user_token(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "bridge_http.json"
+            with mock.patch.object(agent, "APP_DATA", Path(temp_dir)), mock.patch.object(
+                agent, "LOCAL_BRIDGE_CONFIG_FILE", config_path
+            ):
+                config = agent.load_or_create_local_bridge_config()
+                second = agent.load_or_create_local_bridge_config()
+            self.assertEqual(config["port"], 8765)
+            self.assertGreaterEqual(len(config["token"]), 32)
+            self.assertEqual(config["token"], second["token"])
+            self.assertEqual(json.loads(config_path.read_text("utf-8"))["token"], config["token"])
+
+
 class AtomicCommandClaimTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session = FakeSession()
