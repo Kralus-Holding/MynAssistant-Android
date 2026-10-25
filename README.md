@@ -9,12 +9,22 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 - Firebase Authentication and Cloud Firestore
 - GitHub Actions for cloud APK builds
 
-## Automatic device discovery
+## Two PC connection paths
 
-- Android listens in real time to Firestore devices documents filtered by the signed-in user's ownerId.
-- Windows Agent signs in via Google OAuth on first launch and registers the PC under the same Firebase user.
-- Android remote actions are queued in Firestore commands; the Windows Agent consumes commands for its registered device.
-- The Android app no longer requires the user to type a Windows IP address or local bridge token.
+### Cloud connection (recommended for remote / web-panel use)
+
+- Start the Windows MynAssistant bridge from Windows Settings > Telefon-PC bağlantısı and complete Google sign-in with the same account as Android.
+- The bridge registers a `firebase-agent` device in Firestore, sends heartbeats, processes the owner's queued commands, and streams temporary screenshot frames only while a preview lease is active.
+- Android discovers this device from Firestore; the web Control Center also sees it and can queue the allowlisted command set. This route works across networks as long as both clients have internet access and Firebase configuration is valid.
+
+### Optional direct local-network connection
+
+- The Windows bridge also exposes authenticated `GET /health` and `POST /command` endpoints on TCP port 8765, bound to the LAN interfaces.
+- Windows Settings shows the current private-LAN URL and a random per-user connection key. Enter both in Android Settings > Telefon-PC bağlantısı and tap “Kaydet ve bağlantıyı test et”.
+- The phone and PC must be on the same trusted private Wi-Fi. If Windows Firewall asks, allow the bridge only on private networks. Do not create router port forwarding or share the connection key.
+- The local bridge accepts bounded text commands that are handled by the existing allowlist; it does not expose a shell or arbitrary script execution.
+
+The cloud route is separate from the optional LAN route. The web panel only queues Firebase commands for devices registered with `connectionMode=firebase-agent`; local-only records are not remote-web command targets.
 
 ## Build outputs
 
@@ -22,6 +32,9 @@ Native Android companion app for MynAssistant, with an isolated Windows companio
 - Windows companion: built as a versioned prerelease ZIP through the Windows Agent workflow.
 
 ## Current scope
+
+Android version 0.6.1 adds the optional LAN URL/token configuration and health-test UI. The Windows bridge must be rebuilt from the same canonical agent source for direct LAN support; the cloud route stays available independently.
+
 
 The new Windows Agent provides automatic device discovery, online heartbeats, volume/desktop/mouse commands, Unicode text entry, Backspace/Enter input, and an on-demand low-frame-rate JPEG desktop preview. Smooth full-screen remote desktop streaming is a later WebRTC milestone.
 

@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import hmac
 import io
 import json
 import os
 import platform
+import secrets
 import subprocess
 import sys
+import threading
 import unicodedata
 import time
 import uuid
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import pyautogui
 import requests
@@ -27,7 +31,7 @@ IDENTITY_TOOLKIT = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN = "https://securetoken.googleapis.com/v1/token"
 FIRESTORE = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 SCOPES = ["openid", "email", "profile"]
-AGENT_VERSION = "0.2.1"
+AGENT_VERSION = "0.2.2"
 POLL_SECONDS = 2.0
 COMMAND_POLL_SECONDS = 2.0
 SCREEN_CHECK_SECONDS = 8.0
@@ -39,6 +43,11 @@ APP_DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "MynAssistan
 OAUTH_FILE_NAME = "client_secret.json"
 SESSION_FILE = APP_DATA / "session.bin"
 DEVICE_FILE = APP_DATA / "devices.json"
+LOCAL_BRIDGE_CONFIG_FILE = APP_DATA / "bridge_http.json"
+LOCAL_BRIDGE_PORT = 8765
+MAX_LOCAL_COMMAND_BYTES = 8 * 1024
+MAX_LOCAL_COMMAND_TEXT = 500
+LOCAL_COMMAND_LOCK = threading.Lock()
 
 VK_VOLUME_MUTE = 0xAD
 VK_VOLUME_DOWN = 0xAE
@@ -637,6 +646,141 @@ def execute_text_command(text: str) -> str:
     return "Desteklenmeyen komut. Şunları deneyebilirsin: Chrome aç, Not Defteri aç, Hesap makinesi aç, YouTube aç, sesi artır, sesi azalt, masaüstünü göster."
 
 
+def save_local_bridge_config(config: dict) -> None:
+    """Persist the per-user LAN bridge token so the Windows UI can display/copy it."""
+    APP_DATA.mkdir(parents=True, exist_ok=True)
+    temporary = LOCAL_BRIDGE_CONFIG_FILE.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    temporary.replace(LOCAL_BRIDGE_CONFIG_FILE)
+
+
+def load_or_create_local_bridge_config() -> dict:
+    APP_DATA.mkdir(parents=True, exist_ok=True)
+    try:
+        config = json.loads(LOCAL_BRIDGE_CONFIG_FILE.read_text("utf-8"))
+    except Exception:
+        config = {}
+
+    token = config.get("token")
+    if not isinstance(token, str) or len(token) < 32:
+        token = secrets.token_urlsafe(32)
+
+    try:
+        port = int(config.get("port", LOCAL_BRIDGE_PORT))
+    except (TypeError, ValueError):
+        port = LOCAL_BRIDGE_PORT
+    if not 1024 <= port <= 65535:
+        port = LOCAL_BRIDGE_PORT
+
+    result = {"token": token, "port": port, "serverError": ""}
+    save_local_bridge_config(result)
+    return result
+
+
+def local_bridge_token_matches(expected: str, supplied: str | None) -> bool:
+    return isinstance(supplied, str) and bool(supplied) and hmac.compare_digest(expected, supplied)
+
+
+def create_local_bridge_server(config: dict) -> ThreadingHTTPServer:
+    """Expose only authenticated /health and /command on the private LAN."""
+    token = str(config["token"])
+
+    class LocalBridgeServer(ThreadingHTTPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "MynAssistantLocalBridge/1"
+
+        def log_message(self, format_string: str, *args) -> None:
+            print("[LAN] " + (format_string % args))
+
+        def send_json(self, status: int, payload: dict) -> None:
+            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def authorized(self, body_token: str | None = None) -> bool:
+            header_token = self.headers.get("X-MynAssistant-Token", "")
+            return local_bridge_token_matches(token, header_token) or local_bridge_token_matches(token, body_token)
+
+        def do_GET(self) -> None:
+            if urlsplit(self.path).path != "/health":
+                self.send_json(404, {"ok": False, "message": "Uç nokta bulunamadı."})
+                return
+            if not self.authorized():
+                self.send_json(401, {"ok": False, "message": "PC bağlantı anahtarı geçersiz."})
+                return
+            self.send_json(200, {
+                "ok": True,
+                "message": "MynAssistant Windows yerel bağlantısı hazır.",
+                "version": AGENT_VERSION,
+            })
+
+        def do_POST(self) -> None:
+            if urlsplit(self.path).path != "/command":
+                self.send_json(404, {"ok": False, "message": "Uç nokta bulunamadı."})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                self.send_json(400, {"ok": False, "message": "İstek uzunluğu geçersiz."})
+                return
+            if length <= 0:
+                self.send_json(400, {"ok": False, "message": "Komut içeriği boş."})
+                return
+            if length > MAX_LOCAL_COMMAND_BYTES:
+                self.send_json(413, {"ok": False, "message": "İstek boyutu sınırı aşıldı."})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self.send_json(400, {"ok": False, "message": "JSON isteği geçersiz."})
+                return
+            if not isinstance(payload, dict):
+                self.send_json(400, {"ok": False, "message": "İstek gövdesi nesne olmalı."})
+                return
+            body_token = payload.get("token")
+            if not self.authorized(body_token if isinstance(body_token, str) else None):
+                self.send_json(401, {"ok": False, "message": "PC bağlantı anahtarı geçersiz."})
+                return
+            text = payload.get("text")
+            if not isinstance(text, str) or not text.strip():
+                self.send_json(400, {"ok": False, "message": "Çalıştırılacak komut metni gerekli."})
+                return
+            if len(text) > MAX_LOCAL_COMMAND_TEXT:
+                self.send_json(400, {"ok": False, "message": f"Komut metni en fazla {MAX_LOCAL_COMMAND_TEXT} karakter olabilir."})
+                return
+
+            try:
+                # Reuse the explicit allowlist; no shell or script execution is exposed.
+                with LOCAL_COMMAND_LOCK:
+                    result = execute_text_command(text)
+                success = not result.startswith("Desteklenmeyen komut")
+                self.send_json(200, {
+                    "ok": success,
+                    "result": {
+                        "ok": success,
+                        "message": result,
+                        "data": {"action_text": result},
+                    },
+                })
+            except Exception as exc:
+                print(f"[LAN] Komut çalıştırılamadı: {exc}")
+                self.send_json(500, {
+                    "ok": False,
+                    "message": "Windows komutu çalıştırılamadı.",
+                    "result": {"ok": False, "message": "Windows komutu çalıştırılamadı."},
+                })
+
+    return LocalBridgeServer(("0.0.0.0", int(config["port"])), Handler)
+
+
 def execute_command(command: str, fields: dict) -> str:
     command = command.strip().lower()
     if command == "text_command":
@@ -741,6 +885,37 @@ def run_agent() -> int:
     print("PC Kumandası açıkken masaüstü önizlemesi yaklaşık saniyede bir güncellenir.")
     print("Durdurmak için Ctrl+C.")
 
+    local_http_server = None
+    local_http_thread = None
+    try:
+        local_bridge_config = load_or_create_local_bridge_config()
+        local_http_server = create_local_bridge_server(local_bridge_config)
+        local_http_thread = threading.Thread(
+            target=local_http_server.serve_forever,
+            name="MynAssistantLocalBridge",
+            daemon=True,
+        )
+        local_http_thread.start()
+        print(
+            f"Telefon için yerel bağlantı hazır: http://<bu-bilgisayarın-ip>:{local_bridge_config['port']}"
+        )
+        print(f"PC bağlantı anahtarı Windows Ayarları bölümünde gösterilir: {LOCAL_BRIDGE_CONFIG_FILE}")
+    except Exception as exc:
+        if local_http_server is not None:
+            try:
+                local_http_server.server_close()
+            except Exception:
+                pass
+        local_http_server = None
+        local_http_thread = None
+        try:
+            config = load_or_create_local_bridge_config()
+            config["serverError"] = str(exc)[:500]
+            save_local_bridge_config(config)
+        except Exception:
+            pass
+        print(f"[LAN] Yerel PC bağlantısı başlatılamadı; Firebase uzaktan bağlantısı çalışmaya devam edecek: {exc}")
+
     last_heartbeat = time.monotonic()
     last_screen_check = 0.0
     last_screen_frame = 0.0
@@ -818,6 +993,13 @@ def run_agent() -> int:
     except KeyboardInterrupt:
         print("\nAgent kapatılıyor...")
     finally:
+        if local_http_server is not None:
+            try:
+                local_http_server.shutdown()
+                local_http_server.server_close()
+                print("[LAN] Yerel PC bağlantısı durduruldu.")
+            except Exception as exc:
+                print(f"[LAN] Yerel sunucu kapatılırken hata: {exc}")
         try:
             firestore_patch(
                 session,

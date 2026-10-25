@@ -945,6 +945,7 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
             connectTimeout = 5000
             readTimeout = 15000
             setRequestProperty("Accept", "application/json")
+            setRequestProperty("X-MynAssistant-Token", token.trim())
             if (command != null) {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -966,8 +967,14 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
             connection.errorStream
         }
         val bodyText = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+        if (statusCode == 401) {
+            return PcBridgeResult(false, false, "PC bağlantı anahtarı reddedildi. Windows Ayarları bölümündeki anahtarı kontrol et.")
+        }
+        if (statusCode == 404) {
+            return PcBridgeResult(false, false, "Windows köprü uç noktası bulunamadı. MynAssistant Windows'u güncelle ve yeniden başlat.")
+        }
         if (statusCode !in 200..299) {
-            return PcBridgeResult(false, false, "Bilgisayara ulaşılamadı. Bağlantı ayarlarını kontrol edip tekrar dene.")
+            return PcBridgeResult(false, false, "Bilgisayara ulaşıldı ancak istek reddedildi (HTTP $statusCode). Windows köprü günlüğünü kontrol et.")
         }
 
         val response = try { JSONObject(bodyText) } catch (_: Exception) {
@@ -1624,7 +1631,7 @@ class MainActivity : ComponentActivity() {
                     googleLinked = googleLinked,
                     firebaseUserId = auth.currentUser?.uid,
                     initialPcBridgeUrl = prefs.getString("pc_bridge_url_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
-                    initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "meyene") ?: "meyene",
+                    initialPcBridgeToken = prefs.getString("pc_bridge_token_" + (auth.currentUser?.uid ?: "guest"), "") ?: "",
                     savePcBridgeSettings = { url, token ->
                         val scope = auth.currentUser?.uid ?: "guest"
                         prefs.edit()
@@ -3300,6 +3307,60 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                             )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text("Telefon–PC bağlantısı", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "İsteğe bağlı doğrudan bağlantı. Windows uygulamasının Ayarlar bölümündeki IP adresini ve PC bağlantı anahtarını buraya gir. Telefon ve bilgisayar aynı özel Wi-Fi ağında olmalı.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                    )
+                                    OutlinedTextField(
+                                        value = pcBridgeUrl,
+                                        onValueChange = { pcBridgeUrl = it },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Windows bilgisayar adresi") },
+                                        placeholder = { Text("http://192.168.1.25:8765") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                                        enabled = !pcBridgeBusy
+                                    )
+                                    OutlinedTextField(
+                                        value = pcBridgeToken,
+                                        onValueChange = { pcBridgeToken = it },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("PC bağlantı anahtarı") },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                        enabled = !pcBridgeBusy
+                                    )
+                                    Button(
+                                        onClick = { testPcBridgeNow() },
+                                        enabled = signedIn && !pcBridgeBusy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(if (pcBridgeBusy) "Bağlantı test ediliyor..." else "Kaydet ve bağlantıyı test et")
+                                    }
+                                    Text(
+                                        pcBridgeStatus,
+                                        fontSize = 12.sp,
+                                        color = if (localPcConnected) Color(0xFF2E9D62) else MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                    )
+                                    Text(
+                                        "Güvenlik: PC bağlantı anahtarını paylaşma ve modeminde port yönlendirme yapma. Windows Güvenlik Duvarı sorarsa yalnızca özel ağlarda izin ver.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f)
+                                    )
+                                }
+                            }
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(24.dp),
