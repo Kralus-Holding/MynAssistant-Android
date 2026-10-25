@@ -2514,7 +2514,6 @@ private fun AssistantScreen(
 
                         // Prefer an authenticated cloud Agent over a stale legacy LAN-bridge record.
                         val selectionTimestamp = System.currentTimeMillis()
-                        val localPcIdForSelection = "windows-$firebaseUserId"
                         val candidates = devices.filter { it.isPcTarget }.map { device ->
                             PcDeviceRouteCandidate(
                                 id = device.id,
@@ -2524,8 +2523,7 @@ private fun AssistantScreen(
                         }
                         selectedDeviceId = DevicePresencePolicy.preferredPcDeviceId(
                             candidates,
-                            selectedDeviceIdLatest.value,
-                            localPcIdForSelection
+                            selectedDeviceIdLatest.value
                         )
                     }
                 }
@@ -2547,8 +2545,7 @@ private fun AssistantScreen(
                 isOnline = device.isOnlineAt(presenceNowMillis)
             )
         },
-        selectedDeviceId,
-        localPcDeviceId
+        selectedDeviceId
     )
     val selectedDevice = pcDevices.firstOrNull { it.id == selectedPcId }
 
