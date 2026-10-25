@@ -65,7 +65,7 @@ class DevicePresencePolicyTest {
         assertEquals(
             "win-agent-123",
             DevicePresencePolicy.preferredPcDeviceId(
-                devices, "windows-user-123", "windows-user-123"
+                devices, "windows-user-123"
             )
         )
     }
@@ -76,7 +76,7 @@ class DevicePresencePolicyTest {
             PcDeviceRouteCandidate("win-a", "firebase-agent", true),
             PcDeviceRouteCandidate("win-b", "firebase-agent", true)
         )
-        assertEquals("win-b", DevicePresencePolicy.preferredPcDeviceId(devices, "win-b", null))
+        assertEquals("win-b", DevicePresencePolicy.preferredPcDeviceId(devices, "win-b"))
     }
 
     @Test
@@ -88,8 +88,24 @@ class DevicePresencePolicyTest {
         assertEquals(
             "win-agent-123",
             DevicePresencePolicy.preferredPcDeviceId(
-                devices, "windows-user-123", "windows-user-123"
+                devices, "windows-user-123"
             )
         )
     }
+    @Test
+    fun onlineLegacyBridgeIsNotAcceptedAsCloudQueueTarget() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("windows-user-123", "mynai-local-bridge", true)
+        )
+        assertEquals(null, DevicePresencePolicy.preferredPcDeviceId(devices, "windows-user-123"))
+    }
+
+    @Test
+    fun offlineCloudAgentIsNotSelected() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("win-agent-123", "firebase-agent", false)
+        )
+        assertEquals(null, DevicePresencePolicy.preferredPcDeviceId(devices, "win-agent-123"))
+    }
+
 }
