@@ -2509,9 +2509,22 @@ private fun AssistantScreen(
                         }
                         devicesError = null
                         devicesLoading = false
-                        if (devices.none { it.id == selectedDeviceId && it.isPcTarget }) {
-                            selectedDeviceId = devices.firstOrNull { it.isPcTarget }?.id
+
+                        // Prefer an authenticated cloud Agent over a stale legacy LAN-bridge record.
+                        val selectionTimestamp = System.currentTimeMillis()
+                        val localPcIdForSelection = "windows-$firebaseUserId"
+                        val candidates = devices.filter { it.isPcTarget }.map { device ->
+                            PcDeviceRouteCandidate(
+                                id = device.id,
+                                connectionMode = device.connectionMode,
+                                isOnline = device.isOnlineAt(selectionTimestamp)
+                            )
                         }
+                        selectedDeviceId = DevicePresencePolicy.preferredPcDeviceId(
+                            candidates,
+                            selectedDeviceId,
+                            localPcIdForSelection
+                        )
                     }
                 }
         } else {
@@ -2523,9 +2536,19 @@ private fun AssistantScreen(
         onDispose { registration?.remove() }
     }
     val pcDevices = devices.filter { it.isPcTarget }
-    val selectedDevice = pcDevices.firstOrNull { it.id == selectedDeviceId }
-        ?: pcDevices.firstOrNull { it.isOnlineAt(presenceNowMillis) }
-        ?: pcDevices.firstOrNull()
+    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
+    val selectedPcId = DevicePresencePolicy.preferredPcDeviceId(
+        pcDevices.map { device ->
+            PcDeviceRouteCandidate(
+                id = device.id,
+                connectionMode = device.connectionMode,
+                isOnline = device.isOnlineAt(presenceNowMillis)
+            )
+        },
+        selectedDeviceId,
+        localPcDeviceId
+    )
+    val selectedDevice = pcDevices.firstOrNull { it.id == selectedPcId }
 
     // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
     // The agent only sends frames while this lease is refreshed, so it does not upload screenshots in the background.
@@ -2551,7 +2574,6 @@ private fun AssistantScreen(
         }
     }
 
-    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val connectedDevices = pcDevices.filter { device ->
         if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
     }
@@ -4178,7 +4200,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.6.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.6.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
