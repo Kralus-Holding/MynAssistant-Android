@@ -2340,6 +2340,30 @@ private fun AssistantScreen(
     var activeCommandListener by remember {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
+    var activeCommandStartedAt by remember { mutableStateOf(0L) }
+
+    // A Firestore document may remain pending/running forever if the PC disconnects.
+    // Stop observing after a bounded interval and report a timeout, never success.
+    LaunchedEffect(firebaseUserId, activeCommandListener, activeCommandStartedAt) {
+        val startedAt = activeCommandStartedAt
+        if (activeCommandListener != null && startedAt > 0L) {
+            val timeoutMillis = 60_000L
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed < timeoutMillis) {
+                kotlinx.coroutines.delay(timeoutMillis - elapsed)
+            }
+            if (activeCommandListener != null && activeCommandStartedAt == startedAt) {
+                activeCommandListener?.remove()
+                activeCommandListener = null
+                feedback = recordIssue(
+                    "MYN-PC-6007", "Bilgisayar komutu",
+                    "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula.",
+                    "",
+                    "REMOTE_COMMAND_TIMEOUT; deviceId=" + (selectedDevice?.id ?: "unknown")
+                )
+            }
+        }
+    }
 
     // Keep the most recently submitted Firebase command observed until it reaches a terminal state.
     DisposableEffect(firebaseUserId, activeCommandListener) {
@@ -2394,6 +2418,10 @@ private fun AssistantScreen(
                                     )
                                     activeCommandListener = null
                                 }
+                                "cancelled" -> {
+                                    feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
+                                    activeCommandListener = null
+                                }
                                 else -> {
                                     feedback = recordIssue(
                                         "MYN-PC-6005", "Bilgisayar komutu",
@@ -2406,6 +2434,7 @@ private fun AssistantScreen(
                             }
                         }
                     }
+                activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
             } else if (
                 message.contains("hata", ignoreCase = true) ||
