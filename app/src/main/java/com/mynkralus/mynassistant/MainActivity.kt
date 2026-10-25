@@ -2337,11 +2337,11 @@ private fun AssistantScreen(
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
-    var activeCommandListener by remember {
+    var activeCommandListener by remember(firebaseUserId) {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
-    var activeCommandStartedAt by remember { mutableStateOf(0L) }
-    var activeCommandDeviceId by remember { mutableStateOf<String?>(null) }
+    var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
+    var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
 
     // A Firestore document may remain pending/running forever if the PC disconnects.
     // Stop observing after a bounded interval and report a timeout, never success.
@@ -2372,10 +2372,12 @@ private fun AssistantScreen(
         onDispose { listenerToDispose?.remove() }
     }
 
-    val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = {
+    val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = sendTrackedCommand@{
             targetDeviceId, targetCommandName, targetPayload ->
-        activeCommandListener?.remove()
-        activeCommandListener = null
+        if (activeCommandListener != null) {
+            feedback = "Önceki bilgisayar komutunun sonucu henüz gelmedi. Yinelenen komut göndermemek için yeni istek gönderilmedi."
+            return@sendTrackedCommand
+        }
         activeCommandDeviceId = targetDeviceId
         feedback = "Komut bilgisayara gönderiliyor..."
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
