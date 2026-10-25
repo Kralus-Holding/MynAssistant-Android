@@ -4846,11 +4846,17 @@ private fun GoogleGLogo(modifier: Modifier = Modifier) {
 
 @Composable
 private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
-    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        AsyncImage(
-            model = "https://raw.githubusercontent.com/kralus24/MynConverter/master/app/src/main/res/drawable/splash_logo.png",
-            contentDescription = "MynKralus logosu",
-            modifier = Modifier.fillMaxSize()
+    Box(
+        Modifier.size(size)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF070B1F)),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = R.drawable.mynassistant_launcher),
+            contentDescription = "MynAssistant",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
         )
     }
 }
