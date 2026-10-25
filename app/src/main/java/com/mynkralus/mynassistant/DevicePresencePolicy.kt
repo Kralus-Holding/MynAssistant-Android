@@ -34,24 +34,16 @@ internal object DevicePresencePolicy {
      */
     fun preferredPcDeviceId(
         candidates: List<PcDeviceRouteCandidate>,
-        selectedDeviceId: String?,
-        legacyLocalPcDeviceId: String?
+        selectedDeviceId: String?
     ): String? {
-        val selected = candidates.firstOrNull { it.id == selectedDeviceId }
-        if (selected != null && selected.isOnline &&
-            (selected.connectionMode.equals("firebase-agent", ignoreCase = true) ||
-                selected.id != legacyLocalPcDeviceId)
-        ) {
-            return selected.id
+        // The Firestore command queue is implemented only by the cloud Windows Agent.
+        // Never fall back to a stale, local-bridge, or unknown connection record.
+        val onlineCloudAgents = candidates.filter {
+            it.isOnline &&
+                it.connectionMode.trim().equals("firebase-agent", ignoreCase = true)
         }
 
-        return candidates.firstOrNull {
-            it.isOnline && it.connectionMode.equals("firebase-agent", ignoreCase = true)
-        }?.id
-            ?: candidates.firstOrNull {
-                it.isOnline && it.id != legacyLocalPcDeviceId
-            }?.id
-            ?: selected?.id
-            ?: candidates.firstOrNull()?.id
+        return onlineCloudAgents.firstOrNull { it.id == selectedDeviceId }?.id
+            ?: onlineCloudAgents.firstOrNull()?.id
     }
 }
