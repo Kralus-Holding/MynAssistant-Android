@@ -1993,6 +1993,8 @@ private fun AssistantScreen(
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    // Firestore callbacks outlive a single composition; keep the listener's selected ID current.
+    val selectedDeviceIdLatest = androidx.compose.runtime.rememberUpdatedState(selectedDeviceId)
     var presenceNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -2522,7 +2524,7 @@ private fun AssistantScreen(
                         }
                         selectedDeviceId = DevicePresencePolicy.preferredPcDeviceId(
                             candidates,
-                            selectedDeviceId,
+                            selectedDeviceIdLatest.value,
                             localPcIdForSelection
                         )
                     }
