@@ -2341,6 +2341,7 @@ private fun AssistantScreen(
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
     var activeCommandStartedAt by remember { mutableStateOf(0L) }
+    var activeCommandDeviceId by remember { mutableStateOf<String?>(null) }
 
     // A Firestore document may remain pending/running forever if the PC disconnects.
     // Stop observing after a bounded interval and report a timeout, never success.
@@ -2359,7 +2360,7 @@ private fun AssistantScreen(
                     "MYN-PC-6007", "Bilgisayar komutu",
                     "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula.",
                     "",
-                    "REMOTE_COMMAND_TIMEOUT; deviceId=" + (selectedDevice?.id ?: "unknown")
+                    "REMOTE_COMMAND_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown")
                 )
             }
         }
@@ -2375,6 +2376,7 @@ private fun AssistantScreen(
             targetDeviceId, targetCommandName, targetPayload ->
         activeCommandListener?.remove()
         activeCommandListener = null
+        activeCommandDeviceId = targetDeviceId
         feedback = "Komut bilgisayara gönderiliyor..."
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
             feedback = message
