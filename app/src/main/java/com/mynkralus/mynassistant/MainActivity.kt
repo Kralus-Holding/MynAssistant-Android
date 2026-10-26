@@ -2631,12 +2631,15 @@ private fun AssistantScreen(
                 message.contains("gönderilemedi", ignoreCase = true) ||
                 message.contains("başarısız", ignoreCase = true)
             ) {
+                pcFilesLoading = false
                 feedback = recordIssue(
                     "MYN-PC-6006", "Bilgisayar bağlantısı",
                     message,
                     targetPayload["text"]?.toString().orEmpty(),
                     "REMOTE_COMMAND_REJECTED; message=" + message
                 )
+            } else {
+                pcFilesLoading = false
             }
         }
     }
