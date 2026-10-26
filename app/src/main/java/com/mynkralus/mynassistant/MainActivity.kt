@@ -191,7 +191,7 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
     }
 }
 
-internal fun normalizePendingPhoneNumber(raw: String): String?
+internal fun normalizePendingPhoneNumber(raw: String): String? {
     val compact = raw.trim().replace(Regex("[\\s().-]"), "")
     if (!compact.matches(Regex("\\+?[0-9]+"))) return null
     val digits = compact.filter(Char::isDigit)
@@ -236,8 +236,8 @@ private fun firebaseAccountActionError(error: Exception?, operation: String): St
             "Firebase projesinin telefon doğrulama faturalandırma ve kota ayarlarını kontrol et."
         key.contains("session_expired") || key.contains("expired") ->
             "Doğrulama oturumunun süresi doldu. Yeni kod iste."
-        else -> "$operation tamamlanamadı. Firebase hata kodu: \${code.ifBlank { "UNKNOWN" }}." +
-            if (detail.isNotBlank()) " Ayrıntı: \${detail}" else " Firebase Console ayarlarını kontrol et."
+        else -> "$operation tamamlanamadı. Firebase hata kodu: ${code.ifBlank { "UNKNOWN" }}." +
+            if (detail.isNotBlank()) " Ayrıntı: $detail" else " Firebase Console ayarlarını kontrol et."
     }
 }
 
@@ -1993,6 +1993,8 @@ private fun AssistantScreen(
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    // Firestore callbacks outlive a single composition; keep the listener's selected ID current.
+    val selectedDeviceIdLatest = androidx.compose.runtime.rememberUpdatedState(selectedDeviceId)
     var presenceNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -2335,8 +2337,145 @@ private fun AssistantScreen(
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
-    var activeCommandListener by remember {
+    var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
+    var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var desktopPairingStatus by remember(firebaseUserId) {
+        mutableStateOf("Windows uygulamasından yeni bir eşleştirme kodu al.")
+    }
+
+    fun approveDesktopPairing() {
+        val normalizedCode = desktopPairingCode.filter { it.isLetterOrDigit() }
+            .uppercase(Locale.ROOT)
+        if (normalizedCode.length != 10) {
+            desktopPairingStatus = "Windows uygulamasında gösterilen 10 karakterli kodu gir."
+            return
+        }
+
+        val user = FirebaseAuth.getInstance().currentUser
+        if (user == null) {
+            desktopPairingStatus = "Devam etmek için önce MynAssistant hesabına giriş yap."
+            return
+        }
+
+        if (desktopPairingBusy) return
+        desktopPairingBusy = true
+        desktopPairingStatus = "Telefon hesabı doğrulanıyor..."
+
+        user.getIdToken(false)
+            .addOnSuccessListener { tokenResult ->
+                val idToken = tokenResult.token
+                if (idToken.isNullOrBlank()) {
+                    desktopPairingBusy = false
+                    desktopPairingStatus = "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
+                    return@addOnSuccessListener
+                }
+
+                Thread {
+                    var connection: java.net.HttpURLConnection? = null
+                    var message = "Bilgisayar onayı gönderilemedi. İnternet bağlantısını kontrol et."
+                    var approved = false
+                    try {
+                        connection = (java.net.URL(
+                            "https://mynassistant-server.onrender.com/api/v1/desktop/pairing/approve"
+                        ).openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            connectTimeout = 8000
+                            readTimeout = 10000
+                            doOutput = true
+                            setRequestProperty("Accept", "application/json")
+                            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                            setRequestProperty("Authorization", "Bearer $idToken")
+                        }
+
+                        val requestBody = JSONObject()
+                            .put("code", normalizedCode)
+                            .toString()
+                            .toByteArray(Charsets.UTF_8)
+                        connection.outputStream.use { it.write(requestBody) }
+
+                        val responseCode = connection.responseCode
+                        val responseStream = try {
+                            if (responseCode in 200..299) connection.inputStream else connection.errorStream
+                        } catch (_: Exception) {
+                            connection.errorStream
+                        }
+                        val responseText = responseStream
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
+                            .orEmpty()
+
+                        val response = try {
+                            JSONObject(responseText)
+                        } catch (_: Exception) {
+                            JSONObject()
+                        }
+
+                        if (responseCode in 200..299) {
+                            val machineName = response.optString("machineName")
+                                .takeIf { it.isNotBlank() }
+                            message = response.optString(
+                                "message",
+                                "Bilgisayar hesabınla eşleştirildi."
+                            )
+                            if (machineName != null) message += " Bilgisayar: $machineName."
+                            approved = true
+                        } else {
+                            val detail = response.optString("detail").takeIf { it.isNotBlank() }
+                            message = DesktopPairingHttpErrorPolicy.message(responseCode, detail)
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        message = "Sunucudan zamanında yanıt alınamadı. Bağlantıyı kontrol edip tekrar dene."
+                    } catch (_: java.net.UnknownHostException) {
+                        message = "MynAssistant sunucusuna ulaşılamadı. İnternet bağlantını kontrol et."
+                    } catch (_: Exception) {
+                        message = "Eşleştirme isteği tamamlanamadı. İnternet bağlantını kontrol edip tekrar dene."
+                    } finally {
+                        connection?.disconnect()
+                    }
+
+                    Handler(Looper.getMainLooper()).post {
+                        desktopPairingBusy = false
+                        desktopPairingStatus = message
+                        if (approved) {
+                            desktopPairingCode = ""
+                            feedback = message
+                        }
+                    }
+                }.start()
+            }
+            .addOnFailureListener {
+                desktopPairingBusy = false
+                desktopPairingStatus =
+                    "Telefon hesabı doğrulanamadı. İnternet bağlantını kontrol edip yeniden dene."
+            }
+    }
+    var activeCommandListener by remember(firebaseUserId) {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
+    }
+    var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
+    var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+
+    // A Firestore document may remain pending/running forever if the PC disconnects.
+    // Stop observing after a bounded interval and report a timeout, never success.
+    LaunchedEffect(firebaseUserId, activeCommandListener, activeCommandStartedAt) {
+        val startedAt = activeCommandStartedAt
+        if (activeCommandListener != null && startedAt > 0L) {
+            val timeoutMillis = 60_000L
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed < timeoutMillis) {
+                kotlinx.coroutines.delay(timeoutMillis - elapsed)
+            }
+            if (activeCommandListener != null && activeCommandStartedAt == startedAt) {
+                activeCommandListener?.remove()
+                activeCommandListener = null
+                feedback = recordIssue(
+                    "MYN-PC-6007", "Bilgisayar komutu",
+                    "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula.",
+                    "",
+                    "REMOTE_COMMAND_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown")
+                )
+            }
+        }
     }
 
     // Keep the most recently submitted Firebase command observed until it reaches a terminal state.
@@ -2345,10 +2484,13 @@ private fun AssistantScreen(
         onDispose { listenerToDispose?.remove() }
     }
 
-    val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = {
+    val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = sendTrackedCommand@{
             targetDeviceId, targetCommandName, targetPayload ->
-        activeCommandListener?.remove()
-        activeCommandListener = null
+        if (activeCommandListener != null) {
+            feedback = "Önceki bilgisayar komutunun sonucu henüz gelmedi. Yinelenen komut göndermemek için yeni istek gönderilmedi."
+            return@sendTrackedCommand
+        }
+        activeCommandDeviceId = targetDeviceId
         feedback = "Komut bilgisayara gönderiliyor..."
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
             feedback = message
@@ -2392,6 +2534,10 @@ private fun AssistantScreen(
                                     )
                                     activeCommandListener = null
                                 }
+                                "cancelled" -> {
+                                    feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
+                                    activeCommandListener = null
+                                }
                                 else -> {
                                     feedback = recordIssue(
                                         "MYN-PC-6005", "Bilgisayar komutu",
@@ -2404,6 +2550,7 @@ private fun AssistantScreen(
                             }
                         }
                     }
+                activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
             } else if (
                 message.contains("hata", ignoreCase = true) ||
@@ -2509,9 +2656,20 @@ private fun AssistantScreen(
                         }
                         devicesError = null
                         devicesLoading = false
-                        if (devices.none { it.id == selectedDeviceId && it.isPcTarget }) {
-                            selectedDeviceId = devices.firstOrNull { it.isPcTarget }?.id
+
+                        // Prefer an authenticated cloud Agent over a stale legacy LAN-bridge record.
+                        val selectionTimestamp = System.currentTimeMillis()
+                        val candidates = devices.filter { it.isPcTarget }.map { device ->
+                            PcDeviceRouteCandidate(
+                                id = device.id,
+                                connectionMode = device.connectionMode,
+                                isOnline = device.isOnlineAt(selectionTimestamp)
+                            )
                         }
+                        selectedDeviceId = DevicePresencePolicy.preferredPcDeviceId(
+                            candidates,
+                            selectedDeviceIdLatest.value
+                        )
                     }
                 }
         } else {
@@ -2523,9 +2681,18 @@ private fun AssistantScreen(
         onDispose { registration?.remove() }
     }
     val pcDevices = devices.filter { it.isPcTarget }
-    val selectedDevice = pcDevices.firstOrNull { it.id == selectedDeviceId }
-        ?: pcDevices.firstOrNull { it.isOnlineAt(presenceNowMillis) }
-        ?: pcDevices.firstOrNull()
+    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
+    val selectedPcId = DevicePresencePolicy.preferredPcDeviceId(
+        pcDevices.map { device ->
+            PcDeviceRouteCandidate(
+                id = device.id,
+                connectionMode = device.connectionMode,
+                isOnline = device.isOnlineAt(presenceNowMillis)
+            )
+        },
+        selectedDeviceId
+    )
+    val selectedDevice = pcDevices.firstOrNull { it.id == selectedPcId }
 
     // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
     // The agent only sends frames while this lease is refreshed, so it does not upload screenshots in the background.
@@ -2551,7 +2718,6 @@ private fun AssistantScreen(
         }
     }
 
-    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val connectedDevices = pcDevices.filter { device ->
         if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
     }
@@ -3300,6 +3466,83 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                             )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Computer,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Windows bilgisayarını eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "Windows uygulamasında oluşturulan tek kullanımlık kodu gir. Kod 5 dakika içinde sona erer.",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = desktopPairingCode,
+                                        onValueChange = { entered ->
+                                            desktopPairingCode = entered
+                                                .filter { it.isLetterOrDigit() }
+                                                .uppercase(Locale.ROOT)
+                                                .take(10)
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Windows eşleştirme kodu") },
+                                        placeholder = { Text("ABCDE23456") },
+                                        singleLine = true,
+                                        enabled = signedIn && !desktopPairingBusy,
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Ascii,
+                                            imeAction = ImeAction.Done
+                                        ),
+                                        supportingText = {
+                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
+                                        }
+                                    )
+                                    Button(
+                                        onClick = { approveDesktopPairing() },
+                                        enabled = signedIn && !desktopPairingBusy &&
+                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
+                                    }
+                                    Text(
+                                        desktopPairingStatus,
+                                        fontSize = 12.sp,
+                                        color = when {
+                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
+                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
+                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
+                                                Color(0xFF2E9D62)
+                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                        }
+                                    )
+                                }
+                            }
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(24.dp),
@@ -4178,7 +4421,7 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.6.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                        Text("MynAssistant • Android 0.6.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -4822,11 +5065,17 @@ private fun GoogleGLogo(modifier: Modifier = Modifier) {
 
 @Composable
 private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
-    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        AsyncImage(
-            model = "https://raw.githubusercontent.com/kralus24/MynConverter/master/app/src/main/res/drawable/splash_logo.png",
-            contentDescription = "MynKralus logosu",
-            modifier = Modifier.fillMaxSize()
+    Box(
+        Modifier.size(size)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF070B1F)),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = R.drawable.mynassistant_launcher),
+            contentDescription = "MynAssistant",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
         )
     }
 }
