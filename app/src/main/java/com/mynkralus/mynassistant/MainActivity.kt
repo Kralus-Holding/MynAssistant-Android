@@ -2421,18 +2421,7 @@ private fun AssistantScreen(
                             approved = true
                         } else {
                             val detail = response.optString("detail")
-                            message = when {
-                                responseCode == 401 ->
-                                    "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
-                                responseCode == 429 ->
-                                    "Çok fazla eşleştirme denemesi yapıldı. Biraz bekleyip tekrar dene."
-                                responseCode == 404 || responseCode == 405 ->
-                                    "Bu sunucuda telefon-PC eşleştirme uç noktası henüz yayımlanmamış. Sunucu güncellendikten sonra tekrar dene."
-                                responseCode == 503 ->
-                                    "Telefon-PC eşleştirmesi sunucuda yapılandırılmamış. Sunucu yöneticisi Firebase ayarlarını kontrol etmeli."
-                                detail.isNotBlank() -> detail
-                                else -> "Eşleştirme kodu kabul edilmedi. Kodu kontrol edip yeniden dene."
-                            }
+                            message = DesktopPairingHttpErrorPolicy.message(responseCode, detail)
                         }
                     } catch (_: java.net.SocketTimeoutException) {
                         message = "Sunucudan zamanında yanıt alınamadı. Bağlantıyı kontrol edip tekrar dene."
