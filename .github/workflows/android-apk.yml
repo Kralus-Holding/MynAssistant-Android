@@ -76,6 +76,8 @@ jobs:
           grep -q '"PC Kumandası" -> Icons.Default.SettingsRemote' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'sendTrackedRemoteCommand(targetDeviceId, "list_files"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'private data class PcFileListing' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'private fun parsePcFileListing(payload: String)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q '"Touchpad",' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
