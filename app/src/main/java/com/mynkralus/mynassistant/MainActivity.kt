@@ -104,6 +104,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Block
@@ -4013,6 +4014,25 @@ private fun AssistantScreen(
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
+                            val remoteUiPreferences = remember {
+                                commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            }
+                            val remoteUiPreferencePrefix =
+                                "remote_visibility_${firebaseUserId.orEmpty()}_${device?.id.orEmpty()}"
+                            var showScreenPreview by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_screen", true))
+                            }
+                            var showTouchpadPanel by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_touchpad", true))
+                            }
+                            var showKeyboardPanel by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_keyboard", true))
+                            }
+                            fun saveRemoteVisibility(control: String, visible: Boolean) {
+                                remoteUiPreferences.edit()
+                                    .putBoolean("${remoteUiPreferencePrefix}_${control}", visible)
+                                    .apply()
+                            }
                             var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
                                 mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
                             }
@@ -4029,6 +4049,54 @@ private fun AssistantScreen(
                                 (device == null || device.id == localPcDeviceId)
                             val remoteOnline = localBridgeSelected ||
                                 (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconToggleButton(
+                                    checked = showScreenPreview,
+                                    onCheckedChange = {
+                                        showScreenPreview = it
+                                        saveRemoteVisibility("screen", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Tv,
+                                        contentDescription = if (showScreenPreview) "Ekran görünümünü gizle" else "Ekran görünümünü göster",
+                                        tint = if (showScreenPreview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                                IconToggleButton(
+                                    checked = showTouchpadPanel,
+                                    onCheckedChange = {
+                                        showTouchpadPanel = it
+                                        saveRemoteVisibility("touchpad", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.TouchApp,
+                                        contentDescription = if (showTouchpadPanel) "Touchpad alanını gizle" else "Touchpad alanını göster",
+                                        tint = if (showTouchpadPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                                IconToggleButton(
+                                    checked = showKeyboardPanel,
+                                    onCheckedChange = {
+                                        showKeyboardPanel = it
+                                        saveRemoteVisibility("keyboard", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Keyboard,
+                                        contentDescription = if (showKeyboardPanel) "Klavye satırını gizle" else "Klavye satırını göster",
+                                        tint = if (showKeyboardPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                            }
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -4061,7 +4129,7 @@ private fun AssistantScreen(
                                     Box(Modifier.size(9.dp))
                                 }
                             }
-                            if (device?.connectionMode == "firebase-agent") {
+                            if (device?.connectionMode == "firebase-agent" && showScreenPreview) {
                                 Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                 if (screenBitmap != null) {
                                     Image(
@@ -4110,6 +4178,8 @@ private fun AssistantScreen(
                             TvRemotePanel(
                                 enabled = remoteOnline,
                                 mouseEnabled = remoteOnline && !localBridgeSelected,
+                                showTouchpad = showTouchpadPanel,
+                                showKeyboard = showKeyboardPanel,
                                 onCommand = { commandName, payload ->
                                     if (!signedIn) {
                                         feedback = "Devam etmek için önce giriş yap."
@@ -5284,6 +5354,8 @@ private fun TvRemotePanel(
     onCommand: (String, Map<String, Any>) -> Unit,
     enabled: Boolean,
     mouseEnabled: Boolean = enabled,
+    showTouchpad: Boolean = true,
+    showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val buttons = listOf(
@@ -5364,6 +5436,7 @@ private fun TvRemotePanel(
         }
 
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (showTouchpad) {
         // The touchpad keeps its controls inside the surface so there is no redundant
         // explanatory overlay over the dotted area. Gestures are attached only to Canvas,
         // allowing the top-right enable/disable control to remain an independent target.
@@ -5450,6 +5523,8 @@ private fun TvRemotePanel(
             }
         }
 
+        }
+        if (showKeyboard) {
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -5490,6 +5565,7 @@ private fun TvRemotePanel(
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
             )
+        }
         }
     }
 }
