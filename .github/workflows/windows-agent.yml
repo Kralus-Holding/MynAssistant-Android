@@ -21,10 +21,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -57,7 +57,7 @@ jobs:
 
       - name: Publish test build as a prerelease asset
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: mynassistant-windows-agent-${{ github.sha }}
           name: MynAssistant Windows Agent test ${{ github.sha }}
