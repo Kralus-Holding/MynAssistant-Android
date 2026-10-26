@@ -2337,6 +2337,127 @@ private fun AssistantScreen(
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
+    var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var desktopPairingStatus by remember(firebaseUserId) {
+        mutableStateOf("Windows uygulamasından yeni bir eşleştirme kodu al.")
+    }
+
+    fun approveDesktopPairing() {
+        val normalizedCode = desktopPairingCode.filter { it.isLetterOrDigit() }
+            .uppercase(Locale.ROOT)
+        if (normalizedCode.length != 10) {
+            desktopPairingStatus = "Windows uygulamasında gösterilen 10 karakterli kodu gir."
+            return
+        }
+
+        val user = FirebaseAuth.getInstance().currentUser
+        if (user == null) {
+            desktopPairingStatus = "Devam etmek için önce MynAssistant hesabına giriş yap."
+            return
+        }
+
+        if (desktopPairingBusy) return
+        desktopPairingBusy = true
+        desktopPairingStatus = "Telefon hesabı doğrulanıyor..."
+
+        user.getIdToken(false)
+            .addOnSuccessListener { tokenResult ->
+                val idToken = tokenResult.token
+                if (idToken.isNullOrBlank()) {
+                    desktopPairingBusy = false
+                    desktopPairingStatus = "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
+                    return@addOnSuccessListener
+                }
+
+                Thread {
+                    var connection: java.net.HttpURLConnection? = null
+                    var message = "Bilgisayar onayı gönderilemedi. İnternet bağlantısını kontrol et."
+                    var approved = false
+                    try {
+                        connection = (java.net.URL(
+                            "https://mynassistant-server.onrender.com/api/v1/desktop/pairing/approve"
+                        ).openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            connectTimeout = 8000
+                            readTimeout = 10000
+                            doOutput = true
+                            setRequestProperty("Accept", "application/json")
+                            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                            setRequestProperty("Authorization", "Bearer $idToken")
+                        }
+
+                        val requestBody = JSONObject()
+                            .put("code", normalizedCode)
+                            .toString()
+                            .toByteArray(Charsets.UTF_8)
+                        connection.outputStream.use { it.write(requestBody) }
+
+                        val responseCode = connection.responseCode
+                        val responseStream = try {
+                            if (responseCode in 200..299) connection.inputStream else connection.errorStream
+                        } catch (_: Exception) {
+                            connection.errorStream
+                        }
+                        val responseText = responseStream
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
+                            .orEmpty()
+
+                        val response = try {
+                            JSONObject(responseText)
+                        } catch (_: Exception) {
+                            JSONObject()
+                        }
+
+                        if (responseCode in 200..299) {
+                            val machineName = response.optString("machineName")
+                                .takeIf { it.isNotBlank() }
+                            message = response.optString(
+                                "message",
+                                "Bilgisayar hesabınla eşleştirildi."
+                            )
+                            if (machineName != null) message += " Bilgisayar: $machineName."
+                            approved = true
+                        } else {
+                            val detail = response.optString("detail")
+                            message = when {
+                                responseCode == 401 ->
+                                    "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
+                                responseCode == 429 ->
+                                    "Çok fazla eşleştirme denemesi yapıldı. Biraz bekleyip tekrar dene."
+                                responseCode == 503 ->
+                                    "Telefon-PC eşleştirmesi sunucuda henüz hazır değil. Daha sonra tekrar dene."
+                                detail.isNotBlank() -> detail
+                                else -> "Eşleştirme kodu kabul edilmedi. Kodu kontrol edip yeniden dene."
+                            }
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        message = "Sunucudan zamanında yanıt alınamadı. Bağlantıyı kontrol edip tekrar dene."
+                    } catch (_: java.net.UnknownHostException) {
+                        message = "MynAssistant sunucusuna ulaşılamadı. İnternet bağlantını kontrol et."
+                    } catch (_: Exception) {
+                        message = "Eşleştirme isteği tamamlanamadı. İnternet bağlantını kontrol edip tekrar dene."
+                    } finally {
+                        connection?.disconnect()
+                    }
+
+                    Handler(Looper.getMainLooper()).post {
+                        desktopPairingBusy = false
+                        desktopPairingStatus = message
+                        if (approved) {
+                            desktopPairingCode = ""
+                            feedback = message
+                        }
+                    }
+                }.start()
+            }
+            .addOnFailureListener {
+                desktopPairingBusy = false
+                desktopPairingStatus =
+                    "Telefon hesabı doğrulanamadı. İnternet bağlantını kontrol edip yeniden dene."
+            }
+    }
     var activeCommandListener by remember(firebaseUserId) {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
@@ -3354,6 +3475,83 @@ private fun AssistantScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                             )
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Computer,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Windows bilgisayarını eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "Windows uygulamasında oluşturulan tek kullanımlık kodu gir. Kod 5 dakika içinde sona erer.",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = desktopPairingCode,
+                                        onValueChange = { entered ->
+                                            desktopPairingCode = entered
+                                                .filter { it.isLetterOrDigit() }
+                                                .uppercase(Locale.ROOT)
+                                                .take(10)
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Windows eşleştirme kodu") },
+                                        placeholder = { Text("ABCDE23456") },
+                                        singleLine = true,
+                                        enabled = signedIn && !desktopPairingBusy,
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Ascii,
+                                            imeAction = ImeAction.Done
+                                        ),
+                                        supportingText = {
+                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
+                                        }
+                                    )
+                                    Button(
+                                        onClick = { approveDesktopPairing() },
+                                        enabled = signedIn && !desktopPairingBusy &&
+                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
+                                    }
+                                    Text(
+                                        desktopPairingStatus,
+                                        fontSize = 12.sp,
+                                        color = when {
+                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
+                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
+                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
+                                                Color(0xFF2E9D62)
+                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                        }
+                                    )
+                                }
+                            }
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(24.dp),
