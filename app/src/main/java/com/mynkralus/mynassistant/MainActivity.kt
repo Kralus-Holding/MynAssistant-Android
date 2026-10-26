@@ -275,6 +275,22 @@ private data class PcBridgeResult(
     val message: String
 )
 
+private data class PcFileEntry(
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+    val size: Long,
+    val modifiedUtc: String
+)
+
+private data class PcFileListing(
+    val currentPath: String,
+    val parentPath: String?,
+    val entries: List<PcFileEntry>,
+    val truncated: Boolean,
+    val warnings: List<String>
+)
+
 /**
  * Executes the Android-side command subset locally on this handset.
  * Protected operations such as silently toggling Bluetooth or initiating a call
@@ -2337,6 +2353,9 @@ private fun AssistantScreen(
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var pcFileListing by remember(firebaseUserId) { mutableStateOf<PcFileListing?>(null) }
+    var pcFilesDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var pcFilesLoading by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
     var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingStatus by remember(firebaseUserId) {
@@ -2468,6 +2487,7 @@ private fun AssistantScreen(
             if (activeCommandListener != null && activeCommandStartedAt == startedAt) {
                 activeCommandListener?.remove()
                 activeCommandListener = null
+                pcFilesLoading = false
                 feedback = recordIssue(
                     "MYN-PC-6007", "Bilgisayar komutu",
                     "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula.",
@@ -2500,6 +2520,7 @@ private fun AssistantScreen(
                     .document(commandId)
                     .addSnapshotListener { snapshot, error ->
                         if (error != null) {
+                            pcFilesLoading = false
                             feedback = recordIssue(
                                 "MYN-PC-6001", "Bilgisayar komutu",
                                 "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
@@ -2508,6 +2529,7 @@ private fun AssistantScreen(
                             )
                             activeCommandListener = null
                         } else if (snapshot == null || !snapshot.exists()) {
+                            pcFilesLoading = false
                             feedback = recordIssue(
                                 "MYN-PC-6002", "Bilgisayar komutu",
                                 "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
@@ -2522,10 +2544,60 @@ private fun AssistantScreen(
                                 "pending" -> feedback = "Komut bilgisayara ulaştı; işlemesi bekleniyor."
                                 "running" -> feedback = "Bilgisayar komutu uyguluyor..."
                                 "completed" -> {
-                                    feedback = result.ifBlank { "Komut tamamlandı." }
+                                    if (targetCommandName == "list_files") {
+                                        try {
+                                            val listingJson = JSONObject(result)
+                                            val entriesJson = listingJson.optJSONArray("entries")
+                                                ?: throw IllegalArgumentException("Dosya listesi yanıtında entries alanı yok.")
+                                            val entries = buildList {
+                                                for (index in 0 until entriesJson.length()) {
+                                                    val item = entriesJson.optJSONObject(index) ?: continue
+                                                    val name = item.optString("name").takeIf { it.isNotBlank() } ?: continue
+                                                    val path = item.optString("path")
+                                                    if (path.isBlank()) continue
+                                                    add(
+                                                        PcFileEntry(
+                                                            name = name,
+                                                            path = path,
+                                                            isDirectory = item.optBoolean("isDirectory", false),
+                                                            size = item.optLong("size", 0L).coerceAtLeast(0L),
+                                                            modifiedUtc = item.optString("modifiedUtc")
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                            pcFileListing = PcFileListing(
+                                                currentPath = if (listingJson.isNull("currentPath")) "" else listingJson.optString("currentPath", ""),
+                                                parentPath = if (listingJson.isNull("parentPath")) null else listingJson.optString("parentPath", ""),
+                                                entries = entries,
+                                                truncated = listingJson.optBoolean("truncated", false),
+                                                warnings = listingJson.optJSONArray("warnings")?.let { warningsJson ->
+                                                    buildList {
+                                                        for (index in 0 until warningsJson.length()) {
+                                                            warningsJson.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+                                                        }
+                                                    }
+                                                }.orEmpty()
+                                            )
+                                            pcFilesDeviceId = targetDeviceId
+                                            feedback = "Dosya listesi alındı: " + entries.size + " öğe."
+                                        } catch (parseError: Exception) {
+                                            pcFileListing = null
+                                            feedback = recordIssue(
+                                                "MYN-PC-6008", "Bilgisayar dosyaları",
+                                                "Bilgisayardan gelen dosya listesi okunamadı. Windows yardımcı uygulamasını güncelleyip yeniden dene.",
+                                                "",
+                                                "FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
+                                            )
+                                        }
+                                    } else {
+                                        feedback = result.ifBlank { "Komut tamamlandı." }
+                                    }
+                                    pcFilesLoading = false
                                     activeCommandListener = null
                                 }
                                 "failed" -> {
+                                    pcFilesLoading = false
                                     feedback = recordIssue(
                                         "MYN-PC-6003", "Bilgisayar komutu",
                                         result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
@@ -2535,10 +2607,12 @@ private fun AssistantScreen(
                                     activeCommandListener = null
                                 }
                                 "cancelled" -> {
+                                    pcFilesLoading = false
                                     feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
                                     activeCommandListener = null
                                 }
                                 else -> {
+                                    pcFilesLoading = false
                                     feedback = recordIssue(
                                         "MYN-PC-6005", "Bilgisayar komutu",
                                         "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
@@ -2564,6 +2638,18 @@ private fun AssistantScreen(
                     "REMOTE_COMMAND_REJECTED; message=" + message
                 )
             }
+        }
+    }
+
+    val requestPcFileList: (String, String) -> Unit = requestFiles@{ targetDeviceId, path ->
+        if (activeCommandListener != null) {
+            feedback = "Önceki bilgisayar komutu tamamlanmalı. Yeni dosya isteği gönderilmedi."
+        } else {
+            selectedDeviceId = targetDeviceId
+            pcFilesDeviceId = targetDeviceId
+            pcFilesLoading = true
+            if (path.isBlank()) pcFileListing = null
+            sendTrackedRemoteCommand(targetDeviceId, "list_files", mapOf("path" to path))
         }
     }
 
@@ -3410,7 +3496,7 @@ private fun AssistantScreen(
                                 Text("Şu anda aktif ve bağlı bilgisayar yok.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
                                 connectedDevices.forEach { device ->
-                                    val deviceOnlineNow = true
+                                    val deviceOnlineNow = device.isOnlineAt(presenceNowMillis)
                                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3427,7 +3513,7 @@ private fun AssistantScreen(
                                                     feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
                                                 } else if (device.connectionMode == "firebase-agent") {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
-                                                    sendTrackedRemoteCommand(device.id, "text_command", mapOf("text" to "bilgisayar dosyalarını listele"))
+                                                    requestPcFileList(device.id, "")
                                                 } else if (device.id == localPcDeviceId && localPcConnected) {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
                                                     sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, "dosyaları listele") { result ->
@@ -3441,7 +3527,7 @@ private fun AssistantScreen(
                                             }, modifier = Modifier.fillMaxWidth()) {
                                                 Icon(Icons.Default.FolderOpen, contentDescription = null)
                                                 Spacer(Modifier.width(8.dp))
-                                                Text("Dosya listesini iste")
+                                                Text(if (pcFilesLoading && pcFilesDeviceId == device.id) "Dosya listesi alınıyor..." else "Dosya listesini iste")
                                             }
                                             Text(
                                                 "Bilgisayardaki klasörleri burada görüntülemek için Windows yardımcı uygulamasının dosya listesini göndermesi gerekir.",
@@ -3449,6 +3535,90 @@ private fun AssistantScreen(
                                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
                                             )
                                         }
+                                    }
+                                }
+                            }
+                            if (pcFilesLoading) {
+                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                            }
+                            pcFileListing?.takeIf { pcFilesDeviceId != null }?.let { listing ->
+                                Card(
+                                    Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                ) {
+                                    Column(
+                                        Modifier.fillMaxWidth().padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text("Bilgisayar dosyaları", fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            listing.currentPath.ifBlank { "İzin verilen klasörler" },
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .66f),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (listing.parentPath != null) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    pcFilesDeviceId?.let { id -> requestPcFileList(id, listing.parentPath) }
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                enabled = !pcFilesLoading
+                                            ) {
+                                                Icon(Icons.Default.ChevronRight, contentDescription = null)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(if (listing.parentPath.isBlank()) "İzin verilen klasörlere dön" else "Üst klasör")
+                                            }
+                                        }
+                                        if (listing.entries.isEmpty() && !pcFilesLoading) {
+                                            Text(
+                                                "Bu klasörde görüntülenebilir öğe yok.",
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f),
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                        listing.entries.forEach { entry ->
+                                            Row(
+                                                Modifier.fillMaxWidth()
+                                                    .clickable(enabled = entry.isDirectory && !pcFilesLoading) {
+                                                        pcFilesDeviceId?.let { id -> requestPcFileList(id, entry.path) }
+                                                    }
+                                                    .padding(vertical = 7.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    if (entry.isDirectory) Icons.Default.FolderOpen else Icons.Default.MoreHoriz,
+                                                    contentDescription = if (entry.isDirectory) "Klasör" else "Dosya",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(entry.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                    Text(
+                                                        if (entry.isDirectory) "Klasör" else entry.size.toString() + " bayt",
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f)
+                                                    )
+                                                }
+                                                if (entry.isDirectory) {
+                                                    Icon(Icons.Default.ChevronRight, contentDescription = "Klasörü aç")
+                                                }
+                                            }
+                                            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = .2f))
+                                        }
+                                        if (listing.truncated) {
+                                            Text("Bu klasör çok büyük; ilk 200 öğe gösteriliyor.", fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .66f))
+                                        }
+                                        listing.warnings.forEach { warning ->
+                                            Text(warning, fontSize = 12.sp, color = MaterialTheme.colorScheme.tertiary)
+                                        }
+                                        Text(
+                                            "Güvenlik: yalnızca izin verilen kullanıcı klasörleri listelenir. Dosya indirme, yükleme ve ZIP işlemleri ayrı komutlar olarak doğrulanmadan kullanılabilir gösterilmez.",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
+                                        )
                                     }
                                 }
                             }
