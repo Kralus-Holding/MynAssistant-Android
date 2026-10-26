@@ -404,9 +404,11 @@ def update_command(
     if marker not in full_name:
         raise RuntimeError("Komut belgesinin yolu geçersiz.")
     document_path = full_name.split(marker, 1)[1]
+    command_name = decode_field(document.get("fields", {}).get("command"))
+    result_limit = FILE_LIST_MAX_RESULT_LENGTH if command_name == "list_files" else 800
     fields = {
         "status": encode_string(status),
-        "result": encode_string(result[:800]),
+        "result": encode_string(result[:result_limit]),
         "processedAt": encode_timestamp(),
     }
     if extra_fields:
