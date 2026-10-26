@@ -2426,8 +2426,10 @@ private fun AssistantScreen(
                                     "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
                                 responseCode == 429 ->
                                     "Çok fazla eşleştirme denemesi yapıldı. Biraz bekleyip tekrar dene."
+                                responseCode == 404 || responseCode == 405 ->
+                                    "Bu sunucuda telefon-PC eşleştirme uç noktası henüz yayımlanmamış. Sunucu güncellendikten sonra tekrar dene."
                                 responseCode == 503 ->
-                                    "Telefon-PC eşleştirmesi sunucuda henüz hazır değil. Daha sonra tekrar dene."
+                                    "Telefon-PC eşleştirmesi sunucuda yapılandırılmamış. Sunucu yöneticisi Firebase ayarlarını kontrol etmeli."
                                 detail.isNotBlank() -> detail
                                 else -> "Eşleştirme kodu kabul edilmedi. Kodu kontrol edip yeniden dene."
                             }
