@@ -74,6 +74,9 @@ jobs:
           grep -q 'android:name=".MynWakeWordService"' app/src/main/AndroidManifest.xml
           grep -q 'android:name=".MynAssistantAccessibilityService"' app/src/main/AndroidManifest.xml
           grep -q '"PC Kumandası" -> Icons.Default.SettingsRemote' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'sendTrackedRemoteCommand(targetDeviceId, "list_files"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'private data class PcFileListing' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q '"Touchpad",' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Icons.Default.Save' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
