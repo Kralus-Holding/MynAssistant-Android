@@ -80,6 +80,9 @@ jobs:
           grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q '"Touchpad",' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'remote_visibility_' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'showTouchpad = showTouchpadPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'showKeyboard = showKeyboardPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Icons.Default.Save' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFFE0F5E8)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
