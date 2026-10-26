@@ -2421,7 +2421,16 @@ private fun AssistantScreen(
                             approved = true
                         } else {
                             val detail = response.optString("detail")
-                            message = DesktopPairingHttpErrorPolicy.message(responseCode, detail)
+                            message = when {
+                                responseCode == 401 ->
+                                    "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
+                                responseCode == 429 ->
+                                    "Çok fazla eşleştirme denemesi yapıldı. Biraz bekleyip tekrar dene."
+                                responseCode == 503 ->
+                                    "Telefon-PC eşleştirmesi sunucuda henüz hazır değil. Daha sonra tekrar dene."
+                                detail.isNotBlank() -> detail
+                                else -> "Eşleştirme kodu kabul edilmedi. Kodu kontrol edip yeniden dene."
+                            }
                         }
                     } catch (_: java.net.SocketTimeoutException) {
                         message = "Sunucudan zamanında yanıt alınamadı. Bağlantıyı kontrol edip tekrar dene."
