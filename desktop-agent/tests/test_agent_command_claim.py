@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -216,6 +217,82 @@ class RemoteKeyboardCommandTests(unittest.TestCase):
         self.assertIn("Enter", enter_result)
         for command in ("type_text", "key_backspace", "key_enter"):
             self.assertTrue(agent.command_is_supported(command))
+
+
+class SafeFileListingCommandTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.session = FakeSession()
+
+    def test_root_listing_contains_only_existing_allowlisted_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile = Path(temp_dir)
+            for folder in ("Desktop", "Documents", "Pictures", "Music", "Private"):
+                (profile / folder).mkdir()
+            with mock.patch.dict(agent.os.environ, {"USERPROFILE": str(profile)}):
+                payload = json.loads(agent.execute_command("list_files", {"path": ""}))
+
+        self.assertEqual(
+            {item["name"] for item in payload["entries"]},
+            {"Masaüstü", "Belgeler", "Resimler", "Müzik"},
+        )
+        self.assertIsNone(payload["parentPath"])
+        self.assertTrue(agent.command_is_supported("list_files"))
+        self.assertNotIn("Private", json.dumps(payload, ensure_ascii=False))
+
+    def test_directory_listing_returns_metadata_without_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile = Path(temp_dir)
+            documents = profile / "Documents"
+            documents.mkdir()
+            (documents / "Reports").mkdir()
+            report = documents / "report.txt"
+            report.write_text("private file contents", encoding="utf-8")
+            with mock.patch.dict(agent.os.environ, {"USERPROFILE": str(profile)}):
+                payload = json.loads(agent.execute_command("list_files", {"path": str(documents)}))
+
+        self.assertEqual(payload["currentPath"], str(documents.resolve()))
+        self.assertEqual(payload["parentPath"], "")
+        self.assertEqual({item["name"] for item in payload["entries"]}, {"Reports", "report.txt"})
+        file_entry = next(item for item in payload["entries"] if item["name"] == "report.txt")
+        self.assertEqual(file_entry["size"], len("private file contents".encode("utf-8")))
+        self.assertFalse(file_entry["isDirectory"])
+        self.assertNotIn("private file contents", json.dumps(payload))
+        self.assertTrue(file_entry["modifiedUtc"].endswith("Z"))
+
+    def test_directory_outside_allowlisted_roots_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            profile = base / "profile"
+            profile.mkdir()
+            (profile / "Documents").mkdir()
+            outside = base / "Private"
+            outside.mkdir()
+            with mock.patch.dict(agent.os.environ, {"USERPROFILE": str(profile)}):
+                with self.assertRaisesRegex(ValueError, "erişim izni yok"):
+                    agent.execute_command("list_files", {"path": str(outside)})
+
+    def test_legacy_text_request_is_routed_to_real_file_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile = Path(temp_dir)
+            (profile / "Desktop").mkdir()
+            with mock.patch.dict(agent.os.environ, {"USERPROFILE": str(profile)}):
+                payload = json.loads(agent.execute_command(
+                    "text_command", {"text": "bilgisayar dosyalarini listele"}
+                ))
+        self.assertEqual([item["name"] for item in payload["entries"]], ["Masaüstü"])
+
+    def test_file_list_result_is_not_truncated_at_the_status_message_limit(self) -> None:
+        document = {
+            "name": "projects/myncloud-24/databases/(default)/documents/commands/list-files",
+            "fields": {"command": {"stringValue": "list_files"}},
+        }
+        original_result = json.dumps({"entries": [{"name": "x" * 1000} for _ in range(10)]})
+        with mock.patch.object(agent, "firestore_patch") as patch:
+            agent.update_command(self.session, document, "completed", original_result)
+        saved_result = patch.call_args.args[2]["result"]["stringValue"]
+        self.assertEqual(saved_result, original_result)
+        self.assertGreater(len(saved_result), 800)
+        self.assertEqual(len(json.loads(saved_result)["entries"]), 10)
 
 
 class OAuthScopeTests(unittest.TestCase):
