@@ -191,7 +191,7 @@ private fun firebaseAuthErrorMessage(error: Exception?): String {
     }
 }
 
-internal fun normalizePendingPhoneNumber(raw: String): String?
+internal fun normalizePendingPhoneNumber(raw: String): String? {
     val compact = raw.trim().replace(Regex("[\\s().-]"), "")
     if (!compact.matches(Regex("\\+?[0-9]+"))) return null
     val digits = compact.filter(Char::isDigit)
@@ -236,8 +236,8 @@ private fun firebaseAccountActionError(error: Exception?, operation: String): St
             "Firebase projesinin telefon doğrulama faturalandırma ve kota ayarlarını kontrol et."
         key.contains("session_expired") || key.contains("expired") ->
             "Doğrulama oturumunun süresi doldu. Yeni kod iste."
-        else -> "$operation tamamlanamadı. Firebase hata kodu: \${code.ifBlank { "UNKNOWN" }}." +
-            if (detail.isNotBlank()) " Ayrıntı: \${detail}" else " Firebase Console ayarlarını kontrol et."
+        else -> "$operation tamamlanamadı. Firebase hata kodu: ${code.ifBlank { "UNKNOWN" }}." +
+            if (detail.isNotBlank()) " Ayrıntı: $detail" else " Firebase Console ayarlarını kontrol et."
     }
 }
 
