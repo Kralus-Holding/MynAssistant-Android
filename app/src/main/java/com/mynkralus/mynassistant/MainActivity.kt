@@ -291,6 +291,43 @@ private data class PcFileListing(
     val warnings: List<String>
 )
 
+private fun parsePcFileListing(payload: String): PcFileListing {
+    val listingJson = JSONObject(payload)
+    val entriesJson = listingJson.optJSONArray("entries")
+        ?: throw IllegalArgumentException("Dosya listesi yanıtında entries alanı yok.")
+    val entries = buildList {
+        for (index in 0 until entriesJson.length()) {
+            val item = entriesJson.optJSONObject(index) ?: continue
+            val name = item.optString("name").takeIf { it.isNotBlank() } ?: continue
+            val path = item.optString("path")
+            if (path.isBlank()) continue
+            add(
+                PcFileEntry(
+                    name = name,
+                    path = path,
+                    isDirectory = item.optBoolean("isDirectory", false),
+                    size = item.optLong("size", 0L).coerceAtLeast(0L),
+                    modifiedUtc = item.optString("modifiedUtc")
+                )
+            )
+        }
+    }
+    val warnings = listingJson.optJSONArray("warnings")?.let { warningsJson ->
+        buildList {
+            for (index in 0 until warningsJson.length()) {
+                warningsJson.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }.orEmpty()
+    return PcFileListing(
+        currentPath = if (listingJson.isNull("currentPath")) "" else listingJson.optString("currentPath", ""),
+        parentPath = if (listingJson.isNull("parentPath")) null else listingJson.optString("parentPath", ""),
+        entries = entries,
+        truncated = listingJson.optBoolean("truncated", false),
+        warnings = warnings
+    )
+}
+
 /**
  * Executes the Android-side command subset locally on this handset.
  * Protected operations such as silently toggling Bluetooth or initiating a call
@@ -2546,41 +2583,10 @@ private fun AssistantScreen(
                                 "completed" -> {
                                     if (targetCommandName == "list_files") {
                                         try {
-                                            val listingJson = JSONObject(result)
-                                            val entriesJson = listingJson.optJSONArray("entries")
-                                                ?: throw IllegalArgumentException("Dosya listesi yanıtında entries alanı yok.")
-                                            val entries = buildList {
-                                                for (index in 0 until entriesJson.length()) {
-                                                    val item = entriesJson.optJSONObject(index) ?: continue
-                                                    val name = item.optString("name").takeIf { it.isNotBlank() } ?: continue
-                                                    val path = item.optString("path")
-                                                    if (path.isBlank()) continue
-                                                    add(
-                                                        PcFileEntry(
-                                                            name = name,
-                                                            path = path,
-                                                            isDirectory = item.optBoolean("isDirectory", false),
-                                                            size = item.optLong("size", 0L).coerceAtLeast(0L),
-                                                            modifiedUtc = item.optString("modifiedUtc")
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                            pcFileListing = PcFileListing(
-                                                currentPath = if (listingJson.isNull("currentPath")) "" else listingJson.optString("currentPath", ""),
-                                                parentPath = if (listingJson.isNull("parentPath")) null else listingJson.optString("parentPath", ""),
-                                                entries = entries,
-                                                truncated = listingJson.optBoolean("truncated", false),
-                                                warnings = listingJson.optJSONArray("warnings")?.let { warningsJson ->
-                                                    buildList {
-                                                        for (index in 0 until warningsJson.length()) {
-                                                            warningsJson.optString(index).takeIf { it.isNotBlank() }?.let(::add)
-                                                        }
-                                                    }
-                                                }.orEmpty()
-                                            )
+                                            val listing = parsePcFileListing(result)
+                                            pcFileListing = listing
                                             pcFilesDeviceId = targetDeviceId
-                                            feedback = "Dosya listesi alındı: " + entries.size + " öğe."
+                                            feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
                                         } catch (parseError: Exception) {
                                             pcFileListing = null
                                             feedback = recordIssue(
@@ -3519,15 +3525,35 @@ private fun AssistantScreen(
                                                     requestPcFileList(device.id, "")
                                                 } else if (device.id == localPcDeviceId && localPcConnected) {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
+                                                    pcFilesDeviceId = device.id
+                                                    pcFilesLoading = true
                                                     sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, "dosyaları listele") { result ->
                                                         localPcConnected = result.connected
                                                         pcBridgeStatus = result.message
-                                                        feedback = result.message
+                                                        pcFilesLoading = false
+                                                        if (result.connected && result.success) {
+                                                            try {
+                                                                val listing = parsePcFileListing(result.message)
+                                                                pcFileListing = listing
+                                                                pcFilesDeviceId = device.id
+                                                                feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
+                                                            } catch (parseError: Exception) {
+                                                                pcFileListing = null
+                                                                feedback = recordIssue(
+                                                                    "MYN-PC-6008", "Bilgisayar dosyaları",
+                                                                    "Yerel Windows köprüsünden gelen dosya listesi okunamadı. Yardımcı uygulamayı güncelleyip yeniden dene.",
+                                                                    "",
+                                                                    "LOCAL_FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
+                                                                )
+                                                            }
+                                                        } else {
+                                                            feedback = result.message
+                                                        }
                                                     }
                                                 } else {
                                                     feedback = "Bu bağlantı türünde dosya listeleme henüz desteklenmiyor."
                                                 }
-                                            }, modifier = Modifier.fillMaxWidth()) {
+                                            }, modifier = Modifier.fillMaxWidth(), enabled = !(pcFilesLoading && pcFilesDeviceId == device.id)) {
                                                 Icon(Icons.Default.FolderOpen, contentDescription = null)
                                                 Spacer(Modifier.width(8.dp))
                                                 Text(if (pcFilesLoading && pcFilesDeviceId == device.id) "Dosya listesi alınıyor..." else "Dosya listesini iste")
