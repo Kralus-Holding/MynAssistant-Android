@@ -156,12 +156,23 @@ jobs:
             exit 1
           fi
           echo "Verified app version: $VERSION_NAME (versionCode $VERSION_CODE)"
-          APK_SIZE=$(stat -c%s app/build/outputs/apk/debug/app-debug.apk)
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          APK_SIZE=$(stat -c%s "$APK_PATH")
           echo "Verified APK bytes: $APK_SIZE"
           if [ "$APK_SIZE" -lt 100000000 ]; then
             echo "APK is unexpectedly small; verify Vosk/Sherpa packaging"
             exit 1
           fi
+          if ! unzip -tq "$APK_PATH" >/dev/null; then
+            echo "::error::APK archive integrity check failed."
+            exit 1
+          fi
+          APK_SHA256=$(sha256sum "$APK_PATH" | awk '{print toupper($1)}')
+          if [ -z "$APK_SHA256" ]; then
+            echo "::error::APK SHA-256 could not be calculated."
+            exit 1
+          fi
+          echo "Verified APK SHA-256: $APK_SHA256"
 
       - name: Upload APK as an Actions artifact
         uses: actions/upload-artifact@v7
