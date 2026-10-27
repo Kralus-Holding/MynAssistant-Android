@@ -3753,6 +3753,7 @@ private fun AssistantScreen(
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
                             }
                             pcFileListing?.takeIf { pcFilesDeviceId != null }?.let { listing ->
+                                val fileTargetDevice = connectedDevices.firstOrNull { it.id == pcFilesDeviceId }
                                 Card(
                                     Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -3814,7 +3815,39 @@ private fun AssistantScreen(
                                                 }
                                                 if (entry.isDirectory) {
                                                     Icon(Icons.Default.ChevronRight, contentDescription = "Klasörü aç")
+                                                } else {
+                                                    val canDownload = !pcFilesLoading &&
+                                                        entry.size <= MAX_PC_FILE_DOWNLOAD_BYTES &&
+                                                        fileTargetDevice != null &&
+                                                        fileTargetDevice.connectionMode == "firebase-agent" &&
+                                                        fileTargetDevice.isOnlineAt(presenceNowMillis)
+                                                    IconButton(
+                                                        onClick = {
+                                                            pendingPcDownloadEntry = entry
+                                                            pcFileDownloadLauncher.launch(entry.name)
+                                                        },
+                                                        enabled = canDownload,
+                                                        modifier = Modifier.size(44.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Download,
+                                                            contentDescription = if (canDownload) "Dosyayı telefona indir" else "Dosya indirme kullanılamıyor"
+                                                        )
+                                                    }
                                                 }
+                                            }
+                                            if (!entry.isDirectory && entry.size > MAX_PC_FILE_DOWNLOAD_BYTES) {
+                                                Text(
+                                                    "Bu sürüm tek yanıtla en fazla 500.000 bayt indirir; büyük dosya aktarımı için parçalı aktarım henüz etkin değil.",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.tertiary
+                                                )
+                                            } else if (!entry.isDirectory && fileTargetDevice?.connectionMode != "firebase-agent") {
+                                                Text(
+                                                    "Dosya indirme bu bağlantı türünde henüz desteklenmiyor.",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
+                                                )
                                             }
                                             Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = .2f))
                                         }
@@ -3826,7 +3859,7 @@ private fun AssistantScreen(
                                             Text(warning, fontSize = 12.sp, color = MaterialTheme.colorScheme.tertiary)
                                         }
                                         Text(
-                                            "Güvenlik: yalnızca izin verilen kullanıcı klasörleri listelenir. Dosya indirme, yükleme ve ZIP işlemleri ayrı komutlar olarak doğrulanmadan kullanılabilir gösterilmez.",
+                                            "Güvenlik: yalnızca izin verilen kullanıcı klasörleri listelenir. Bulut Agent üzerinden en fazla 500.000 baytlık dosyalar telefona indirilebilir ve boyut/SHA-256 doğrulanır. Büyük dosya parçalama, telefondan bilgisayara yükleme ve ZIP işlemleri henüz etkin değildir.",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
                                         )
