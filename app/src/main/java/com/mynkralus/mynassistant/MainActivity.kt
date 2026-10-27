@@ -2736,7 +2736,7 @@ private fun AssistantScreen(
             return@rememberLauncherForActivityResult
         }
 
-        val targetDevice = connectedDevices.firstOrNull { it.id == targetDeviceId }
+        val targetDevice = devices.firstOrNull { it.id == targetDeviceId }
         if (entry == null || targetDeviceId.isNullOrBlank() ||
             targetDevice == null || targetDevice.connectionMode != "firebase-agent" ||
             !targetDevice.isOnlineAt(presenceNowMillis)
