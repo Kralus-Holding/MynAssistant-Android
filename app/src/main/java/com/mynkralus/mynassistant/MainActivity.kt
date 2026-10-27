@@ -4111,7 +4111,7 @@ private fun AssistantScreen(
                                             localBridgeSelected -> "Bağlı • Yerel bağlantı"
                                             device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
                                             device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
-                                            remoteOnline -> "Bağlı • " + device.platform
+                                            remoteOnline -> "Çevrimiçi • son heartbeat güncel"
                                             else -> "Çevrimdışı • Bilgisayar bekleniyor"
                                         },
                                         fontSize = 11.sp,
@@ -4129,6 +4129,13 @@ private fun AssistantScreen(
                                     Box(Modifier.size(9.dp))
                                 }
                             }
+                            if (device?.connectionMode == "firebase-agent" && remoteOnline) {
+                                Text(
+                                    "Çevrimiçi durumu son heartbeat'i gösterir; her komutun teslim sonucu ayrıca doğrulanır.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                )
+                            }
                             if (device?.connectionMode == "firebase-agent" && showScreenPreview) {
                                 Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                 if (screenBitmap != null) {
@@ -4142,7 +4149,7 @@ private fun AssistantScreen(
                                         contentScale = ContentScale.Fit
                                     )
                                     Text(
-                                        "Ekran önizlemesi yaklaşık 1–2 saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
+                                        "Ekran önizlemesi bağlantı ve bilgisayar durumuna göre yenilenir; sabit gecikme garantisi yoktur.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )
