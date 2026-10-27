@@ -5441,11 +5441,11 @@ private fun TvRemotePanel(
                     .fillMaxWidth()
                     .height(250.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .then(touchpadGestureModifier)
             ) {
                 // Keep the touch surface intentionally plain: the approved design is a
                 // solid grey canvas with the "Touchpad" label, not decorative white dots.
-                Canvas(Modifier.fillMaxSize()) {
+                // Gestures stay on the Canvas so title controls do not emit remote mouse clicks.
+                Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier)) {
                     drawRect(Color(0xFF414141))
                 }
 
