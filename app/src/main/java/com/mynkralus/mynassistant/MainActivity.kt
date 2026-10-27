@@ -5613,7 +5613,6 @@ private fun TvRemotePanel(
                 }
             }
         }
-        var touchpadEnabled by remember { mutableStateOf(true) }
         var keyboardText by remember { mutableStateOf("") }
 
         fun submitRemoteKeyboardText() {
@@ -5627,9 +5626,9 @@ private fun TvRemotePanel(
             }
         }
 
-        val touchpadGestureModifier = if (mouseEnabled && touchpadEnabled) {
+        val touchpadGestureModifier = if (mouseEnabled) {
             Modifier
-                .pointerInput(mouseEnabled, touchpadEnabled) {
+                .pointerInput(mouseEnabled) {
                     var deltaX = 0f
                     var deltaY = 0f
                     detectDragGestures(
@@ -5646,7 +5645,7 @@ private fun TvRemotePanel(
                         }
                     )
                 }
-                .pointerInput(mouseEnabled, touchpadEnabled) {
+                .pointerInput(mouseEnabled) {
                     detectTapGestures(
                         onTap = { onCommand("mouse_click", emptyMap()) },
                         onLongPress = { onCommand("mouse_right_click", emptyMap()) }
@@ -5671,42 +5670,23 @@ private fun TvRemotePanel(
                     drawRect(Color(0xFF414141))
                 }
 
-                if (!mouseEnabled || !touchpadEnabled) {
+                if (!mouseEnabled) {
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = if (!mouseEnabled) .10f else .14f))
+                            .background(Color.Black.copy(alpha = .10f))
                     )
                 }
 
-                Row(
-                    Modifier
+                Text(
+                    "Touchpad",
+                    modifier = Modifier
                         .align(Alignment.TopStart)
-                        .fillMaxWidth()
-                        .padding(start = 14.dp, top = 4.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Touchpad",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        color = Color.White.copy(alpha = .88f)
-                    )
-                    Spacer(Modifier.weight(1f))
-                    IconButton(
-                        onClick = { touchpadEnabled = !touchpadEnabled },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(Color.White.copy(alpha = .08f), CircleShape)
-                    ) {
-                        Icon(
-                            if (touchpadEnabled) Icons.Default.TouchApp else Icons.Default.Block,
-                            contentDescription = if (touchpadEnabled) "Touchpad'i kapat" else "Touchpad'i aç",
-                            tint = if (touchpadEnabled) Color.White.copy(alpha = .92f) else Color.White.copy(alpha = .58f),
-                            modifier = Modifier.size(25.dp)
-                        )
-                    }
-                }
+                        .padding(start = 14.dp, top = 8.dp),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = .88f)
+                )
             }
         }
         if (showKeyboard) {
