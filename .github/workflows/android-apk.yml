@@ -77,6 +77,8 @@ jobs:
           grep -q 'sendTrackedRemoteCommand(targetDeviceId, "list_files"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'private data class PcFileListing' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'private fun parsePcFileListing(payload: String)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'resolvePcFileListingPayload(result.payload, result.message)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/PcFileListingPayloadTest.kt
           grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -Fq 'Çevrimiçi • son heartbeat güncel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
