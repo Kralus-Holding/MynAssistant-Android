@@ -324,7 +324,7 @@ def remote_control_enabled() -> bool:
     except FileNotFoundError:
         return True
     except Exception as exc:
-        print(f"[Permissions] Uzaktan kontrol ayarı okunamadı; güvenlik için kapatıldı: {exc}")
+        print(f"[Permissions] Could not read remote-control settings; disabled for safety: {exc}")
         return False
 
     if not isinstance(settings, dict):
@@ -346,11 +346,11 @@ def fail_pending_commands_when_remote_control_disabled(
                 session,
                 document,
                 "failed",
-                "Uzaktan kontrol izni kapalı olduğu için komut çalıştırılmadı.",
+                "Remote-control permission is disabled; command was not executed.",
                 expected_update_time=document.get("updateTime"),
             )
         except Exception as exc:
-            print(f"[Permissions] İzin kapalıyken bekleyen komut başarısız olarak işaretlenemedi: {exc}")
+            print(f"[Permissions] Could not fail queued command while permission is disabled: {exc}")
 
 
 def screen_request_is_active(fields: dict) -> bool:
@@ -1313,7 +1313,7 @@ def run_agent() -> int:
                             update_mask=["screenRequested", "screenJpegBase64", "screenFrameAt"],
                         )
                     except Exception as exc:
-                        print(f"[Permissions] Ekran önizlemesi durdurulamadı: {exc}")
+                        print(f"[Permissions] Could not stop screen preview: {exc}")
 
                 remote_control_was_enabled = False
                 screen_active = False
