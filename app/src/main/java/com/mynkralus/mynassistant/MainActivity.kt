@@ -2808,6 +2808,7 @@ private fun AssistantScreen(
                 return@downloadResult
             }
 
+            pcFilesLoading = true
             feedback = "Boyut ve SHA-256 doğrulandı; dosya telefona kaydediliyor..."
             Thread {
                 var saveError: Exception? = null
