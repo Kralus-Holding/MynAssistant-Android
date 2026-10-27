@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -164,13 +164,13 @@ jobs:
           retention-days: 7
 
       - name: Publish APK as a prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/android-pcfiles-list-files')
         uses: softprops/action-gh-release@v3
         with:
           tag_name: mynassistant-android-apk-${{ github.sha }}
           name: MynAssistant Android Preview (${{ github.sha }})
           body: |
-            Automated debug APK built from ${{ github.ref_name }}.
+            Automated preview debug APK built from ${{ github.ref_name }} at commit ${{ github.sha }}.
 
             The stable debug signing certificate is verified by CI.
             This is a prerelease build, not a Play Store release.
