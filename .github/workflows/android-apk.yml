@@ -79,6 +79,12 @@ jobs:
           grep -q 'private fun parsePcFileListing(payload: String)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Çevrimiçi • son heartbeat güncel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'her komutun teslim sonucu ayrıca doğrulanır' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -Fq 'yaklaşık 1–2 saniyede bir güncellenir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Screen preview must not promise unmeasured 1–2 second latency."
+            exit 1
+          fi
           grep -q '"Touchpad"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFF414141)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -Fq 'Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
