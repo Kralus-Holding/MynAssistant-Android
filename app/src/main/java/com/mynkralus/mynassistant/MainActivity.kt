@@ -43,6 +43,7 @@ import com.google.firebase.firestore.SetOptions
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -101,6 +102,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.automirrored.filled.Backspace
@@ -2523,6 +2525,12 @@ private fun AssistantScreen(
     }
     var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
     var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var activeCommandName by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var trackedCommandResultHandler by remember(firebaseUserId) {
+        mutableStateOf<((String, String, String) -> Unit)?>(null)
+    }
+    var pendingPcDownloadEntry by remember(firebaseUserId) { mutableStateOf<PcFileEntry?>(null) }
+    var pendingPcDownloadUri by remember(firebaseUserId) { mutableStateOf<Uri?>(null) }
 
     // A Firestore document may remain pending/running forever if the PC disconnects.
     // Stop observing after a bounded interval and report a timeout, never success.
@@ -2535,8 +2543,10 @@ private fun AssistantScreen(
                 kotlinx.coroutines.delay(timeoutMillis - elapsed)
             }
             if (activeCommandListener != null && activeCommandStartedAt == startedAt) {
+                val timedOutCommand = activeCommandName
                 activeCommandListener?.remove()
                 activeCommandListener = null
+                activeCommandName = null
                 pcFilesLoading = false
                 feedback = recordIssue(
                     "MYN-PC-6007", "Bilgisayar komutu",
@@ -2544,6 +2554,11 @@ private fun AssistantScreen(
                     "",
                     "REMOTE_COMMAND_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown")
                 )
+                val handler = trackedCommandResultHandler
+                trackedCommandResultHandler = null
+                if (timedOutCommand != null) handler?.invoke(timedOutCommand, "timeout", "")
+                pendingPcDownloadEntry = null
+                pendingPcDownloadUri = null
             }
         }
     }
@@ -2561,6 +2576,7 @@ private fun AssistantScreen(
             return@sendTrackedCommand
         }
         activeCommandDeviceId = targetDeviceId
+        activeCommandName = targetCommandName
         feedback = "Komut bilgisayara gönderiliyor..."
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
             feedback = message
@@ -2578,6 +2594,10 @@ private fun AssistantScreen(
                                 error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
                             )
                             activeCommandListener = null
+                            activeCommandName = null
+                            val handler = trackedCommandResultHandler
+                            trackedCommandResultHandler = null
+                            handler?.invoke(targetCommandName, "error", "")
                         } else if (snapshot == null || !snapshot.exists()) {
                             pcFilesLoading = false
                             feedback = recordIssue(
@@ -2587,6 +2607,10 @@ private fun AssistantScreen(
                                 "COMMAND_DOCUMENT_MISSING; id=" + commandId
                             )
                             activeCommandListener = null
+                            activeCommandName = null
+                            val handler = trackedCommandResultHandler
+                            trackedCommandResultHandler = null
+                            handler?.invoke(targetCommandName, "missing", "")
                         } else {
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
@@ -2609,11 +2633,18 @@ private fun AssistantScreen(
                                                 "FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
                                             )
                                         }
+                                    } else if (targetCommandName == "download_file") {
+                                        // The payload contains file bytes. Never show or log it as ordinary command text.
+                                        feedback = "Dosya verisi alındı; boyut ve SHA-256 doğrulanıyor..."
                                     } else {
                                         feedback = result.ifBlank { "Komut tamamlandı." }
                                     }
                                     pcFilesLoading = false
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "completed", result)
                                 }
                                 "failed" -> {
                                     pcFilesLoading = false
@@ -2621,14 +2652,22 @@ private fun AssistantScreen(
                                         "MYN-PC-6003", "Bilgisayar komutu",
                                         result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
                                         targetPayload["text"]?.toString().orEmpty(),
-                                        "REMOTE_COMMAND_FAILED; result=" + result
+                                        "REMOTE_COMMAND_FAILED; command=" + targetCommandName
                                     )
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "failed", result)
                                 }
                                 "cancelled" -> {
                                     pcFilesLoading = false
                                     feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "cancelled", "")
                                 }
                                 else -> {
                                     pcFilesLoading = false
@@ -2639,26 +2678,36 @@ private fun AssistantScreen(
                                         "UNKNOWN_COMMAND_STATUS=" + status
                                     )
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "unknown", status)
                                 }
                             }
                         }
                     }
                 activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
-            } else if (
-                message.contains("hata", ignoreCase = true) ||
-                message.contains("gönderilemedi", ignoreCase = true) ||
-                message.contains("başarısız", ignoreCase = true)
-            ) {
-                pcFilesLoading = false
-                feedback = recordIssue(
-                    "MYN-PC-6006", "Bilgisayar bağlantısı",
-                    message,
-                    targetPayload["text"]?.toString().orEmpty(),
-                    "REMOTE_COMMAND_REJECTED; message=" + message
-                )
             } else {
                 pcFilesLoading = false
+                activeCommandName = null
+                if (
+                    message.contains("hata", ignoreCase = true) ||
+                    message.contains("gönderilemedi", ignoreCase = true) ||
+                    message.contains("başarısız", ignoreCase = true)
+                ) {
+                    feedback = recordIssue(
+                        "MYN-PC-6006", "Bilgisayar bağlantısı",
+                        message,
+                        targetPayload["text"]?.toString().orEmpty(),
+                        "REMOTE_COMMAND_REJECTED; command=" + targetCommandName
+                    )
+                } else {
+                    feedback = message
+                }
+                val handler = trackedCommandResultHandler
+                trackedCommandResultHandler = null
+                handler?.invoke(targetCommandName, "rejected", message)
             }
         }
     }
