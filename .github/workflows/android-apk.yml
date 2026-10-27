@@ -81,6 +81,7 @@ jobs:
           grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q '"Touchpad"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFF414141)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           python3 - <<'PY'
           from pathlib import Path
           source = Path("app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt").read_text(encoding="utf-8")
