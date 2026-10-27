@@ -44,4 +44,10 @@ class RemoteCommandSubmissionPolicyTest {
             remoteCommandStatusMessage("running")
         )
     }
+
+    @Test
+    fun commandValidityWindowIsBoundedToOneMinute() {
+        assertEquals(60_000L, REMOTE_COMMAND_VALIDITY_MILLIS)
+    }
+
 }

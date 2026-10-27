@@ -3,6 +3,7 @@ package com.mynkralus.mynassistant
 import java.util.Locale
 
 internal const val REMOTE_COMMAND_SUBMISSION_TIMEOUT_MILLIS = 20_000L
+internal const val REMOTE_COMMAND_VALIDITY_MILLIS = 60_000L
 
 /**
  * Allows only one outstanding remote command per account screen. The submission

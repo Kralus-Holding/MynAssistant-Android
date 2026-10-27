@@ -1734,7 +1734,12 @@ class MainActivity : ComponentActivity() {
                                 "deviceId" to deviceId,
                                 "command" to commandName,
                                 "status" to "pending",
-                                "createdAt" to FieldValue.serverTimestamp()
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                // Firestore can queue this write while offline. Keep the original
+                                // deadline so a delayed sync cannot execute a stale PC action later.
+                                "expiresAt" to com.google.firebase.Timestamp(
+                                    java.util.Date(System.currentTimeMillis() + REMOTE_COMMAND_VALIDITY_MILLIS)
+                                )
                             )
                             commandData.putAll(payload)
                             FirebaseFirestore.getInstance().collection("commands")
