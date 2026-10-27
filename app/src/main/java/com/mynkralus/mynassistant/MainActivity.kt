@@ -5348,7 +5348,6 @@ private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
         )
     }
 }
-
 @Composable
 private fun TvRemotePanel(
     onCommand: (String, Map<String, Any>) -> Unit,
@@ -5437,91 +5436,114 @@ private fun TvRemotePanel(
 
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (showTouchpad) {
-        // The touchpad keeps its controls inside the surface so there is no redundant
-        // explanatory overlay over the dotted area. Gestures are attached only to Canvas,
-        // allowing the top-right enable/disable control to remain an independent target.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(250.dp)
-                .clip(RoundedCornerShape(24.dp))
-        ) {
-            Canvas(
-                Modifier
-                    .fillMaxSize()
-                    .then(touchpadGestureModifier)
-            ) {
-                drawRect(Color(0xFF414141))
-                val spacing = 20.dp.toPx()
-                var y = spacing * .58f
-                var rowIndex = 0
-                while (y < size.height) {
-                    val stagger = (rowIndex % 2) * spacing * .48f
-                    var x = spacing * .35f + stagger
-                    while (x < size.width) {
-                        val normalizedX = (x / size.width).coerceIn(0f, 1f)
-                        val normalizedY = (y / size.height).coerceIn(0f, 1f)
-                        val upperLeftDistance = kotlin.math.sqrt(
-                            ((normalizedX - .15f) / .68f) * ((normalizedX - .15f) / .68f) +
-                            ((normalizedY - .16f) / .54f) * ((normalizedY - .16f) / .54f)
-                        )
-                        val lowerRightDistance = kotlin.math.sqrt(
-                            ((normalizedX - .86f) / .67f) * ((normalizedX - .86f) / .67f) +
-                            ((normalizedY - .69f) / .48f) * ((normalizedY - .69f) / .48f)
-                        )
-                        val upperLeftCluster = (1f - upperLeftDistance).coerceIn(0f, 1f)
-                        val lowerRightCluster = (1f - lowerRightDistance).coerceIn(0f, 1f)
-                        val visibility = maxOf(upperLeftCluster, lowerRightCluster)
-                        val behindTitle = x < 112.dp.toPx() && y < 42.dp.toPx()
-                        if (visibility > .08f && !behindTitle) {
-                            val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
-                            val radius = (0.72f + visibility * 1.25f + wave * .52f).dp.toPx()
-                            val alpha = (0.10f + visibility * .25f + wave * .035f).coerceIn(.10f, .38f)
-                            drawCircle(
-                                color = Color.White.copy(alpha = alpha),
-                                radius = radius,
-                                center = androidx.compose.ui.geometry.Offset(x, y)
-                            )
-                        }
-                        x += spacing
-                    }
-                    y += spacing
-                    rowIndex++
-                }
-                if (!mouseEnabled || !touchpadEnabled) {
-                    drawRect(Color.Black.copy(alpha = if (!mouseEnabled) .10f else .14f))
-                }
-            }
-
             Row(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .padding(start = 14.dp, top = 8.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    "Touchpad",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = Color.White.copy(alpha = .84f)
-                )
-                Spacer(Modifier.weight(1f))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Dokunmatik alan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    Text(
+                        when {
+                            !mouseEnabled -> "Bilgisayar bağlantısı bekleniyor"
+                            touchpadEnabled -> "Kaydır: fare • Dokun: tık"
+                            else -> "Dokunmatik kapalı • Sayfayı kaydırabilirsin"
+                        },
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                    )
+                }
                 IconButton(
                     onClick = { touchpadEnabled = !touchpadEnabled },
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(Color.White.copy(alpha = .08f), CircleShape)
+                    modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
                         if (touchpadEnabled) Icons.Default.TouchApp else Icons.Default.Block,
-                        contentDescription = if (touchpadEnabled) "Touchpad'i kapat" else "Touchpad'i aç",
-                        tint = if (touchpadEnabled) Color.White.copy(alpha = .92f) else Color.White.copy(alpha = .58f),
-                        modifier = Modifier.size(25.dp)
+                        contentDescription = if (touchpadEnabled) "Dokunmatiği kapat" else "Dokunmatiği aç",
+                        tint = if (touchpadEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f),
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
-        }
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(250.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .then(touchpadGestureModifier)
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(Color(0xFF3D3D3D))
+                    val spacing = 29.dp.toPx()
+                    var y = spacing * .65f
+                    var rowIndex = 0
+                    while (y < size.height) {
+                        val stagger = (rowIndex % 2) * spacing * .5f
+                        var x = spacing * .35f + stagger
+                        while (x < size.width) {
+                            val diagonal = kotlin.math.sin((x / spacing + rowIndex * .7f) * .32f)
+                            val radius = (1.2f + (diagonal + 1f) * .75f).dp.toPx()
+                            val alpha = (0.12f + (diagonal + 1f) * .055f).coerceIn(.1f, .24f)
+                            drawCircle(
+                                color = Color(0xFFD4D4D4).copy(alpha = alpha),
+                                radius = radius,
+                                center = androidx.compose.ui.geometry.Offset(x, y)
+                            )
+                            x += spacing
+                        }
+                        y += spacing
+                        rowIndex++
+                    }
+                }
+                if (!mouseEnabled || !touchpadEnabled) {
+                    Box(
+                        Modifier.fillMaxSize().background(Color.Black.copy(alpha = .18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                if (touchpadEnabled) Icons.Default.SettingsRemote else Icons.Default.Block,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                                tint = Color.White.copy(alpha = .82f)
+                            )
+                            Text(
+                                if (!mouseEnabled) {
+                                    if (enabled) "Fare kontrolü bu bağlantıda desteklenmiyor" else "Bilgisayar bağlantısı bekleniyor"
+                                } else "Dokunmatik kapalı",
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                if (!mouseEnabled) "Windows Agent bağlantısı kurulduğunda fare kontrolü açılır."
+                                else "Bu alandaki dokunuşlar artık fareye gönderilmez; sayfayı kaydırabilirsin.",
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = .78f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 15.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.SettingsRemote, contentDescription = null, modifier = Modifier.size(30.dp), tint = Color.White.copy(alpha = .85f))
+                        Text(
+                            "Sürükle: fareyi hareket ettir • Dokun: sol tık • Basılı tut: sağ tık",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = .85f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
 
         }
         if (showKeyboard) {
@@ -5569,3 +5591,4 @@ private fun TvRemotePanel(
         }
     }
 }
+
