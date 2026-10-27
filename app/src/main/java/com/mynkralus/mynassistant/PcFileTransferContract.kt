@@ -44,7 +44,7 @@ internal fun verifyPcFileDownloadPayload(
 
     val actualHash = MessageDigest.getInstance("SHA-256")
         .digest(bytes)
-        .joinToString("") { "%02x".format(it) }
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     require(actualHash.equals(expectedSha256, ignoreCase = true)) {
         "İndirilen dosyanın SHA-256 doğrulaması başarısız."
     }
