@@ -100,6 +100,34 @@ jobs:
           for expected in ('"Touchpad"', "Color(0xFF414141)", 'showTouchpad = showTouchpadPanel', 'showKeyboard = showKeyboardPanel'):
               if expected not in remote and expected not in source:
                   raise SystemExit(f"Expected remote-control behavior missing: {expected}")
+
+          # The exact pre-adaptive square PNG is intentional; fail if someone silently
+          # swaps in a circular/adaptive export.
+          import subprocess
+          expected_icon_blob = "97b1f85688c3233885b4c4929652565dd4f07ab3"
+          actual_icon_blob = subprocess.check_output(
+              ["git", "rev-parse", "HEAD:app/src/main/res/drawable-nodpi/mynassistant_launcher.png"],
+              text=True,
+          ).strip()
+          if actual_icon_blob != expected_icon_blob:
+              raise SystemExit(f"Launcher square icon changed unexpectedly: {actual_icon_blob}")
+
+          controls_start = source.index("val remoteUiPreferencePrefix")
+          controls_end = source.index("TvRemotePanel(", controls_start)
+          remote_controls = source[controls_start:controls_end]
+          if remote_controls.count("IconToggleButton(") < 3:
+              raise SystemExit("Remote control must retain three separate visibility buttons.")
+          for expected in (
+              "Icons.Default.Tv", "Icons.Default.TouchApp", "Icons.Default.Keyboard",
+              'saveRemoteVisibility("screen", it)',
+              'saveRemoteVisibility("touchpad", it)',
+              'saveRemoteVisibility("keyboard", it)',
+              'contentDescription = if (showScreenPreview)',
+              'contentDescription = if (showTouchpadPanel)',
+              'contentDescription = if (showKeyboardPanel)',
+          ):
+              if expected not in remote_controls:
+                  raise SystemExit(f"Independent remote visibility control is missing: {expected}")
           PY
           grep -q 'remote_visibility_' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'showTouchpad = showTouchpadPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
