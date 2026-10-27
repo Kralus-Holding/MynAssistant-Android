@@ -13,7 +13,7 @@ class PcFileTransferContractTest {
         val bytes = "MynAssistant file transfer".toByteArray()
         val sha256 = MessageDigest.getInstance("SHA-256")
             .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
         val result = verifyPcFileDownloadPayload(
             name = "sample.txt",
@@ -49,7 +49,7 @@ class PcFileTransferContractTest {
         val bytes = "file".toByteArray()
         val sha256 = MessageDigest.getInstance("SHA-256")
             .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
         assertThrows(IllegalArgumentException::class.java) {
             verifyPcFileDownloadPayload(
