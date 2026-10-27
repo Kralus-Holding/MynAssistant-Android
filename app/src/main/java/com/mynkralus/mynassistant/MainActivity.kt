@@ -1041,15 +1041,19 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
             val ok = response.optBoolean("ok", result?.optBoolean("ok", false) ?: false)
             val message = result?.optString("message").orEmpty()
             val actionText = result?.optJSONObject("data")?.optString("action_text").orEmpty()
+            // The local bridge returns file-list JSON in action_text. Keep it out of
+            // human-readable feedback/status fields so the UI never displays raw JSON.
+            val actionPayload = actionText.takeIf { it.isNotBlank() && it.trimStart().startsWith("{") }
+            val messagePayload = message.trim().let { candidate ->
+                candidate.takeIf { it.startsWith("{") }
+                    ?: candidate.substringAfter('\n', "").trim().takeIf { it.startsWith("{") }
+            }
+            val payload = actionPayload ?: messagePayload
             val displayText = when {
-                message.isBlank() -> actionText.ifBlank { "Komut yanıtlandı." }
-                actionText.isBlank() || actionText == message -> message
+                message.isBlank() -> if (payload != null) "Komut yanıtlandı." else actionText.ifBlank { "Komut yanıtlandı." }
+                actionText.isBlank() || actionText == message || actionPayload != null -> message
                 else -> message + "\n" + actionText
             }
-            // Keep machine-readable command output separate from UI-friendly status text.
-            // PcFiles must parse the JSON payload, not a message concatenated in front of it.
-            val payload = actionText.takeIf { it.isNotBlank() }
-                ?: message.takeIf { it.trimStart().startsWith("{") }
             PcBridgeResult(true, ok, displayText, payload)
         }
     } catch (error: Exception) {
