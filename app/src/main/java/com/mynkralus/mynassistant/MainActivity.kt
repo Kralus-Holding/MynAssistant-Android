@@ -2523,6 +2523,8 @@ private fun AssistantScreen(
     var activeCommandListener by remember(firebaseUserId) {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
+    // Prevent duplicate writes during the network gap before Firestore returns a command ID.
+    var commandSubmissionInProgress by remember(firebaseUserId) { mutableStateOf(false) }
     var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
     var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var activeCommandName by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -2571,14 +2573,21 @@ private fun AssistantScreen(
 
     val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = sendTrackedCommand@{
             targetDeviceId, targetCommandName, targetPayload ->
-        if (activeCommandListener != null) {
-            feedback = "Önceki bilgisayar komutunun sonucu henüz gelmedi. Yinelenen komut göndermemek için yeni istek gönderilmedi."
+        if (!isRemoteCommandSubmissionAllowed(
+                commandSubmissionInProgress,
+                activeCommandListener != null
+            )) {
+            feedback = "Önceki bilgisayar komutu gönderiliyor veya sonucu bekleniyor. Yinelenen komut gönderilmedi."
             return@sendTrackedCommand
         }
+        commandSubmissionInProgress = true
         activeCommandDeviceId = targetDeviceId
         activeCommandName = targetCommandName
         feedback = "Komut bilgisayara gönderiliyor..."
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
+            if (commandId == null) {
+                commandSubmissionInProgress = false
+            }
             feedback = message
             if (commandId != null) {
                 val registration = FirebaseFirestore.getInstance()
@@ -2688,6 +2697,7 @@ private fun AssistantScreen(
                     }
                 activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
+                commandSubmissionInProgress = false
             } else {
                 pcFilesLoading = false
                 activeCommandName = null
