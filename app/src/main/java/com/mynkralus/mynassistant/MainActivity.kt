@@ -2525,6 +2525,8 @@ private fun AssistantScreen(
     }
     // Prevent duplicate writes during the network gap before Firestore returns a command ID.
     var commandSubmissionInProgress by remember(firebaseUserId) { mutableStateOf(false) }
+    var commandSubmissionStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
+    var commandSubmissionTimedOut by remember(firebaseUserId) { mutableStateOf(false) }
     var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
     var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var activeCommandName by remember(firebaseUserId) { mutableStateOf<String?>(null) }
@@ -2565,6 +2567,33 @@ private fun AssistantScreen(
         }
     }
 
+    // Firestore may delay acknowledgement while offline. Stop the spinner after 20 seconds,
+    // but retain the submission lock because the queued write could still reach the PC later.
+    LaunchedEffect(firebaseUserId, commandSubmissionInProgress, commandSubmissionStartedAt) {
+        val startedAt = commandSubmissionStartedAt
+        if (commandSubmissionInProgress && startedAt > 0L) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed < REMOTE_COMMAND_SUBMISSION_TIMEOUT_MILLIS) {
+                kotlinx.coroutines.delay(REMOTE_COMMAND_SUBMISSION_TIMEOUT_MILLIS - elapsed)
+            }
+            if (isRemoteCommandSubmissionTimeoutExpired(
+                    commandSubmissionInProgress,
+                    startedAt,
+                    System.currentTimeMillis()
+                )) {
+                commandSubmissionTimedOut = true
+                pcFilesLoading = false
+                feedback = recordIssue(
+                    "MYN-PC-6009", "Bilgisayar komutu",
+                    "Komutun sunucu tarafından onaylanması 20 saniyeyi geçti. İstek durumu belirsiz; yinelenen komut oluşmaması için yeni istek kilitlendi. İnternet bağlantısını kontrol et; ilk istek daha sonra tamamlanabilir.",
+                    "",
+                    "COMMAND_SUBMISSION_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown") +
+                        "; command=" + (activeCommandName ?: "unknown")
+                )
+            }
+        }
+    }
+
     // Keep the most recently submitted Firebase command observed until it reaches a terminal state.
     DisposableEffect(firebaseUserId, activeCommandListener) {
         val listenerToDispose = activeCommandListener
@@ -2577,9 +2606,15 @@ private fun AssistantScreen(
                 commandSubmissionInProgress,
                 activeCommandListener != null
             )) {
-            feedback = "Önceki bilgisayar komutu gönderiliyor veya sonucu bekleniyor. Yinelenen komut gönderilmedi."
+            feedback = if (commandSubmissionTimedOut) {
+                "Önceki komutun durumu belirsiz. Yinelenen komut gönderilmedi; bağlantıyı kontrol edip ilk isteğin sonucunu bekle."
+            } else {
+                "Önceki bilgisayar komutu gönderiliyor veya sonucu bekleniyor. Yinelenen komut gönderilmedi."
+            }
             return@sendTrackedCommand
         }
+        commandSubmissionTimedOut = false
+        commandSubmissionStartedAt = System.currentTimeMillis()
         commandSubmissionInProgress = true
         activeCommandDeviceId = targetDeviceId
         activeCommandName = targetCommandName
@@ -2587,6 +2622,8 @@ private fun AssistantScreen(
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
             if (commandId == null) {
                 commandSubmissionInProgress = false
+                commandSubmissionStartedAt = 0L
+                commandSubmissionTimedOut = false
             }
             feedback = message
             if (commandId != null) {
@@ -2624,8 +2661,8 @@ private fun AssistantScreen(
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
                             when (status) {
-                                "pending" -> feedback = "Komut bilgisayara ulaştı; işlemesi bekleniyor."
-                                "running" -> feedback = "Bilgisayar komutu uyguluyor..."
+                                "pending" -> feedback = remoteCommandStatusMessage(status)
+                                "running" -> feedback = remoteCommandStatusMessage(status)
                                 "completed" -> {
                                     if (targetCommandName == "list_files") {
                                         try {
@@ -2697,7 +2734,12 @@ private fun AssistantScreen(
                     }
                 activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
+                commandSubmissionStartedAt = 0L
+                commandSubmissionTimedOut = false
                 commandSubmissionInProgress = false
+                if (targetCommandName == "list_files" || targetCommandName == "download_file") {
+                    pcFilesLoading = true
+                }
             } else {
                 pcFilesLoading = false
                 activeCommandName = null
