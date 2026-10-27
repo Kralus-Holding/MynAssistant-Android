@@ -2724,6 +2724,124 @@ private fun AssistantScreen(
         }
     }
 
+    val pcFileDownloadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val entry = pendingPcDownloadEntry
+        val targetDeviceId = pcFilesDeviceId
+        if (uri == null) {
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+            feedback = "Dosya indirme iptal edildi."
+            return@rememberLauncherForActivityResult
+        }
+
+        val targetDevice = connectedDevices.firstOrNull { it.id == targetDeviceId }
+        if (entry == null || targetDeviceId.isNullOrBlank() ||
+            targetDevice == null || targetDevice.connectionMode != "firebase-agent" ||
+            !targetDevice.isOnlineAt(presenceNowMillis)
+        ) {
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+            feedback = "Dosya indirmek için aynı çevrimiçi Windows Agent cihazını seç."
+            return@rememberLauncherForActivityResult
+        }
+        if (activeCommandListener != null) {
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+            feedback = "Önceki bilgisayar komutu tamamlanmalı. Yeni indirme başlatılmadı."
+            return@rememberLauncherForActivityResult
+        }
+
+        pendingPcDownloadUri = uri
+        pcFilesLoading = true
+        feedback = "Dosya bilgisayardan alınıyor..."
+        trackedCommandResultHandler = downloadResult@{ commandName, status, result ->
+            val selectedEntry = pendingPcDownloadEntry
+            val saveUri = pendingPcDownloadUri
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+
+            if (commandName != "download_file") {
+                pcFilesLoading = false
+                feedback = "Beklenmeyen komut yanıtı alındı; dosya kaydedilmedi."
+                return@downloadResult
+            }
+            if (status != "completed") {
+                pcFilesLoading = false
+                feedback = recordIssue(
+                    "MYN-PC-6010", "Dosya indirme",
+                    "Dosya indirilemedi. Bağlantıyı kontrol edip tekrar dene.",
+                    "",
+                    "FILE_DOWNLOAD_COMMAND_FAILED; status=" + status
+                )
+                return@downloadResult
+            }
+
+            val verifiedPayload = try {
+                val json = JSONObject(result)
+                verifyPcFileDownloadPayload(
+                    name = json.getString("name"),
+                    path = json.getString("path"),
+                    size = json.getLong("size"),
+                    expectedSha256 = json.getString("sha256"),
+                    contentBase64 = json.getString("contentBase64")
+                ).also { payload ->
+                    if (selectedEntry == null || payload.name != selectedEntry.name || payload.path != selectedEntry.path) {
+                        throw IllegalArgumentException("Dosya yanıtı seçilen öğeyle eşleşmiyor.")
+                    }
+                }
+            } catch (error: Exception) {
+                pcFilesLoading = false
+                feedback = recordIssue(
+                    "MYN-PC-6011", "Dosya bütünlüğü",
+                    "İndirilen dosyanın boyutu veya SHA-256 değeri doğrulanamadı. Dosya kaydedilmedi.",
+                    "",
+                    "FILE_DOWNLOAD_VALIDATION_FAILED; type=" + error.javaClass.simpleName
+                )
+                return@downloadResult
+            }
+
+            if (saveUri == null) {
+                pcFilesLoading = false
+                feedback = "Dosyanın kaydedileceği hedef seçilmedi."
+                return@downloadResult
+            }
+
+            feedback = "Boyut ve SHA-256 doğrulandı; dosya telefona kaydediliyor..."
+            Thread {
+                var saveError: Exception? = null
+                try {
+                    val output = commandContext.applicationContext.contentResolver
+                        .openOutputStream(saveUri, "wt")
+                        ?: throw java.io.IOException("Seçilen hedef dosya yazmaya açılamadı.")
+                    output.use {
+                        it.write(verifiedPayload.content)
+                        it.flush()
+                    }
+                } catch (error: Exception) {
+                    saveError = error
+                }
+
+                Handler(Looper.getMainLooper()).post {
+                    pcFilesLoading = false
+                    if (saveError == null) {
+                        feedback = "Dosya indirildi ve SHA-256 doğrulandı: ${verifiedPayload.name} (${verifiedPayload.size} bayt)."
+                    } else {
+                        feedback = recordIssue(
+                            "MYN-PC-6012", "Dosya kaydetme",
+                            "Dosya doğrulandı ancak seçilen telefona kaydedilemedi.",
+                            "",
+                            "FILE_DOWNLOAD_SAVE_FAILED; type=" + saveError.javaClass.simpleName
+                        )
+                    }
+                }
+            }.start()
+        }
+
+        sendTrackedRemoteCommand(targetDeviceId, "download_file", mapOf("path" to entry.path))
+    }
+
     DisposableEffect(commandContext) {
         val wakePrefs = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val wakeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
