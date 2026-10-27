@@ -79,11 +79,12 @@ jobs:
           grep -q 'private fun parsePcFileListing(payload: String)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q '"Touchpad",' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q '"Dokunmatik alan"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Sürükle: fareyi hareket ettir • Dokun: sol tık • Basılı tut: sağ tık' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'val spacing = 29.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'remote_visibility_' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'showTouchpad = showTouchpadPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'showKeyboard = showKeyboardPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Icons.Default.Save' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFFE0F5E8)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
