@@ -273,8 +273,12 @@ private fun saveFirebaseProfile(
 private data class PcBridgeResult(
     val connected: Boolean,
     val success: Boolean,
-    val message: String
+    val message: String,
+    val payload: String? = null
 )
+
+internal fun resolvePcFileListingPayload(payload: String?, fallbackMessage: String): String =
+    payload?.takeIf { it.isNotBlank() } ?: fallbackMessage
 
 private data class PcFileEntry(
     val name: String,
@@ -1042,7 +1046,11 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
                 actionText.isBlank() || actionText == message -> message
                 else -> message + "\n" + actionText
             }
-            PcBridgeResult(true, ok, displayText)
+            // Keep machine-readable command output separate from UI-friendly status text.
+            // PcFiles must parse the JSON payload, not a message concatenated in front of it.
+            val payload = actionText.takeIf { it.isNotBlank() }
+                ?: message.takeIf { it.trimStart().startsWith("{") }
+            PcBridgeResult(true, ok, displayText, payload)
         }
     } catch (error: Exception) {
         PcBridgeResult(
@@ -3534,7 +3542,9 @@ private fun AssistantScreen(
                                                         pcFilesLoading = false
                                                         if (result.connected && result.success) {
                                                             try {
-                                                                val listing = parsePcFileListing(result.message)
+                                                                val listing = parsePcFileListing(
+                                                                    resolvePcFileListingPayload(result.payload, result.message)
+                                                                )
                                                                 pcFileListing = listing
                                                                 pcFilesDeviceId = device.id
                                                                 feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
