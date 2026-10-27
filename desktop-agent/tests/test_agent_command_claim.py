@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
