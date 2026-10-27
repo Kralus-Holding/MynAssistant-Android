@@ -98,6 +98,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -2540,6 +2541,8 @@ private fun AssistantScreen(
     }
     var pendingPcDownloadEntry by remember(firebaseUserId) { mutableStateOf<PcFileEntry?>(null) }
     var pendingPcDownloadUri by remember(firebaseUserId) { mutableStateOf<Uri?>(null) }
+    var pendingPcUploadDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var pendingPcUploadDestinationPath by remember(firebaseUserId) { mutableStateOf<String?>(null) }
 
     // A Firestore document may remain pending/running forever if the PC disconnects.
     // Stop observing after a bounded interval and report a timeout, never success.
@@ -2742,7 +2745,7 @@ private fun AssistantScreen(
                 commandSubmissionStartedAt = 0L
                 commandSubmissionTimedOut = false
                 commandSubmissionInProgress = false
-                if (targetCommandName == "list_files" || targetCommandName == "download_file") {
+                if (targetCommandName in setOf("list_files", "download_file", "upload_file", "zip_folder")) {
                     pcFilesLoading = true
                 }
             } else {
@@ -2898,6 +2901,113 @@ private fun AssistantScreen(
         }
 
         sendTrackedRemoteCommand(targetDeviceId, "download_file", mapOf("path" to entry.path))
+    }
+
+    val pcFileUploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val targetDeviceId = pendingPcUploadDeviceId
+        val destinationPath = pendingPcUploadDestinationPath
+        pendingPcUploadDeviceId = null
+        pendingPcUploadDestinationPath = null
+
+        if (uri == null) {
+            feedback = "Dosya seçimi iptal edildi."
+            return@rememberLauncherForActivityResult
+        }
+        val targetDevice = devices.firstOrNull { it.id == targetDeviceId }
+        if (targetDeviceId.isNullOrBlank() || destinationPath.isNullOrBlank() ||
+            targetDevice == null || targetDevice.connectionMode != "firebase-agent" ||
+            !targetDevice.isOnlineAt(presenceNowMillis) ||
+            pcFilesDeviceId != targetDeviceId || pcFileListing?.currentPath != destinationPath
+        ) {
+            feedback = "Hedef klasör veya bilgisayar değişti. Dosya gönderilmedi; listeyi yeniden iste."
+            return@rememberLauncherForActivityResult
+        }
+        if (activeCommandListener != null || commandSubmissionInProgress || pcFilesLoading) {
+            feedback = "Önceki bilgisayar işlemi bitmeli. Dosya gönderilmedi."
+            return@rememberLauncherForActivityResult
+        }
+
+        pcFilesLoading = true
+        feedback = "Telefon dosyası okunuyor ve doğrulanıyor..."
+        Thread {
+            var preparedFields: Map<String, Any>? = null
+            var readFailure: Exception? = null
+            try {
+                val displayName = try {
+                    commandContext.contentResolver.query(
+                        uri,
+                        arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                        null,
+                        null,
+                        null
+                    )?.use { cursor ->
+                        val column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+                    }
+                } catch (_: Exception) {
+                    null
+                } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "phone-upload.bin"
+
+                val bytes = commandContext.contentResolver.openInputStream(uri)?.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        if (output.size().toLong() + count > MAX_PC_FILE_UPLOAD_BYTES) {
+                            throw IllegalArgumentException(
+                                "Bu sürüm tek dosyada en fazla $MAX_PC_FILE_UPLOAD_BYTES bayt yükler. Büyük dosyalar için parçalı aktarım henüz etkin değil."
+                            )
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                } ?: throw java.io.IOException("Seçilen telefondaki dosya okunamadı.")
+
+                preparedFields = buildPcFileUploadPayload(
+                    name = displayName,
+                    destinationPath = destinationPath,
+                    content = bytes
+                ).toCommandFields()
+            } catch (error: Exception) {
+                readFailure = error
+            }
+
+            Handler(Looper.getMainLooper()).post {
+                val error = readFailure
+                if (error != null) {
+                    pcFilesLoading = false
+                    feedback = recordIssue(
+                        "MYN-PC-6013", "Dosya yükleme",
+                        error.message ?: "Dosya okunamadı veya yükleme boyutu sınırını aştı.",
+                        "",
+                        "PHONE_FILE_UPLOAD_PREPARE_FAILED; type=" + error.javaClass.simpleName
+                    )
+                    return@post
+                }
+
+                val liveTarget = devices.firstOrNull { it.id == targetDeviceId }
+                if (targetDeviceId.isNullOrBlank() || destinationPath.isNullOrBlank() ||
+                    pcFilesDeviceId != targetDeviceId || pcFileListing?.currentPath != destinationPath ||
+                    liveTarget == null || liveTarget.connectionMode != "firebase-agent" ||
+                    !liveTarget.isOnlineAt(System.currentTimeMillis())
+                ) {
+                    pcFilesLoading = false
+                    feedback = "Hedef bilgisayar veya klasör değişti. Dosya gönderilmedi."
+                    return@post
+                }
+                val fields = preparedFields
+                if (fields == null) {
+                    pcFilesLoading = false
+                    feedback = "Dosya yükleme isteği hazırlanamadı."
+                    return@post
+                }
+                feedback = "Dosya Windows bilgisayarına gönderiliyor..."
+                sendTrackedRemoteCommand(targetDeviceId, "upload_file", fields)
+            }
+        }.start()
     }
 
     DisposableEffect(commandContext) {
@@ -3828,6 +3938,26 @@ private fun AssistantScreen(
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        if (listing.currentPath.isNotBlank() &&
+                                            fileTargetDevice?.connectionMode == "firebase-agent") {
+                                            val canUpload = !pcFilesLoading &&
+                                                activeCommandListener == null &&
+                                                !commandSubmissionInProgress &&
+                                                fileTargetDevice.isOnlineAt(presenceNowMillis)
+                                            Button(
+                                                onClick = {
+                                                    pendingPcUploadDeviceId = pcFilesDeviceId
+                                                    pendingPcUploadDestinationPath = listing.currentPath
+                                                    pcFileUploadLauncher.launch(arrayOf("*/*"))
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                enabled = canUpload
+                                            ) {
+                                                Icon(Icons.Default.Send, contentDescription = null)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Telefondan bilgisayara yükle")
+                                            }
+                                        }
                                         if (listing.parentPath != null) {
                                             OutlinedButton(
                                                 onClick = {
@@ -3872,9 +4002,30 @@ private fun AssistantScreen(
                                                     )
                                                 }
                                                 if (entry.isDirectory) {
+                                                    val canZip = !pcFilesLoading &&
+                                                        activeCommandListener == null &&
+                                                        !commandSubmissionInProgress &&
+                                                        fileTargetDevice != null &&
+                                                        fileTargetDevice.connectionMode == "firebase-agent" &&
+                                                        fileTargetDevice.isOnlineAt(presenceNowMillis)
+                                                    TextButton(
+                                                        onClick = {
+                                                            pcFilesLoading = true
+                                                            sendTrackedRemoteCommand(
+                                                                pcFilesDeviceId.orEmpty(),
+                                                                "zip_folder",
+                                                                mapOf("path" to entry.path)
+                                                            )
+                                                        },
+                                                        enabled = canZip
+                                                    ) {
+                                                        Text("ZIP")
+                                                    }
                                                     Icon(Icons.Default.ChevronRight, contentDescription = "Klasörü aç")
                                                 } else {
                                                     val canDownload = !pcFilesLoading &&
+                                                        activeCommandListener == null &&
+                                                        !commandSubmissionInProgress &&
                                                         entry.size <= MAX_PC_FILE_DOWNLOAD_BYTES &&
                                                         fileTargetDevice != null &&
                                                         fileTargetDevice.connectionMode == "firebase-agent" &&
@@ -3917,7 +4068,7 @@ private fun AssistantScreen(
                                             Text(warning, fontSize = 12.sp, color = MaterialTheme.colorScheme.tertiary)
                                         }
                                         Text(
-                                            "Güvenlik: yalnızca izin verilen kullanıcı klasörleri listelenir. Bulut Agent üzerinden en fazla 500.000 baytlık dosyalar telefona indirilebilir ve boyut/SHA-256 doğrulanır. Büyük dosya parçalama, telefondan bilgisayara yükleme ve ZIP işlemleri henüz etkin değildir.",
+                                            "Güvenlik: yalnızca izin verilen kullanıcı klasörleri kullanılır. İndirme ve yükleme en fazla 500.000 baytla sınırlıdır; yüklemede ve indirmede SHA-256 doğrulanır. ZIP işlemi izin verilen klasörlerde çalışır; büyük dosya parçalama ve devam ettirme henüz etkin değildir.",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
                                         )
