@@ -71,6 +71,13 @@ jobs:
             exit 1
           fi
           test -s app/src/main/java/com/mynkralus/mynassistant/MynAssistantAccountBackend.kt
+          grep -q 'play-services-code-scanner:16.1.0' app/build.gradle.kts
+          grep -q 'android:name="com.google.mlkit.vision.DEPENDENCIES"' app/src/main/AndroidManifest.xml
+          grep -q 'android:value="barcode_ui"' app/src/main/AndroidManifest.xml
+          grep -q 'GmsBarcodeScanning.getClient' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MYNASSISTANT-PAIR' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'responseCode == 409' app/src/main/java/com/mynkralus/mynassistant/DesktopPairingHttpErrorPolicy.kt
+          grep -q 'mismatchedAccountIsRejectedWithActionableGuidance' app/src/test/java/com/mynkralus/mynassistant/DesktopPairingHttpErrorPolicyTest.kt
           grep -q 'android:name=".MynWakeWordService"' app/src/main/AndroidManifest.xml
           grep -q 'android:name=".MynAssistantAccessibilityService"' app/src/main/AndroidManifest.xml
           grep -q '"PC Kumandası" -> Icons.Default.SettingsRemote' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
