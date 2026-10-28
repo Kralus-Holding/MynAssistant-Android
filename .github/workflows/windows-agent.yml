@@ -2,7 +2,7 @@ name: Build MynAssistant Windows Agent
 
 on:
   push:
-    branches: ["main", "feature/windows-agent-atomic-command-claim", "feature/stage5-remote-control-permission"]
+    branches: ["main", "feature/windows-agent-atomic-command-claim"]
     paths:
       - "desktop-agent/**"
       - ".github/workflows/windows-agent.yml"
