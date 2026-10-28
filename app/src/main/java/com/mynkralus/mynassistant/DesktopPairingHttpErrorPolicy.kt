@@ -15,6 +15,8 @@ internal object DesktopPairingHttpErrorPolicy {
                 "Telefon-PC eşleştirme API'si açık ancak Firebase sunucu ayarları eksik veya geçersiz (MYN-SERVER-503). Sunucu yapılandırması kontrol edilmeli."
             responseCode == 401 ->
                 "Telefon hesabı doğrulanamadı. Yeniden giriş yapıp tekrar dene."
+            responseCode == 409 ->
+                "Bu bilgisayarda farklı bir hesap açık. Eşleştirmek için iki cihazda da aynı hesapla oturum aç. Hesabı değiştirmek için Windows'ta 'Hesabı değiştir' seçeneğini kullan."
             responseCode == 429 ->
                 "Çok fazla eşleştirme denemesi yapıldı. Biraz bekleyip tekrar dene."
             responseCode == 410 ->

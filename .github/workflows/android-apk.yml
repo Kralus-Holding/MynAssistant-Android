@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/stage1-account-bound-pairing" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -60,8 +60,11 @@ jobs:
             exit 1
           fi
           test -s app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk > app/build/outputs/apk/debug/app-debug.apk.sha256
+          cat app/build/outputs/apk/debug/app-debug.apk.sha256
 
       - name: Verify recovered assistant features
+        id: verify_features
         shell: bash
         run: |
           test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
@@ -71,6 +74,14 @@ jobs:
             exit 1
           fi
           test -s app/src/main/java/com/mynkralus/mynassistant/MynAssistantAccountBackend.kt
+          grep -q 'play-services-code-scanner:16.1.0' app/build.gradle.kts
+          grep -q 'android:name="com.google.mlkit.vision.DEPENDENCIES"' app/src/main/AndroidManifest.xml
+          grep -q 'android:value="barcode_ui"' app/src/main/AndroidManifest.xml
+          grep -q 'GmsBarcodeScanning.getClient' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MYNASSISTANT-PAIR' app/src/main/java/com/mynkralus/mynassistant/DesktopPairingQrPayload.kt
+          grep -q 'DesktopPairingQrPayloadParserTest' app/src/test/java/com/mynkralus/mynassistant/DesktopPairingQrPayloadParserTest.kt
+          grep -q 'responseCode == 409' app/src/main/java/com/mynkralus/mynassistant/DesktopPairingHttpErrorPolicy.kt
+          grep -q 'mismatchedAccountIsRejectedWithActionableGuidance' app/src/test/java/com/mynkralus/mynassistant/DesktopPairingHttpErrorPolicyTest.kt
           grep -q 'android:name=".MynWakeWordService"' app/src/main/AndroidManifest.xml
           grep -q 'android:name=".MynAssistantAccessibilityService"' app/src/main/AndroidManifest.xml
           grep -q '"PC Kumandası" -> Icons.Default.SettingsRemote' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
@@ -134,10 +145,14 @@ jobs:
           fi
 
       - name: Upload APK as an Actions artifact
+        id: upload_artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: MynAssistant-Android-0.6.1-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -154,7 +169,31 @@ jobs:
             This is a prerelease build, not a Play Store release.
           prerelease: true
           make_latest: false
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified Stage 1 APK preview
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/fix/stage1-account-bound-pairing' && steps.verify_features.outcome == 'success'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: mynassistant-android-stage1-preview-${{ github.sha }}
+          name: MynAssistant Android Stage 1 Preview (${{ github.sha }})
+          body: |
+            Automated preview build from the isolated stage-1 account-bound pairing branch.
+
+            Version: 0.6.1 (versionCode 38).
+            Gradle unit tests, APK signature verification against the CI debug keystore, and source-feature guards passed before publication.
+            SHA-256 is provided as a separate sidecar file for download verification.
+
+            This is a debug-signed prerelease for manual testing, not a Play Store release. Real-device behavior and production signing are not implied by CI success.
+          prerelease: true
+          make_latest: false
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
