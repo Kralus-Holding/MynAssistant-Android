@@ -25,6 +25,29 @@ class DesktopPairingQrPayloadParserTest {
         assertNull(DesktopPairingQrPayloadParser.parse(null))
     }
 
+
+    @Test
+    fun rejectsNonBase64UrlCharactersEvenWhenSignatureLengthIsCorrect() {
+        val invalidSignature = "A".repeat(42) + "+"
+        assertEquals(43, invalidSignature.length)
+        assertNull(
+            DesktopPairingQrPayloadParser.parse(
+                "MYNASSISTANT-PAIR:ABCDE23456:1790000000:$invalidSignature"
+            )
+        )
+    }
+
+    @Test
+    fun acceptsCanonicalWindowsPayloadMarkerAndNormalizesCodeCase() {
+        val signature = "A".repeat(43)
+        val result = DesktopPairingQrPayloadParser.parse(
+            "mynassistant-pair:abcde23456:1790000000:$signature"
+        )
+
+        assertEquals("ABCDE23456", requireNotNull(result).code)
+        assertEquals(signature, result.signature)
+    }
+
     @Test
     fun rejectsMalformedCodeExpiryAndSignature() {
         assertNull(
