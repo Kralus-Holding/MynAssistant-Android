@@ -2,9 +2,9 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main", "fix/android-pcfiles-list-files" ]
+    branches: [ "main", "fix/android-pcfiles-list-files", "feature/stage5-remote-control-permission" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files" ]
   workflow_dispatch:
 
 permissions:
