@@ -12,10 +12,10 @@ class DesktopPairingQrPayloadParserTest {
             "MYNASSISTANT-PAIR:ABCDE23456:1790000000:$signature"
         )
 
-        requireNotNull(result)
-        assertEquals("ABCDE23456", result.code)
-        assertEquals(1790000000L, result.expiresAtUnix)
-        assertEquals(signature, result.signature)
+        val parsed = requireNotNull(result)
+        assertEquals("ABCDE23456", parsed.code)
+        assertEquals(1790000000L, parsed.expiresAtUnix)
+        assertEquals(signature, parsed.signature)
     }
 
     @Test
