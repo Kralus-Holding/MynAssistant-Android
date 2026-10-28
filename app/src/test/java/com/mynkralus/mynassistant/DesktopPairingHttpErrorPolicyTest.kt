@@ -59,4 +59,11 @@ class DesktopPairingHttpErrorPolicyTest {
             DesktopPairingHttpErrorPolicy.message(500, null)
         )
     }
+    @Test
+    fun mismatchedAccountIsRejectedWithActionableGuidance() {
+        assertEquals(
+            "Bu bilgisayarda farklı bir hesap açık. Eşleştirmek için iki cihazda da aynı hesapla oturum aç. Hesabı değiştirmek için Windows'ta 'Hesabı değiştir' seçeneğini kullan.",
+            DesktopPairingHttpErrorPolicy.message(409, "Server detail should not replace the actionable account-mismatch message.")
+        )
+    }
 }
