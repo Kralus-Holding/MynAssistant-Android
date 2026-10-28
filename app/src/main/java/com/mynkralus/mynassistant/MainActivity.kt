@@ -2341,6 +2341,8 @@ private fun AssistantScreen(
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
+    var desktopPairingQrSignature by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var desktopPairingQrExpiresAtUnix by remember(firebaseUserId) { mutableStateOf<Long?>(null) }
     var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingScanBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingStatus by remember(firebaseUserId) {
@@ -2352,6 +2354,12 @@ private fun AssistantScreen(
             .uppercase(Locale.ROOT)
         if (normalizedCode.length != 10) {
             desktopPairingStatus = "Windows uygulamasında gösterilen 10 karakterli kodu gir."
+            return
+        }
+        val qrSignature = desktopPairingQrSignature
+        val qrExpiresAtUnix = desktopPairingQrExpiresAtUnix
+        if ((qrSignature == null) != (qrExpiresAtUnix == null)) {
+            desktopPairingStatus = "QR imza bilgisi eksik. QR kodunu yeniden tara veya eşleştirme kodunu elle gir."
             return
         }
 
@@ -2391,8 +2399,13 @@ private fun AssistantScreen(
                             setRequestProperty("Authorization", "Bearer $idToken")
                         }
 
-                        val requestBody = JSONObject()
-                            .put("code", normalizedCode)
+                        val requestJson = JSONObject().put("code", normalizedCode)
+                        if (qrSignature != null && qrExpiresAtUnix != null) {
+                            requestJson
+                                .put("qrSignature", qrSignature)
+                                .put("qrExpiresAtUnix", qrExpiresAtUnix)
+                        }
+                        val requestBody = requestJson
                             .toString()
                             .toByteArray(Charsets.UTF_8)
                         connection.outputStream.use { it.write(requestBody) }
@@ -2442,6 +2455,8 @@ private fun AssistantScreen(
                         desktopPairingStatus = message
                         if (approved) {
                             desktopPairingCode = ""
+                            desktopPairingQrSignature = null
+                            desktopPairingQrExpiresAtUnix = null
                             feedback = message
                         }
                     }
@@ -3505,6 +3520,8 @@ private fun AssistantScreen(
                                                 .filter { it.isLetterOrDigit() }
                                                 .uppercase(Locale.ROOT)
                                                 .take(10)
+                                            desktopPairingQrSignature = null
+                                            desktopPairingQrExpiresAtUnix = null
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         label = { Text("Windows eşleştirme kodu") },
@@ -3535,26 +3552,34 @@ private fun AssistantScreen(
                                                     .addOnSuccessListener { barcode ->
                                                         desktopPairingScanBusy = false
                                                         val rawValue = barcode.rawValue.orEmpty().trim()
-                                                        val parts = rawValue.split(':', limit = 3)
-                                                        val scannedCode = when {
-                                                            parts.size == 3 &&
-                                                                parts[0].equals("MYNASSISTANT-PAIR", ignoreCase = true) &&
-                                                                parts[2].toLongOrNull()?.let { it > 0L } == true ->
-                                                                parts[1].filter { it.isLetterOrDigit() }
-                                                            rawValue.matches(Regex("^[A-Za-z0-9]{10}$")) ->
-                                                                rawValue
-                                                            else -> ""
-                                                        }.uppercase(Locale.ROOT)
+                                                        val parts = rawValue.split(':', limit = 4)
+                                                        val scannedCode = parts.getOrNull(1)
+                                                            ?.filter { it.isLetterOrDigit() }
+                                                            ?.uppercase(Locale.ROOT)
+                                                            .orEmpty()
+                                                        val expiry = parts.getOrNull(2)?.toLongOrNull()
+                                                        val signature = parts.getOrNull(3)
 
-                                                        if (scannedCode.length != 10 ||
-                                                            !scannedCode.all { it in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" }
-                                                        ) {
+                                                        val validSignedQr =
+                                                            parts.size == 4 &&
+                                                                parts[0].equals("MYNASSISTANT-PAIR", ignoreCase = true) &&
+                                                                scannedCode.length == 10 &&
+                                                                scannedCode.all { it in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" } &&
+                                                                expiry != null && expiry > 0L &&
+                                                                signature?.matches(Regex("^[A-Za-z0-9_-]{43}$")) == true
+
+                                                        if (!validSignedQr || expiry == null || signature == null) {
+                                                            desktopPairingCode = ""
+                                                            desktopPairingQrSignature = null
+                                                            desktopPairingQrExpiresAtUnix = null
                                                             desktopPairingStatus =
-                                                                "QR kodu geçersiz. Windows uygulamasında yeni kod oluştur veya kodu elle gir."
+                                                                "QR kodu geçersiz veya imzasız. Windows uygulamasında yeni bir QR kodu oluştur ya da 10 karakterli kodu elle gir."
                                                         } else {
                                                             desktopPairingCode = scannedCode
+                                                            desktopPairingQrSignature = signature
+                                                            desktopPairingQrExpiresAtUnix = expiry
                                                             desktopPairingStatus =
-                                                                "QR kodu okundu. Sunucu kodun geçerliliğini doğrulayacak; devam etmek için 'Bilgisayarı bağla' düğmesine dokun."
+                                                                "İmzalı QR kodu okundu. Sunucu imzayı ve süreyi doğrulayacak; devam etmek için 'Bilgisayarı bağla' düğmesine dokun."
                                                         }
                                                     }
                                                     .addOnCanceledListener {
