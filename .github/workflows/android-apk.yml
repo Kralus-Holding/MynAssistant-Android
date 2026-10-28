@@ -66,6 +66,9 @@ jobs:
         run: |
           test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
           grep -q 'sherpa-onnx' app/build.gradle.kts
+          grep -q 'catch (error: LinkageError)' app/src/main/java/com/mynkralus/mynassistant/MynSherpaWakeWordEngine.kt
+          grep -q 'MYN-WAKE-8033' app/src/main/java/com/mynkralus/mynassistant/MynWakeWordService.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/WakeNativeLibraryLoadExceptionTest.kt
           if grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts; then
             echo "Firebase Storage is not allowed in the strict free-start build"
             exit 1
