@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "fix/android-pcfiles-list-files", "fix/android-063-native-library-runtime" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files" ]
   workflow_dispatch:
 
 permissions:
