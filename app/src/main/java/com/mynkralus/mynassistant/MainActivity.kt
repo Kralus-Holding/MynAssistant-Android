@@ -3551,33 +3551,18 @@ private fun AssistantScreen(
                                                 GmsBarcodeScanning.getClient(commandContext, options).startScan()
                                                     .addOnSuccessListener { barcode ->
                                                         desktopPairingScanBusy = false
-                                                        val rawValue = barcode.rawValue.orEmpty().trim()
-                                                        val parts = rawValue.split(':', limit = 4)
-                                                        val scannedCode = parts.getOrNull(1)
-                                                            ?.filter { it.isLetterOrDigit() }
-                                                            ?.uppercase(Locale.ROOT)
-                                                            .orEmpty()
-                                                        val expiry = parts.getOrNull(2)?.toLongOrNull()
-                                                        val signature = parts.getOrNull(3)
+                                                        val scannedQr = DesktopPairingQrPayloadParser.parse(barcode.rawValue)
 
-                                                        val validSignedQr =
-                                                            parts.size == 4 &&
-                                                                parts[0].equals("MYNASSISTANT-PAIR", ignoreCase = true) &&
-                                                                scannedCode.length == 10 &&
-                                                                scannedCode.all { it in "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" } &&
-                                                                expiry != null && expiry > 0L &&
-                                                                signature?.matches(Regex("^[A-Za-z0-9_-]{43}$")) == true
-
-                                                        if (!validSignedQr || expiry == null || signature == null) {
+                                                        if (scannedQr == null) {
                                                             desktopPairingCode = ""
                                                             desktopPairingQrSignature = null
                                                             desktopPairingQrExpiresAtUnix = null
                                                             desktopPairingStatus =
                                                                 "QR kodu geçersiz veya imzasız. Windows uygulamasında yeni bir QR kodu oluştur ya da 10 karakterli kodu elle gir."
                                                         } else {
-                                                            desktopPairingCode = scannedCode
-                                                            desktopPairingQrSignature = signature
-                                                            desktopPairingQrExpiresAtUnix = expiry
+                                                            desktopPairingCode = scannedQr.code
+                                                            desktopPairingQrSignature = scannedQr.signature
+                                                            desktopPairingQrExpiresAtUnix = scannedQr.expiresAtUnix
                                                             desktopPairingStatus =
                                                                 "İmzalı QR kodu okundu. Sunucu imzayı ve süreyi doğrulayacak; devam etmek için 'Bilgisayarı bağla' düğmesine dokun."
                                                         }
