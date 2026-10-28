@@ -2,9 +2,9 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main", "fix/android-pcfiles-list-files" ]
+    branches: [ "main", "fix/android-pcfiles-list-files", "fix/android-063-native-library-runtime" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files" ]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     name: Build debug APK
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out source
@@ -66,6 +66,9 @@ jobs:
         run: |
           test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
           grep -q 'sherpa-onnx' app/build.gradle.kts
+          grep -q 'catch (error: LinkageError)' app/src/main/java/com/mynkralus/mynassistant/MynSherpaWakeWordEngine.kt
+          grep -q 'MYN-WAKE-8033' app/src/main/java/com/mynkralus/mynassistant/MynWakeWordService.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/WakeNativeLibraryLoadExceptionTest.kt
           if grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts; then
             echo "Firebase Storage is not allowed in the strict free-start build"
             exit 1
@@ -170,7 +173,7 @@ jobs:
           fi
           grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'MynAssistant • Android 0.6.2' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MynAssistant • Android 0.6.3' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'profilePhotos/{userId}/{fileName}' storage.rules
           grep -q 'android:icon="@drawable/mynassistant_launcher"' app/src/main/AndroidManifest.xml
           if grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml; then
@@ -179,7 +182,7 @@ jobs:
           fi
           VERSION_CODE=$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')
           VERSION_NAME=$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)
-          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 39 ] || [ "$VERSION_NAME" != "0.6.2" ]; then
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 40 ] || [ "$VERSION_NAME" != "0.6.3" ]; then
             echo "Invalid or old Android version"
             exit 1
           fi
@@ -195,35 +198,56 @@ jobs:
             echo "::error::APK archive integrity check failed."
             exit 1
           fi
-          APK_SHA256=$(sha256sum "$APK_PATH" | awk '{print toupper($1)}')
-          if [ -z "$APK_SHA256" ]; then
-            echo "::error::APK SHA-256 could not be calculated."
-            exit 1
-          fi
+
+          # Verify the runtime libraries needed by Vosk/JNA and sherpa-onnx
+          # are packaged for both supported ARM Android userspaces.
+          APK_ENTRIES="$(unzip -Z1 "$APK_PATH")"
+          for ABI in arm64-v8a armeabi-v7a; do
+            for LIB in libvosk.so libjnidispatch.so libonnxruntime.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libsherpa-onnx-jni.so; do
+              if ! printf '%s\n' "$APK_ENTRIES" | grep -Fxq "lib/$ABI/$LIB"; then
+                echo "::error::Missing native library in APK: lib/$ABI/$LIB"
+                exit 1
+              fi
+            done
+          done
+          echo "Verified required native libraries for arm64-v8a and armeabi-v7a."
+
+          mkdir -p build/release
+          RELEASE_APK="build/release/MynAssistant-Android-0.6.3.apk"
+          cp "$APK_PATH" "$RELEASE_APK"
+          APK_SHA256=$(sha256sum "$RELEASE_APK" | awk '{print tolower($1)}')
+          printf "%s  MynAssistant-Android-0.6.3.apk\n" "$APK_SHA256" > "$RELEASE_APK.sha256"
+          test -s "$RELEASE_APK.sha256"
           echo "Verified APK SHA-256: $APK_SHA256"
 
       - name: Upload APK as an Actions artifact
         uses: actions/upload-artifact@v7
         with:
-          name: MynAssistant-Android-0.6.2-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MynAssistant-Android-0.6.3-debug-${{ github.sha }}
+          path: |
+            build/release/MynAssistant-Android-0.6.3.apk
+            build/release/MynAssistant-Android-0.6.3.apk.sha256
           if-no-files-found: error
           retention-days: 7
 
       - name: Publish APK as a prerelease asset
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/android-pcfiles-list-files')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/android-pcfiles-list-files' || github.ref == 'refs/heads/fix/android-063-native-library-runtime')
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: mynassistant-android-apk-${{ github.sha }}
-          name: MynAssistant Android Preview (${{ github.sha }})
+          tag_name: mynassistant-android-0.6.3-${{ github.sha }}
+          name: MynAssistant Android 0.6.3 Preview (${{ github.sha }})
           body: |
-            Automated preview debug APK built from ${{ github.ref_name }} at commit ${{ github.sha }}.
+            Automated 0.6.3 preview debug APK built from ${{ github.ref_name }} at commit ${{ github.sha }}.
 
-            The stable debug signing certificate is verified by CI.
-            This is a prerelease build, not a Play Store release.
+            Version: 0.6.3 (versionCode 40).
+            CI verifies Android unit tests, stable debug signing, APK archive integrity and the required Vosk/JNA/sherpa-onnx native libraries for both ARM ABIs.
+            The APK has an accompanying SHA-256 sidecar. Runtime wake-word accuracy and physical-device installation are still manual test gates.
+            This is a debug-signed prerelease, not a Play Store release.
           prerelease: true
           make_latest: false
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: |
+            build/release/MynAssistant-Android-0.6.3.apk
+            build/release/MynAssistant-Android-0.6.3.apk.sha256
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
