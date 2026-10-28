@@ -202,6 +202,14 @@ jobs:
           fi
           echo "Verified APK SHA-256: $APK_SHA256"
 
+      - name: Upload APK as an Actions artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: MynAssistant-Android-${{ github.sha }}-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish APK as a prerelease asset
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/android-pcfiles-list-files' || github.ref == 'refs/heads/feature/stage5-remote-control-permission')
         uses: softprops/action-gh-release@v3
