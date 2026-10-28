@@ -2,9 +2,9 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main", "fix/stage1-account-bound-pairing" ]
+    branches: [ "main", "fix/stage1-account-bound-pairing", "fix/stage5-android-release-workflows-stage1-integration" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "fix/stage1-account-bound-pairing" ]
   workflow_dispatch:
 
 permissions:
@@ -142,18 +142,18 @@ jobs:
             exit 1
           fi
 
-      - name: Upload APK as an Actions artifact
+      - name: Upload APK as an Actions artifact (best-effort)
         id: upload_artifact
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: MynAssistant-Android-0.6.1-debug-${{ github.sha }}
+          name: MynAssistant-Android-${{ github.sha }}-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
 
       - name: Publish APK as a prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/stage5-android-release-workflows-stage1-integration')
         uses: softprops/action-gh-release@v3
         with:
           tag_name: mynassistant-android-apk-${{ github.sha }}
@@ -170,15 +170,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish verified APK to prerelease if Actions artifact storage is full
-        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/fix/stage1-account-bound-pairing' && steps.upload_artifact.outcome == 'failure' && steps.verify_features.outcome == 'success'
+        if: always() && github.event_name == 'push' && (github.ref == 'refs/heads/fix/stage1-account-bound-pairing' || github.ref == 'refs/heads/fix/stage5-android-release-workflows-stage1-integration') && steps.upload_artifact.outcome == 'failure' && steps.verify_features.outcome == 'success'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: mynassistant-android-stage1-preview-${{ github.sha }}
-          name: MynAssistant Android Stage 1 Preview (${{ github.sha }})
+          tag_name: mynassistant-android-preview-${{ github.sha }}
+          name: MynAssistant Android Preview (${{ github.sha }})
           body: |
-            Automated preview build from the isolated stage-1 account-bound pairing branch.
+            Automated verified preview build from ${{ github.ref_name }}.
 
-            Version: 0.6.1 (versionCode 38).
             Android unit tests, APK signature verification, and recovered-feature checks passed.
             The Actions artifact upload was attempted first; if it failed due to Actions storage quota, this release asset provides the verified APK.
 
