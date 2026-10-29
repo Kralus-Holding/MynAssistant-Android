@@ -98,7 +98,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
@@ -118,7 +117,6 @@ import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Send
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
