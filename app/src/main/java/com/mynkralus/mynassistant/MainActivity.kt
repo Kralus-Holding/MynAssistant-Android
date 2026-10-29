@@ -1891,12 +1891,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         activityResumed = false
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("android_device_foreground", false)
+            .apply()
         stopAndroidDeviceHeartbeat()
         FirebaseAuth.getInstance().currentUser?.let { updateAndroidDevicePresence(it, online = false) }
         super.onPause()
     }
 
     override fun onDestroy() {
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("android_device_foreground", false)
+            .apply()
         stopAndroidDeviceHeartbeat()
         FirebaseAuth.getInstance().removeAuthStateListener(firebaseAuthStateListener)
         super.onDestroy()
@@ -1993,6 +1999,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("android_device_foreground", true)
+            .apply()
         startAndroidDeviceHeartbeat(FirebaseAuth.getInstance().currentUser)
         reconcileStaleWakeWordState(this)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -3351,7 +3360,7 @@ private fun AssistantScreen(
                 feedback = "Uzak Android komutu göndermek için aynı MynAssistant hesabında oturum aç."
             target == "ANDROID" && manualAndroidDevice == null ->
                 feedback = "Seçtiğin Android cihaz artık bu hesapta kayıtlı görünmüyor. Cihaz listesini yenileyip yeniden seç."
-            target == "ANDROID" && !manualAndroidDevice.isOnlineAt(presenceNowMillis) ->
+            target == "ANDROID" && manualAndroidDevice?.isOnlineAt(presenceNowMillis) != true ->
                 feedback = "Seçtiğin Android cihaz çevrimdışı. Komut başka bir cihaza yönlendirilmedi."
             target == "ANDROID" && !AndroidRemoteCommandPolicy.isAllowed(textCommand) ->
                 feedback = AndroidRemoteCommandPolicy.rejectionMessage()
