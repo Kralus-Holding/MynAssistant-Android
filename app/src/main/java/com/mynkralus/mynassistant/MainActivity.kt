@@ -3384,7 +3384,8 @@ private fun AssistantScreen(
                 }
                 val retryNumber = androidCommandReceiverClaimRetryCount + 1
                 androidCommandReceiverClaimRetryCount = retryNumber
-                if (retryNumber <= 3) {
+                val retryDelayMillis = AndroidCommandClaimRetryPolicy.delayMillis(retryNumber)
+                if (retryDelayMillis != null) {
                     Handler(Looper.getMainLooper()).postDelayed({
                         val sameAccountStillActive =
                             FirebaseAuth.getInstance().currentUser?.uid == ownerUid
@@ -3396,7 +3397,7 @@ private fun AssistantScreen(
                         ) {
                             processNextPendingAndroidCommand()
                         }
-                    }, retryNumber * 2_000L)
+                    }, retryDelayMillis)
                 } else {
                     Log.e(
                         "MynAndroidCommand",
