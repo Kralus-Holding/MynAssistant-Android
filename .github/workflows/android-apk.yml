@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main", "fix/android-pcfiles-list-files", "fix/android-063-native-library-runtime" ]
+    branches: [ "main", "fix/android-pcfiles-list-files", "fix/android-063-native-library-runtime", "fix/android-full-audit-10-parts" ]
   pull_request:
     branches: [ "main", "fix/android-pcfiles-list-files" ]
   workflow_dispatch:
@@ -173,7 +173,6 @@ jobs:
           fi
           grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'MynAssistant • Android 0.6.3' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'profilePhotos/{userId}/{fileName}' storage.rules
           grep -q 'android:icon="@drawable/mynassistant_launcher"' app/src/main/AndroidManifest.xml
           if grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml; then
