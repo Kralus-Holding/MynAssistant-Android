@@ -59,6 +59,10 @@ class RemoteCommandSubmissionPolicyTest {
             "Komut kuyruğa alındı; Windows Agent tarafından alınması bekleniyor.",
             remoteCommandStatusMessageForTarget("pending", false)
         )
+        assertEquals(
+            "Android komut durumu: cancelled",
+            remoteCommandStatusMessageForTarget("cancelled", true)
+        )
     }
 
     @Test
