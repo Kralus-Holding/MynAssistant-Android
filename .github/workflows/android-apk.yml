@@ -129,6 +129,10 @@ jobs:
           test -s app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt
           grep -q 'AndroidRemoteCommandExecutionPolicy.rejectionMessage' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicyTest.kt
+          grep -q 'AndroidCommandClaimRetryPolicy.delayMillis(retryNumber)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'get(com.google.firebase.firestore.Source.SERVER)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
           grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           python3 - <<'PY'
