@@ -4152,9 +4152,7 @@ private fun AssistantScreen(
                                     )
                                 }
                             }
-                        Page.SETTINGS -> {
                             if (settingsCategory == "Genel") {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
                                 Switch(checked = dark, onCheckedChange = { toggleTheme() })
@@ -4170,7 +4168,6 @@ private fun AssistantScreen(
                             }
 
                             if (settingsCategory == "Hesap") {
-                            Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -4432,8 +4429,6 @@ private fun AssistantScreen(
                             if (settingsCategory == "Hata günlükleri") {
                             OutlinedButton(
                                 onClick = { navigateToPage(Page.DIAGNOSTICS) },
-                            OutlinedButton(
-                                onClick = { navigateToPage(Page.DIAGNOSTICS) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.BugReport, contentDescription = null)
@@ -4443,8 +4438,6 @@ private fun AssistantScreen(
                             }
                             if (settingsCategory == "İzinler") {
                             OutlinedButton(
-                                onClick = {
-                                    val missing = requiredRuntimePermissionList()                            OutlinedButton(
                                 onClick = {
                                     val missing = requiredRuntimePermissionList().filter { permission ->
                                         androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
@@ -4465,8 +4458,6 @@ private fun AssistantScreen(
                             }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                             if (settingsCategory == "Eklentiler") {
-                            HorizontalDivider()
-                            Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             HorizontalDivider()
                             Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -4490,8 +4481,6 @@ private fun AssistantScreen(
                             }
                             }
                             if (settingsCategory == "Agent") {
-                            HorizontalDivider()
-                            Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             HorizontalDivider()
                             Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(
