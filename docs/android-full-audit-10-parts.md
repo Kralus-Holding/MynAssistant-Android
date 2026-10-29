@@ -9,7 +9,7 @@ Korumalı dallar: `main` ve PR #32'nin kaynak dalı değiştirilmedi. Hiçbir PR
 
 Bu dalda kaynak değişiklikleri yapıldı; ancak projenin tamamı **tamamlandı** olarak işaretlenemez. Android Gradle derlemesi henüz çalışmış değil: son kontrol edilen CI denemesi runner tahsisinden önce başarısız oldu (`runner_id=0`, boş `runner_name`, `steps=[]`). Yerel ortamda `gradle`, Android SDK araçları ve `adb` bulunmadığından tam Android build, Compose/UI testleri veya gerçek cihaz testi bu çalışma ortamında gerçekleştirilemedi.
 
-Bağımsız olarak çalıştırılan Kotlin politika/uyandırma/dosya aktarımı/uzak yürütme/retry/platform-geri-bildirim smoke testi **135/135 assertion** ile geçti. Bu, tam Android projesinin derlendiği anlamına gelmez. `MainActivity.kt` için statik parantez/ayraç denetimi geçti ve yinelenen import bulunmadı.
+Bağımsız olarak çalıştırılan Kotlin politika/uyandırma/dosya aktarımı/uzak yürütme/retry/platform-geri-bildirim/sonuç-hata-sınıflandırma smoke testi **140/140 assertion** ile geçti. Bu, tam Android projesinin derlendiği anlamına gelmez. `MainActivity.kt` için statik parantez/ayraç denetimi geçti ve yinelenen import bulunmadı.
 
 ### Durum anlamları
 
@@ -32,7 +32,7 @@ Bağımsız olarak çalıştırılan Kotlin politika/uyandırma/dosya aktarımı
 | 7. Windows eşleştirmesi ve komut yönlendirme | İmzalı QR biçim ayrıştırıcısı, QR tarama/iptal/hata durumları, imza ve expiry alanlarını sunucuya gönderme eklendi. HTTP 409 hesap uyuşmazlığı için açıklayıcı hata politikası eklendi. | QR/HTTP politikaları izole test edildi. Sunucu PR #10 ve Windows PR #19 taslak/açık olduğundan canlı HMAC/expiry/tek kullanımlık kod ve gerçek çift cihaz eşleştirmesi doğrulanmadı. | KISMEN TAMAMLANDI |
 | 8. Sesli asistan ve native kütüphaneler | PR #32'deki LinkageError/ `MYN-WAKE-8033` tanılama yolu ve test korundu. ABI kontrolü workflow'da mevcut. | Tam 0.6.3 APK kurulmadı; native kütüphane paketlemesi ve “Hey Meyene” gerçek telefon doğrulaması yapılamadı. | DOĞRULANAMADI |
 | 9. PcFiles ve önceki özellikler | Mevcut dosya listeleme/indirme/yükleme/ZIP, boyut ve SHA-256 sınırları korunacak şekilde incelendi. | Kaynak ve mevcut sözleşme testleri görüldü; tam Gradle suite ve gerçek Windows dosya aktarım testi çalışmadı. | KISMEN TAMAMLANDI |
-| 10. Son paket ve APK teslimi | Sürüm hedefi 0.6.3 / versionCode 40 olarak dalda mevcut. Workflow, sürüm, imza, APK ZIP bütünlüğü, ABI ve SHA-256 kontrollerini içeriyor. | Run #570 / tekrar deneme 2, runner başlamadan başarısız oldu; yeni 0.6.3 APK/Release kanıtı yok. Eski 0.6.1/0.6.2 APK'ları 0.6.3 adıyla sunulmadı. | BLOKE — APK ÜRETİMİ DOĞRULANAMADI |
+| 10. Son paket ve APK teslimi | Sürüm hedefi 0.6.3 / versionCode 40 olarak dalda mevcut. Workflow, sürüm, imza, APK ZIP bütünlüğü, ABI ve SHA-256 kontrollerini içeriyor. | Run #576 / tekrar deneme 2, runner başlamadan başarısız oldu; yeni 0.6.3 APK/Release kanıtı yok. Eski 0.6.1/0.6.2 APK'ları 0.6.3 adıyla sunulmadı. | BLOKE — APK ÜRETİMİ DOĞRULANAMADI |
 
 ## 2. Gereksinim envanteri
 
@@ -105,6 +105,8 @@ Orijinal görsel dosyaları değiştirilmedi.
 - Android komut alıcısındaki geçici Firestore claim hataları artık aynı bekleyen komutu hızlı döngüde yeniden denemiyor. Queue refresh server kaynağından yapılıyor; claim en fazla üç kez 2/4/6 saniyelik backoff ile deneniyor ve oturum/foreground hâlâ etkin değilse retry yapılmıyor.
 
 - Android komut alıcısı artık bekleyen komutları sırayla işliyor; yürütme öncesinde UID, ön plan durumu ve son kullanma zamanı tekrar doğrulanıyor. Bu kapılar `AndroidRemoteCommandExecutionPolicy` altında test edilebilir yardımcı politika hâline getirildi.
+- Android süreç başlangıcında kalıcı `android_device_foreground` değeri sıfırlanıyor; önceki süreç beklenmedik şekilde sonlandırılmışsa alıcı yeni süreçte otomatik etkinleşmiyor.
+- Uzak komutların sonucu merkezi sınıflandırıcıdan geçiyor; `çalıştırılamadı`/`başlatılamadı` gibi Türkçe hata sonuçları artık başarı olarak işaretlenmemeli. İzole testler bu hata ve başarı ifadelerini kapsıyor.
 
 | Dosya | Değişiklik |
 |---|---|
@@ -113,6 +115,7 @@ Orijinal görsel dosyaları değiştirilmedi.
 | `app/src/main/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicy.kt` | PHONE/ANDROID/PC/AUTO hedef çözümleme. |
 | `app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicy.kt` | İzin verilen uzaktan Android komutlarının katı allowlist'i; arama/mesaj/kamera/galeri ve kişisel uygulama komutları engelleniyor. |
 | `app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicy.kt` | Uzak komut yürütülmeden önce alıcı ömrü, aktif kullanıcı UID'si, expiry, ön plan durumu ve komut türü yeniden kontrol edilir. |
+| `app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicy.kt` | Türkçe hata sonuçları için merkezi `androidCommandResultIndicatesFailure` sınıflandırıcısı. |
 | `app/src/main/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicy.kt` | Geçici Firestore claim hataları için en fazla üç retry, 2/4/6 saniye artan backoff. |
 | `app/src/main/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicy.kt` | Windows metinleri korunurken Android hedefi için ayrı pending/running ve submission/result timeout mesajları. |
 | `app/src/main/java/com/mynkralus/mynassistant/DesktopPairingQrPayload.kt` | Signed QR payload yapısal ayrıştırıcısı (gerçek imza doğrulaması sunucuya ait). |
@@ -123,6 +126,7 @@ Orijinal görsel dosyaları değiştirilmedi.
 | `app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt` | PHONE/ANDROID/PC/AUTO hedef çözümleme senaryoları. |
 | `app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicyTest.kt` | Güvenli allowlist ve red senaryoları. |
 | `app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt` | Hesap değişimi, expiry, foreground ve tamamlanma kabul koşulları. |
+| `app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt` | `çalıştırılamadı`, `başlatılamadı` hata sonuçları ile başarılı komut yanıtlarının sınıflandırılması. |
 | `app/src/test/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicyTest.kt` | Bounded retry ve 2/4/6 saniye backoff sınırları. |
 | `app/src/test/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicyTest.kt` | Android/Windows hedeflerine göre durum ve zaman aşımı mesajlarının ayrışması. |
 | `app/src/test/java/com/mynkralus/mynassistant/DesktopPairingQrPayloadParserTest.kt` | Signed QR pozitif/negatif payload senaryoları. |
@@ -143,15 +147,15 @@ Orijinal görsel dosyaları değiştirilmedi.
 | Android komut claim retry/backoff kaynak kontrolü | BAŞARILI — 8/8 | Server-only queue refresh, retry cap, backoff policy bağlantısı ve ilgili test dosyaları mevcut kaynakla eşleştirildi. Bu Gradle derlemesi değildir. |
 | Android/Windows hedefe özel durum ve timeout geri bildirimi | BAŞARILI — statik ve izole politika | Pending/running/unknown status ve 20/60 saniye timeout metinleri için kaynak ve smoke kontrolleri geçti; gerçek UI testi değildir. |
 | Kaynak sabit e-posta taraması | BAŞARILI (statik) | Uygulamanın taranan MainActivity kaynağında sabit geliştirici/test e-posta adresi bulunmadı. Hesap izolasyonu runtime testi değildir. |
-| İzole Kotlin policy smoke suite | BAŞARILI — 135/135 | `kotlinc` ile yalnız politika/yardımcı dosyalar ve smoke harness derlenip çalıştırıldı; tam Android projesi değildi. |
-| Android `testDebugUnitTest assembleDebug` CI | DOĞRULANAMADI | Run #570 deneme 2: runner_id=0, runner_name boş, steps=0; kaynak derleme adımına ulaşmadı. |
+| İzole Kotlin policy smoke suite | BAŞARILI — 140/140 | `kotlinc` ile yalnız politika/yardımcı dosyalar ve smoke harness derlenip çalıştırıldı; tam Android projesi değildi. |
+| Android `testDebugUnitTest assembleDebug` CI | DOĞRULANAMADI | Run #576 deneme 2: runner_id=0, runner_name boş, steps=0; kaynak derleme adımına ulaşmadı. |
 | Android/Windows gerçek cihaz testi | DOĞRULANAMADI | Bu oturumda gerçek telefon/PC üzerinde işlem yapılamadı. |
 | APK native ABI, imza, SHA-256, kurulum | DOĞRULANAMADI | Bu dal için doğrulanmış 0.6.3 APK artefaktı oluşmadı. |
 | Canlı Render eşleştirme / server HMAC | DOĞRULANAMADI | İlgili server PR merge/deploy kanıtı yok. |
 
 ### CI kanıtı
 
-Son kontrol edilen Actions run: [Run #570](https://github.com/Kralus-Holding/MynAssistant-Android/actions/runs/40972175486). Run #570 de `runner_id=0`, boş runner adı ve sıfır step ile başarısız oldu. Bu kayıt Kotlin/Gradle hatası göstermiyor; runner tahsis engelinin devam ettiğini gösteriyor.
+Son kontrol edilen Actions run: [Run #576](https://github.com/Kralus-Holding/MynAssistant-Android/actions/runs/40972653636). Run #576 de `runner_id=0`, boş runner adı ve sıfır step ile başarısız oldu. Bu kayıt Kotlin/Gradle hatası göstermiyor; runner tahsis engelinin devam ettiğini gösteriyor.
 
 ## 6. Açık riskler ve bloke olanlar
 
