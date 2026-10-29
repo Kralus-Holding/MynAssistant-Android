@@ -87,6 +87,7 @@ import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Home
@@ -2089,6 +2090,8 @@ private fun AssistantScreen(
 
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
+    // An explicit device choice must not silently fall back to a different PC.
+    var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
@@ -3124,17 +3127,49 @@ private fun AssistantScreen(
         onDispose { registration?.remove() }
     }
     val pcDevices = devices.filter { it.isPcTarget }
-    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
-    val selectedPcId = DevicePresencePolicy.preferredPcDeviceId(
-        pcDevices.map { device ->
-            PcDeviceRouteCandidate(
-                id = device.id,
-                connectionMode = device.connectionMode,
-                isOnline = device.isOnlineAt(presenceNowMillis)
+    val androidDevices = devices.filter {
+        !it.isPcTarget && (
+            it.platform.equals("Android", ignoreCase = true) ||
+                it.id.startsWith("android-", ignoreCase = true)
             )
-        },
-        selectedDeviceId
-    )
+    }
+    val currentAndroidDeviceId = remember(firebaseUserId) {
+        val activeUid = firebaseUserId.orEmpty()
+        val installationId = commandContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(ANDROID_INSTALLATION_ID_KEY, null)
+        if (activeUid.isBlank() || installationId.isNullOrBlank()) {
+            null
+        } else {
+            runCatching {
+                val digest = MessageDigest.getInstance("SHA-256")
+                    .digest("$activeUid:$installationId".toByteArray(Charsets.UTF_8))
+                val suffix = digest.take(12).joinToString("") { byte ->
+                    "%02x".format(byte.toInt() and 0xff)
+                }
+                "android-$suffix"
+            }.getOrNull()
+        }
+    }
+    val otherAndroidDevices = androidDevices.filter { it.id != currentAndroidDeviceId }
+    val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
+    val manuallySelectedPcStillRegistered = manuallySelectedPcDeviceId?.let { chosenId ->
+        pcDevices.any { it.id == chosenId }
+    } == true
+    val selectedPcId = if (manuallySelectedPcStillRegistered) {
+        manuallySelectedPcDeviceId
+    } else {
+        DevicePresencePolicy.preferredPcDeviceId(
+            pcDevices.map { device ->
+                PcDeviceRouteCandidate(
+                    id = device.id,
+                    connectionMode = device.connectionMode,
+                    isOnline = device.isOnlineAt(presenceNowMillis)
+                )
+            },
+            selectedDeviceId
+        )
+    }
     val selectedDevice = pcDevices.firstOrNull { it.id == selectedPcId }
 
     // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
@@ -3272,6 +3307,12 @@ private fun AssistantScreen(
         } else {
             textCommand
         }
+        val manualPcSelection = target == "PC" && !manuallySelectedPcDeviceId.isNullOrBlank()
+        val manualPcDevice = if (manualPcSelection) {
+            pcDevices.firstOrNull { it.id == manuallySelectedPcDeviceId }
+        } else {
+            null
+        }
         val contactAction = contactActionKind(textCommand)
         val phoneNumber = extractPhoneNumber(textCommand)
         val relationshipAssignment = parseRelationshipAliasAssignment(textCommand)
@@ -3405,6 +3446,27 @@ private fun AssistantScreen(
             }
             routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
             !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
+            manualPcSelection && manualPcDevice == null ->
+                feedback = "Seçtiğin bilgisayar artık bu hesapta kayıtlı görünmüyor. Cihaz listesini yenileyip tekrar seç."
+            manualPcSelection && manualPcDevice != null &&
+                manualPcDevice.id == localPcDeviceId && localPcConnected -> {
+                feedback = "Komut seçtiğin bilgisayara gönderiliyor..."
+                sendLocalPcText(routedText)
+            }
+            manualPcSelection && manualPcDevice != null &&
+                manualPcDevice.connectionMode.equals("firebase-agent", ignoreCase = true) &&
+                manualPcDevice.isOnlineAt(presenceNowMillis) -> {
+                feedback = "Komut seçtiğin bilgisayara gönderiliyor..."
+                sendTrackedRemoteCommand(manualPcDevice.id, "text_command", mapOf("text" to routedText))
+            }
+            manualPcSelection && manualPcDevice != null &&
+                manualPcDevice.id == localPcDeviceId ->
+                feedback = "Seçtiğin yerel bilgisayar çevrimdışı. Bağlantıyı yeniden test et."
+            manualPcSelection && manualPcDevice != null &&
+                !manualPcDevice.isOnlineAt(presenceNowMillis) ->
+                feedback = "Seçtiğin bilgisayar çevrimdışı. Komut başka bir cihaza yönlendirilmedi."
+            manualPcSelection ->
+                feedback = "Seçilen bilgisayarın bağlantı türü bu komut akışını desteklemiyor."
             selectedDevice?.isOnlineAt(presenceNowMillis) == true && selectedDevice.connectionMode == "firebase-agent" -> {
                 feedback = "Komut bilgisayarına gönderiliyor..."
                 sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
@@ -4761,55 +4823,249 @@ private fun AssistantScreen(
                             ) {
                                 Box {
                                     Column(
-                                        modifier = Modifier.width(52.dp).clip(RoundedCornerShape(18.dp))
+                                        modifier = Modifier.width(48.dp)
+                                            .clip(RoundedCornerShape(16.dp))
                                             .clickable { targetMenuExpanded = true }
-                                            .padding(vertical = 3.dp),
+                                            .padding(vertical = 8.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center
                                     ) {
                                         Icon(
-                                            when (commandTarget) {
-                                                "PHONE" -> Icons.Default.Devices
-                                                "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.SmartToy
-                                            },
-                                            contentDescription = when (commandTarget) {
-                                                "PHONE" -> "Hedef: bu Android telefonu"
-                                                "PC" -> "Hedef: Windows bilgisayar"
-                                                else -> "Hedef: otomatik yönlendirme"
+                                            Icons.Default.Add,
+                                            contentDescription = when {
+                                                commandTarget == "PHONE" -> "Hedef bu Android telefonu; cihaz seç"
+                                                commandTarget == "PC" && manuallySelectedPcDeviceId != null ->
+                                                    "Hedef seçili Windows cihazı; cihaz değiştir"
+                                                commandTarget == "PC" -> "Hedef Windows bilgisayar; cihaz seç"
+                                                else -> "Komut hedefi ve cihaz seç"
                                             },
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        Text(
-                                            when (commandTarget) {
-                                                "PHONE" -> "Telefon"
-                                                "PC" -> "PC"
-                                                else -> "Oto"
-                                            },
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f),
-                                            maxLines = 1
+                                            modifier = Modifier.size(27.dp)
                                         )
                                     }
-                                    DropdownMenu(
-                                        expanded = targetMenuExpanded,
-                                        onDismissRequest = { targetMenuExpanded = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Otomatik — komuta göre seç") },
-                                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
-                                            onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Bu telefon (Android)") },
-                                            leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
-                                            onClick = { commandTarget = "PHONE"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Bilgisayarım (Windows)") },
-                                            leadingIcon = { Icon(Icons.Default.Computer, contentDescription = null) },
-                                            onClick = { commandTarget = "PC"; targetMenuExpanded = false; feedback = null }
+                                    if (targetMenuExpanded) {
+                                        AlertDialog(
+                                            onDismissRequest = { targetMenuExpanded = false },
+                                            title = { Text("Komut hedefi ve cihaz seç") },
+                                            text = {
+                                                Column(
+                                                    Modifier.fillMaxWidth()
+                                                        .heightIn(max = 430.dp)
+                                                        .verticalScroll(rememberScrollState()),
+                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                ) {
+                                                    Text(
+                                                        "Komut hedefi",
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text("Otomatik hedef")
+                                                                Text(
+                                                                    "Komuta göre telefon veya kullanılabilir bilgisayar",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                                                        trailingIcon = {
+                                                            if (commandTarget == "AUTO" && manuallySelectedPcDeviceId == null) {
+                                                                Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            commandTarget = "AUTO"
+                                                            manuallySelectedPcDeviceId = null
+                                                            selectedDeviceId = null
+                                                            targetMenuExpanded = false
+                                                            feedback = null
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text("Bu telefon (Android)")
+                                                                Text(
+                                                                    "Komutlar bu telefonda çalışır",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                                        trailingIcon = {
+                                                            if (commandTarget == "PHONE") {
+                                                                Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            commandTarget = "PHONE"
+                                                            manuallySelectedPcDeviceId = null
+                                                            selectedDeviceId = null
+                                                            targetMenuExpanded = false
+                                                            feedback = null
+                                                        }
+                                                    )
+
+                                                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                                    Text(
+                                                        "Kayıtlı Windows cihazları",
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    when {
+                                                        !signedIn -> {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Windows cihazları için giriş yap") },
+                                                                leadingIcon = { Icon(Icons.Default.Login, contentDescription = null) },
+                                                                onClick = {
+                                                                    targetMenuExpanded = false
+                                                                    navigateToPage(Page.AUTH)
+                                                                }
+                                                            )
+                                                        }
+                                                        devicesLoading -> {
+                                                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                                                            Text("Cihazlar yükleniyor…", fontSize = 12.sp)
+                                                        }
+                                                        devicesError != null -> {
+                                                            Text(
+                                                                devicesError.orEmpty(),
+                                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                                fontSize = 12.sp,
+                                                                color = MaterialTheme.colorScheme.error
+                                                            )
+                                                        }
+                                                        pcDevices.isEmpty() -> {
+                                                            Text(
+                                                                "Bu hesapta kayıtlı Windows cihazı bulunamadı. Windows uygulamasını aynı hesapla açıp tekrar dene.",
+                                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                                fontSize = 12.sp
+                                                            )
+                                                        }
+                                                        else -> pcDevices.forEach { device ->
+                                                            val isOnlineNow = if (device.id == localPcDeviceId) {
+                                                                localPcConnected
+                                                            } else {
+                                                                device.isOnlineAt(presenceNowMillis)
+                                                            }
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Column {
+                                                                        Text(
+                                                                            device.name.ifBlank { "Windows bilgisayar" },
+                                                                            maxLines = 1,
+                                                                            overflow = TextOverflow.Ellipsis
+                                                                        )
+                                                                        Text(
+                                                                            if (isOnlineNow) "Windows · Çevrimiçi" else "Windows · Çevrimdışı",
+                                                                            fontSize = 11.sp,
+                                                                            color = if (isOnlineNow) Color(0xFF49B86E)
+                                                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                        )
+                                                                    }
+                                                                },
+                                                                leadingIcon = { Icon(Icons.Default.Computer, contentDescription = null) },
+                                                                trailingIcon = {
+                                                                    if (manuallySelectedPcDeviceId == device.id) {
+                                                                        Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                                    }
+                                                                },
+                                                                onClick = {
+                                                                    commandTarget = "PC"
+                                                                    manuallySelectedPcDeviceId = device.id
+                                                                    selectedDeviceId = device.id
+                                                                    targetMenuExpanded = false
+                                                                    feedback = null
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+
+                                                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                                    Text(
+                                                        "Kayıtlı Android cihazları",
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text("Bu telefon")
+                                                                Text(
+                                                                    "Etkin oturumdaki Android cihazı",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                                        trailingIcon = {
+                                                            if (commandTarget == "PHONE") {
+                                                                Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            commandTarget = "PHONE"
+                                                            manuallySelectedPcDeviceId = null
+                                                            selectedDeviceId = null
+                                                            targetMenuExpanded = false
+                                                            feedback = null
+                                                        }
+                                                    )
+                                                    if (!signedIn) {
+                                                        Text(
+                                                            "Diğer kayıtlı cihazlar için hesabına giriş yap.",
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                            fontSize = 12.sp
+                                                        )
+                                                    } else if (otherAndroidDevices.isEmpty()) {
+                                                        Text(
+                                                            "Bu hesaba kayıtlı başka Android cihazı bulunamadı.",
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                            fontSize = 12.sp,
+                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                        )
+                                                    } else {
+                                                        otherAndroidDevices.forEach { device ->
+                                                            val isOnlineNow = device.isOnlineAt(presenceNowMillis)
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Column {
+                                                                        Text(
+                                                                            device.name.ifBlank { "Android cihaz" },
+                                                                            maxLines = 1,
+                                                                            overflow = TextOverflow.Ellipsis
+                                                                        )
+                                                                        Text(
+                                                                            (if (isOnlineNow) "Android · Çevrimiçi" else "Android · Çevrimdışı") +
+                                                                                " · Bu sürümde uzaktan Android komut alıcısı yok",
+                                                                            fontSize = 10.sp,
+                                                                            maxLines = 2,
+                                                                            overflow = TextOverflow.Ellipsis,
+                                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                        )
+                                                                    }
+                                                                },
+                                                                leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                                                enabled = false,
+                                                                onClick = {}
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            confirmButton = {
+                                                TextButton(onClick = { targetMenuExpanded = false }) {
+                                                    Text("Kapat")
+                                                }
+                                            }
                                         )
                                     }
                                 }
@@ -5120,7 +5376,6 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.6.3", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
