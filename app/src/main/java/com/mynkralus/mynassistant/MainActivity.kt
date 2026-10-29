@@ -3279,9 +3279,10 @@ private fun AssistantScreen(
 
                         transaction.update(commandReference, "status", "running")
                         transaction.update(commandReference, "startedAt", FieldValue.serverTimestamp())
-                        Pair(
+                        Triple(
                             current.getString("command").orEmpty(),
-                            current.getString("text").orEmpty()
+                            current.getString("text").orEmpty(),
+                            expiryMillis
                         )
                     }.addOnSuccessListener { claim ->
                         if (claim == null) return@addOnSuccessListener
@@ -3289,12 +3290,20 @@ private fun AssistantScreen(
                             val foregroundNow = commandContext
                                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                                 .getBoolean("android_device_foreground", false)
+                            val sameAuthenticatedAccount =
+                                FirebaseAuth.getInstance().currentUser?.uid == ownerUid
+                            val notExpiredAtExecution =
+                                claim.third > System.currentTimeMillis()
                             val commandName = claim.first
                             val rawText = claim.second
                             val commandAllowed = commandName == "text_command" &&
                                 AndroidRemoteCommandPolicy.isAllowed(rawText)
 
                             val result = when {
+                                !sameAuthenticatedAccount ->
+                                    "Hesap değişti veya oturum kapandı; komut Android cihazında çalıştırılmadı."
+                                !notExpiredAtExecution ->
+                                    "Komut çalıştırılmadan önce süresi doldu."
                                 !foregroundNow ->
                                     "Telefon uygulaması artık ön planda değil; komut çalıştırılmadı."
                                 commandName != "text_command" ->
@@ -3312,6 +3321,7 @@ private fun AssistantScreen(
                                 "açılamadı", "gerekiyor", "çalıştırılmadı"
                             ).any { result.contains(it, ignoreCase = true) }
                             val finalStatus = if (
+                                sameAuthenticatedAccount && notExpiredAtExecution &&
                                 foregroundNow && commandAllowed && !resultIndicatesFailure
                             ) "completed" else "failed"
 
