@@ -2598,7 +2598,7 @@ private fun AssistantScreen(
     var pendingPcUploadDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var pendingPcUploadDestinationPath by remember(firebaseUserId) { mutableStateOf<String?>(null) }
 
-    // A Firestore document may remain pending/running forever if the PC disconnects.
+    // A Firestore document may remain pending/running forever if a remote device disconnects.
     // Stop observing after a bounded interval and report a timeout, never success.
     LaunchedEffect(firebaseUserId, activeCommandListener, activeCommandStartedAt) {
         val startedAt = activeCommandStartedAt
@@ -2614,7 +2614,6 @@ private fun AssistantScreen(
                 activeCommandListener = null
                 activeCommandName = null
                 pcFilesLoading = false
-                val targetLabel = if (activeCommandIsAndroidTarget) "Android cihaz" else "bilgisayar"
                 feedback = recordIssue(
                     if (activeCommandIsAndroidTarget) "MYN-ANDROID-6007" else "MYN-PC-6007",
                     if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
@@ -2634,7 +2633,7 @@ private fun AssistantScreen(
     }
 
     // Firestore may delay acknowledgement while offline. Stop the spinner after 20 seconds,
-    // but retain the submission lock because the queued write could still reach the PC later.
+    // but retain the submission lock because the queued write may still reach the target later.
     LaunchedEffect(firebaseUserId, commandSubmissionInProgress, commandSubmissionStartedAt) {
         val startedAt = commandSubmissionStartedAt
         if (commandSubmissionInProgress && startedAt > 0L) {
