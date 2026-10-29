@@ -29,10 +29,6 @@ internal object DevicePresencePolicy {
     }
 
     /**
-     * A fresh Firebase Agent is the cloud route used by both Android and the web panel.
-     * Prefer it over the legacy windows-{uid} LAN bridge when both records exist.
-     */
-    /**
      * Honors a user's explicit selection while the chosen device remains registered,
      * even if it is offline. The caller must block commands to an offline target.
      * If the explicit device disappeared, fall back to the normal online cloud choice.
@@ -48,6 +44,10 @@ internal object DevicePresencePolicy {
         return manualSelection ?: preferredPcDeviceId(candidates, automaticSelectedDeviceId)
     }
 
+    /**
+     * A fresh Firebase Agent is the cloud route used by both Android and the web panel.
+     * Prefer it over the legacy windows-{uid} LAN bridge when both records exist.
+     */
     fun preferredPcDeviceId(
         candidates: List<PcDeviceRouteCandidate>,
         selectedDeviceId: String?
