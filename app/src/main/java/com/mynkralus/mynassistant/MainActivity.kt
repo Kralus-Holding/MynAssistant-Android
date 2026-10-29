@@ -2112,6 +2112,7 @@ private fun AssistantScreen(
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
     var androidCommandReceiverInFlightId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var androidCommandReceiverClaimRetryCount by remember(firebaseUserId) { mutableIntStateOf(0) }
     var androidCommandReceiverActive by remember(firebaseUserId) {
         mutableStateOf(
             commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -3254,7 +3255,7 @@ private fun AssistantScreen(
                     .whereEqualTo("ownerId", ownerUid)
                     .whereEqualTo("deviceId", ownDeviceId)
                     .whereEqualTo("status", "pending")
-                    .get()
+                    .get(com.google.firebase.firestore.Source.SERVER)
                     .addOnSuccessListener { pendingSnapshot ->
                         if (!receiverDisposed && androidCommandReceiverInFlightId == null) {
                             pendingSnapshot.documents.firstOrNull()?.let { claimAndRunAndroidCommand(it) }
@@ -3317,6 +3318,7 @@ private fun AssistantScreen(
                     processNextPendingAndroidCommand()
                     return@addOnSuccessListener
                 }
+                androidCommandReceiverClaimRetryCount = 0
                 Handler(Looper.getMainLooper()).post {
                     val foregroundNow = commandContext
                         .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -3375,12 +3377,32 @@ private fun AssistantScreen(
                         Log.w("MynAndroidCommand", "Remote Android command result could not be saved")
                     }
                 }
-            }.addOnFailureListener {
-                Log.w("MynAndroidCommand", "Remote Android command could not be claimed")
+            }.addOnFailureListener { error ->
+                Log.w("MynAndroidCommand", "Remote Android command could not be claimed", error)
                 if (androidCommandReceiverInFlightId == pendingDocument.id) {
                     androidCommandReceiverInFlightId = null
                 }
-                processNextPendingAndroidCommand()
+                val retryNumber = androidCommandReceiverClaimRetryCount + 1
+                androidCommandReceiverClaimRetryCount = retryNumber
+                if (retryNumber <= 3) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        val sameAccountStillActive =
+                            FirebaseAuth.getInstance().currentUser?.uid == ownerUid
+                        val foregroundStillActive = commandContext
+                            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            .getBoolean("android_device_foreground", false)
+                        if (!receiverDisposed && sameAccountStillActive && foregroundStillActive &&
+                            androidCommandReceiverClaimRetryCount == retryNumber
+                        ) {
+                            processNextPendingAndroidCommand()
+                        }
+                    }, retryNumber * 2_000L)
+                } else {
+                    Log.e(
+                        "MynAndroidCommand",
+                        "Remote Android command claim retries exhausted; waiting for the next queue change"
+                    )
+                }
             }
         }
 
