@@ -113,6 +113,15 @@ jobs:
           grep -q 'GmsBarcodeScanning.getClient' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'qrSignature' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           test -s app/src/test/java/com/mynkralus/mynassistant/DesktopPairingQrPayloadParserTest.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicyTest.kt
+          grep -q 'target == "ANDROID" ->' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'whereEqualTo("ownerId", ownerUid)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'whereEqualTo("deviceId", ownDeviceId)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'android_device_foreground' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'AndroidRemoteCommandPolicy.isAllowed(rawText)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
+          grep -q 'rejectionMessage' app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicyTest.kt
           grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
           grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           python3 - <<'PY'
