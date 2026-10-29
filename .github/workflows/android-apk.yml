@@ -93,6 +93,28 @@ jobs:
           grep -q '"Touchpad"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFF414141)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -Fq 'Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Icons.Default.Add' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -Fq 'else -> "Oto"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "The visible Oto target label must be replaced by the plus control."
+            exit 1
+          fi
+          grep -q 'resolveAssistantCommandTarget(commandTarget, computerPrefix != null)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
+          grep -q 'DevicePresencePolicy.selectedPcDeviceId' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'devicesRefreshRevision' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q '12_000L' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'ANDROID_SETTINGS_CATEGORIES.forEach' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'displayDeviceName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'play-services-code-scanner:16.1.0' app/build.gradle.kts
+          grep -q 'com.google.mlkit.vision.DEPENDENCIES' app/src/main/AndroidManifest.xml
+          grep -q 'MYNASSISTANT-PAIR' app/src/main/java/com/mynkralus/mynassistant/DesktopPairingQrPayload.kt
+          grep -q 'GmsBarcodeScanning.getClient' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'qrSignature' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/DesktopPairingQrPayloadParserTest.kt
+          grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
+          grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           python3 - <<'PY'
           from pathlib import Path
           source = Path("app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt").read_text(encoding="utf-8")
