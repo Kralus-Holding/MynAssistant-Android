@@ -35,3 +35,31 @@ internal fun remoteCommandStatusMessage(status: String): String =
         "running" -> "Windows Agent komutu aldı ve uyguluyor..."
         else -> "Windows komut durumu: $status"
     }
+
+
+/**
+ * Uses platform-appropriate wording for the shared Firestore command queue.
+ * The Windows route keeps its existing wording.
+ */
+internal fun remoteCommandStatusMessageForTarget(status: String, isAndroidTarget: Boolean): String =
+    when {
+        isAndroidTarget && status.equals("pending", ignoreCase = true) ->
+            "Komut seçili Android cihazının alması için kuyrukta bekliyor."
+        isAndroidTarget && status.equals("running", ignoreCase = true) ->
+            "Android cihaz komutu çalıştırıyor..."
+        else -> remoteCommandStatusMessage(status)
+    }
+
+internal fun remoteCommandTimeoutMessage(
+    isAndroidTarget: Boolean,
+    submissionTimeout: Boolean
+): String = when {
+    isAndroidTarget && submissionTimeout ->
+        "Android komutunun sunucu tarafından onaylanması 20 saniyeyi geçti. İstek durumu belirsiz; yinelenen komut oluşmaması için yeni istek kilitlendi. İnternet bağlantısını kontrol et; ilk istek daha sonra tamamlanabilir."
+    isAndroidTarget ->
+        "Android cihaz üzerinden 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını hedef cihazda doğrula."
+    submissionTimeout ->
+        "Komutun sunucu tarafından onaylanması 20 saniyeyi geçti. İstek durumu belirsiz; yinelenen komut oluşmaması için yeni istek kilitlendi. İnternet bağlantısını kontrol et; ilk istek daha sonra tamamlanabilir."
+    else ->
+        "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula."
+}
