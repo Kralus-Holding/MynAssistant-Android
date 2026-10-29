@@ -2684,7 +2684,14 @@ private fun AssistantScreen(
                 commandSubmissionStartedAt = 0L
                 commandSubmissionTimedOut = false
             }
-            feedback = message
+            feedback = if (
+                commandId != null &&
+                devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
+            ) {
+                "Komut seçtiğin Android cihazına iletildi; çalıştırma sonucu bekleniyor."
+            } else {
+                message
+            }
             if (commandId != null) {
                 val registration = FirebaseFirestore.getInstance()
                     .collection("commands")
