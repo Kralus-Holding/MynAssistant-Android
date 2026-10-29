@@ -9,7 +9,7 @@ Korumalı dallar: `main` ve PR #32'nin kaynak dalı değiştirilmedi. Hiçbir PR
 
 Bu dalda kaynak değişiklikleri yapıldı; ancak projenin tamamı **tamamlandı** olarak işaretlenemez. Android Gradle derlemesi henüz çalışmış değil: son kontrol edilen CI denemesi runner tahsisinden önce başarısız oldu (`runner_id=0`, boş `runner_name`, `steps=[]`). Yerel ortamda `gradle`, Android SDK araçları ve `adb` bulunmadığından tam Android build, Compose/UI testleri veya gerçek cihaz testi bu çalışma ortamında gerçekleştirilemedi.
 
-Bağımsız olarak çalıştırılan Kotlin politika/yardımcı kod smoke testi **38/38 assertion** ile geçti. Bu, tam Android projesinin derlendiği anlamına gelmez. `MainActivity.kt` için statik parantez/ayraç denetimi geçti ve yinelenen import bulunmadı.
+Bağımsız olarak çalıştırılan Kotlin politika/yardımcı kod smoke testi **41/41 assertion** ile geçti. Bu, tam Android projesinin derlendiği anlamına gelmez. `MainActivity.kt` için statik parantez/ayraç denetimi geçti ve yinelenen import bulunmadı.
 
 ### Durum anlamları
 
@@ -126,8 +126,9 @@ Orijinal görsel dosyaları değiştirilmedi.
 |---|---|---|
 | `MainActivity.kt` statik ayraç/parantez kontrolü | BAŞARILI | Açık/uyumsuz parantez yok. Bu Kotlin derlemesi değildir. |
 | Yinelenen import taraması | BAŞARILI | Son taramada yinelenen import yok. |
+| Workflow kaynak-kontrol ifadelerinin statik ön kontrolü | BAŞARILI — 67/67 | 67 dosya içerik koşulu mevcut dallardaki kaynak/dosya metniyle karşılaştırıldı; bu GitHub Actions çalıştırması değildir. |
 | Kaynak sabit e-posta taraması | BAŞARILI (statik) | Uygulamanın taranan MainActivity kaynağında sabit geliştirici/test e-posta adresi bulunmadı. Hesap izolasyonu runtime testi değildir. |
-| İzole Kotlin policy smoke suite | BAŞARILI — 38/38 | `kotlinc` ile yalnız politika/yardımcı dosyalar ve smoke harness derlenip çalıştırıldı; tam Android projesi değildi. |
+| İzole Kotlin policy smoke suite | BAŞARILI — 41/41 | `kotlinc` ile yalnız politika/yardımcı dosyalar ve smoke harness derlenip çalıştırıldı; tam Android projesi değildi. |
 | Android `testDebugUnitTest assembleDebug` CI | DOĞRULANAMADI | Run #548 deneme 2: runner_id=0, runner_name boş, steps=0; kaynak derleme adımına ulaşmadı. |
 | Android/Windows gerçek cihaz testi | DOĞRULANAMADI | Bu oturumda gerçek telefon/PC üzerinde işlem yapılamadı. |
 | APK native ABI, imza, SHA-256, kurulum | DOĞRULANAMADI | Bu dal için doğrulanmış 0.6.3 APK artefaktı oluşmadı. |
