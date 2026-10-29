@@ -2104,7 +2104,7 @@ private fun AssistantScreen(
         }
     }
 
-    var commandTarget by remember { mutableStateOf("AUTO") }
+    var commandTarget by remember(firebaseUserId) { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
     // Explicit per-device choices must not silently fall back to a different target.
     var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
