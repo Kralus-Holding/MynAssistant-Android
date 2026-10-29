@@ -133,6 +133,10 @@ jobs:
           test -s app/src/test/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicyTest.kt
           grep -q 'AndroidCommandClaimRetryPolicy.delayMillis(retryNumber)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'get(com.google.firebase.firestore.Source.SERVER)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'remoteCommandStatusMessageForTarget(status, activeCommandIsAndroidTarget)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = true)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MYN-ANDROID-6007' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'timeoutMessagesAreSpecificToTargetPlatformAndPhase' app/src/test/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicyTest.kt
           grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
           grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           python3 - <<'PY'
