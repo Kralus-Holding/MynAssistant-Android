@@ -3330,22 +3330,18 @@ private fun AssistantScreen(
                     val commandAllowed = commandName == "text_command" &&
                         AndroidRemoteCommandPolicy.isAllowed(rawText)
 
-                    val result = when {
-                        receiverDisposed || !sameAuthenticatedAccount ->
-                            "Hesap veya alıcı oturumu değişti; komut Android cihazında çalıştırılmadı."
-                        !notExpiredAtExecution ->
-                            "Komut çalıştırılmadan önce süresi doldu."
-                        !foregroundNow ->
-                            "Telefon uygulaması artık ön planda değil; komut çalıştırılmadı."
-                        commandName != "text_command" ->
-                            "Bu Android cihazı bu komut türünü desteklemiyor."
-                        !commandAllowed ->
-                            AndroidRemoteCommandPolicy.rejectionMessage()
-                        else -> runCatching {
-                            executeAndroidTextCommand(commandContext, rawText)
-                        }.getOrElse {
-                            "Telefon komutu çalıştırılamadı. Cihazın bağlantısını ve izinlerini kontrol et."
-                        }
+                    val executionRejection = AndroidRemoteCommandExecutionPolicy.rejectionMessage(
+                        receiverDisposed = receiverDisposed,
+                        sameAuthenticatedAccount = sameAuthenticatedAccount,
+                        notExpiredAtExecution = notExpiredAtExecution,
+                        foreground = foregroundNow,
+                        commandName = commandName,
+                        commandAllowed = commandAllowed
+                    )
+                    val result = executionRejection ?: runCatching {
+                        executeAndroidTextCommand(commandContext, rawText)
+                    }.getOrElse {
+                        "Telefon komutu çalıştırılamadı. Cihazın bağlantısını ve izinlerini kontrol et."
                     }
                     val resultIndicatesFailure = listOf(
                         "henüz desteklenmiyor", "desteklenmiyor", "bulunamadı",
@@ -3353,8 +3349,14 @@ private fun AssistantScreen(
                         "oturumu değişti"
                     ).any { result.contains(it, ignoreCase = true) }
                     val finalStatus = if (
-                        !receiverDisposed && sameAuthenticatedAccount && notExpiredAtExecution &&
-                        foregroundNow && commandAllowed && !resultIndicatesFailure
+                        AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted(
+                            receiverDisposed = receiverDisposed,
+                            sameAuthenticatedAccount = sameAuthenticatedAccount,
+                            notExpiredAtExecution = notExpiredAtExecution,
+                            foreground = foregroundNow,
+                            commandAllowed = commandAllowed,
+                            resultIndicatesFailure = resultIndicatesFailure
+                        )
                     ) "completed" else "failed"
 
                     commandReference.update(
