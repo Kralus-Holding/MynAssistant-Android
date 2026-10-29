@@ -59,6 +59,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -134,6 +135,7 @@ import kotlinx.coroutines.delay
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
+private val ANDROID_SETTINGS_CATEGORIES = listOf("Genel", "Agent", "Hesap", "İzinler", "Eklentiler", "Başlangıç", "Hata günlükleri", "Kısayollar")
 private const val PREFS = "mynassistant_prefs"
 private const val GOOGLE_ACCOUNTS_KEY = "saved_google_accounts"
 private const val ANDROID_INSTALLATION_ID_KEY = "android_installation_id"
@@ -2048,6 +2050,7 @@ private fun AssistantScreen(
     onWakeCommandConsumed: () -> Unit = {}
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
+    var settingsCategory by remember { mutableStateOf("Genel") }
     val pageHistory = remember { mutableStateListOf<Page>() }
     var drawer by remember { mutableStateOf(false) }
     var showExitConfirmation by remember { mutableStateOf(false) }
@@ -4136,16 +4139,38 @@ private fun AssistantScreen(
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
                         Page.SETTINGS -> {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ANDROID_SETTINGS_CATEGORIES.forEach { category ->
+                                    FilterChip(
+                                        selected = settingsCategory == category,
+                                        onClick = { settingsCategory = category },
+                                        label = { Text(category, maxLines = 1) }
+                                    )
+                                }
+                            }
+                        Page.SETTINGS -> {
+                            if (settingsCategory == "Genel") {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
                                 Switch(checked = dark, onCheckedChange = { toggleTheme() })
                             }
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
+                            }
+                            if (settingsCategory == "İzinler") {
                             Text(
                                 "Rehber izni verildiğinde, bu telefona senkronize edilmiş Google, SIM ve diğer kişi hesaplarındaki kayıtlar aranır.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
                             )
+                            }
+
+                            if (settingsCategory == "Hesap") {
+                            Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -4224,6 +4249,8 @@ private fun AssistantScreen(
                                     )
                                 }
                             }
+                            }
+                            if (settingsCategory == "Başlangıç") {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(24.dp),
@@ -4401,6 +4428,10 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+                            }
+                            if (settingsCategory == "Hata günlükleri") {
+                            OutlinedButton(
+                                onClick = { navigateToPage(Page.DIAGNOSTICS) },
                             OutlinedButton(
                                 onClick = { navigateToPage(Page.DIAGNOSTICS) },
                                 modifier = Modifier.fillMaxWidth()
@@ -4409,7 +4440,11 @@ private fun AssistantScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Hata kayıtları")
                             }
+                            }
+                            if (settingsCategory == "İzinler") {
                             OutlinedButton(
+                                onClick = {
+                                    val missing = requiredRuntimePermissionList()                            OutlinedButton(
                                 onClick = {
                                     val missing = requiredRuntimePermissionList().filter { permission ->
                                         androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
@@ -4427,7 +4462,11 @@ private fun AssistantScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Eksik izinleri iste")
                             }
+                            }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+                            if (settingsCategory == "Eklentiler") {
+                            HorizontalDivider()
+                            Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             HorizontalDivider()
                             Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -4449,6 +4488,10 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+                            }
+                            if (settingsCategory == "Agent") {
+                            HorizontalDivider()
+                            Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             HorizontalDivider()
                             Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(
@@ -4490,6 +4533,38 @@ private fun AssistantScreen(
                                         Spacer(Modifier.width(8.dp))
                                         Text("Cihazlarımı gör")
                                     }
+                                }
+                            }
+                            }
+                            if (settingsCategory == "Kısayollar") {
+                                Text(
+                                    "Sık kullanılan bölümlere buradan geçebilirsin.",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                )
+                                OutlinedButton(
+                                    onClick = { navigateToPage(Page.HOME) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Home, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Ana sayfa ve komut alanı")
+                                }
+                                OutlinedButton(
+                                    onClick = { navigateToPage(Page.DEVICES) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Devices, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Cihazlarım")
+                                }
+                                OutlinedButton(
+                                    onClick = { navigateToPage(Page.REMOTE) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.SettingsRemote, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("PC Kumandası")
                                 }
                             }
                         }
