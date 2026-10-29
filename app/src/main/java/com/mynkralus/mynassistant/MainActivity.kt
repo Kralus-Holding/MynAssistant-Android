@@ -2097,8 +2097,9 @@ private fun AssistantScreen(
 
     var commandTarget by remember { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
-    // An explicit device choice must not silently fall back to a different PC.
+    // Explicit per-device choices must not silently fall back to a different target.
     var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var manuallySelectedAndroidDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
