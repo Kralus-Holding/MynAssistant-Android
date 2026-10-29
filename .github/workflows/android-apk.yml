@@ -125,6 +125,10 @@ jobs:
           grep -q 'AndroidRemoteCommandPolicy.isAllowed(rawText)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           grep -q 'rejectionMessage' app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicyTest.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt
+          grep -q 'AndroidRemoteCommandExecutionPolicy.rejectionMessage' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
           grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           python3 - <<'PY'
