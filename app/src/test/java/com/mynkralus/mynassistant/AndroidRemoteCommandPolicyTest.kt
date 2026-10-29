@@ -31,6 +31,13 @@ class AndroidRemoteCommandPolicyTest {
     }
 
     @Test
+    fun rejectionMessageExplainsWhySensitiveCommandsAreBlocked() {
+        val message = AndroidRemoteCommandPolicy.rejectionMessage()
+        assertTrue(message.contains("yerel onay"))
+        assertTrue(message.contains("Arama, mesaj, kamera"))
+    }
+
+    @Test
     fun rejectsCameraGalleryAndArbitraryCommands() {
         assertFalse(AndroidRemoteCommandPolicy.isAllowed("fotoğraf çek"))
         assertFalse(AndroidRemoteCommandPolicy.isAllowed("galeri aç"))
