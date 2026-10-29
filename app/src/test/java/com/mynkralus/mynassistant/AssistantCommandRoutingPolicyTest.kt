@@ -10,6 +10,12 @@ class AssistantCommandRoutingPolicyTest {
     }
 
     @Test
+    fun explicitRemoteAndroidTargetDoesNotDependOnComputerPrefix() {
+        assertEquals("ANDROID", resolveAssistantCommandTarget("ANDROID", hasComputerPrefix = true))
+        assertEquals("ANDROID", resolveAssistantCommandTarget("ANDROID", hasComputerPrefix = false))
+    }
+
+    @Test
     fun explicitPcTargetDoesNotDependOnPrefix() {
         assertEquals("PC", resolveAssistantCommandTarget("PC", hasComputerPrefix = false))
     }
