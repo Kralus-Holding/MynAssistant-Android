@@ -3145,7 +3145,7 @@ private fun AssistantScreen(
                 it.id.startsWith("android-", ignoreCase = true)
             )
     }
-    val currentAndroidDeviceId = remember(firebaseUserId) {
+    val currentAndroidDeviceId = remember(firebaseUserId, devices) {
         val activeUid = firebaseUserId.orEmpty()
         val installationId = commandContext
             .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
