@@ -4266,6 +4266,14 @@ private fun AssistantScreen(
                                     )
                                 }
                             }
+                            OutlinedButton(
+                                onClick = { navigateToPage(if (signedIn) Page.LOGIN else Page.AUTH) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.AccountCircle, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Hesap ve profil ayarları")
+                            }
                             }
                             if (settingsCategory == "Başlangıç") {
                             Card(
