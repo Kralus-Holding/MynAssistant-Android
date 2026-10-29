@@ -25,6 +25,9 @@ class AndroidRemoteCommandPolicyTest {
         assertFalse(AndroidRemoteCommandPolicy.isAllowed("WhatsApp'tan mesaj gönder"))
         assertFalse(AndroidRemoteCommandPolicy.isAllowed("numara 5551234567 ara"))
         assertFalse(AndroidRemoteCommandPolicy.isAllowed("SMS gönder"))
+        assertFalse(AndroidRemoteCommandPolicy.isAllowed("Gmail aç"))
+        assertFalse(AndroidRemoteCommandPolicy.isAllowed("Telegram aç"))
+        assertFalse(AndroidRemoteCommandPolicy.isAllowed("Instagram aç"))
     }
 
     @Test
