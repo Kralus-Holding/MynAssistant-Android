@@ -5399,7 +5399,7 @@ private fun AssistantScreen(
                                                                         )
                                                                         Text(
                                                                             (if (isOnlineNow) "Android · Çevrimiçi" else "Android · Çevrimdışı") +
-                                                                                " · Temel ses, ayar ve uygulama açma komutları",
+                                                                                " · MynAssistant açıkken temel ses/ayar/uygulama komutları",
                                                                             fontSize = 10.sp,
                                                                             maxLines = 2,
                                                                             overflow = TextOverflow.Ellipsis,
