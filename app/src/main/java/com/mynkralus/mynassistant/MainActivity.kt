@@ -3335,12 +3335,35 @@ private fun AssistantScreen(
         } else {
             null
         }
+        val manualAndroidSelection = target == "ANDROID" && !manuallySelectedAndroidDeviceId.isNullOrBlank()
+        val manualAndroidDevice = if (manualAndroidSelection) {
+            androidDevices.firstOrNull { it.id == manuallySelectedAndroidDeviceId }
+        } else {
+            null
+        }
         val contactAction = contactActionKind(textCommand)
         val phoneNumber = extractPhoneNumber(textCommand)
         val relationshipAssignment = parseRelationshipAliasAssignment(textCommand)
 
         when {
             textCommand.isBlank() -> feedback = "Önce bir komut yaz."
+            target == "ANDROID" && !signedIn ->
+                feedback = "Uzak Android komutu göndermek için aynı MynAssistant hesabında oturum aç."
+            target == "ANDROID" && manualAndroidDevice == null ->
+                feedback = "Seçtiğin Android cihaz artık bu hesapta kayıtlı görünmüyor. Cihaz listesini yenileyip yeniden seç."
+            target == "ANDROID" && !manualAndroidDevice.isOnlineAt(presenceNowMillis) ->
+                feedback = "Seçtiğin Android cihaz çevrimdışı. Komut başka bir cihaza yönlendirilmedi."
+            target == "ANDROID" && !AndroidRemoteCommandPolicy.isAllowed(textCommand) ->
+                feedback = AndroidRemoteCommandPolicy.rejectionMessage()
+            target == "ANDROID" -> {
+                val targetDevice = manualAndroidDevice
+                if (targetDevice == null) {
+                    feedback = "Önce gerçek bir Android cihaz seç."
+                } else {
+                    feedback = "Komut seçtiğin Android cihazına gönderiliyor..."
+                    sendTrackedRemoteCommand(targetDevice.id, "text_command", mapOf("text" to textCommand))
+                }
+            }
             target == "PHONE" && relationshipAssignment != null -> {
                 val missing = if (
                     androidx.core.content.ContextCompat.checkSelfPermission(
@@ -5010,6 +5033,8 @@ private fun AssistantScreen(
                                             Icons.Default.Add,
                                             contentDescription = when {
                                                 commandTarget == "PHONE" -> "Hedef bu Android telefonu; cihaz seç"
+                                                commandTarget == "ANDROID" && manuallySelectedAndroidDeviceId != null ->
+                                                    "Hedef seçili uzak Android cihazı; cihaz değiştir"
                                                 commandTarget == "PC" && manuallySelectedPcDeviceId != null ->
                                                     "Hedef seçili Windows cihazı; cihaz değiştir"
                                                 commandTarget == "PC" -> "Hedef Windows bilgisayar; cihaz seç"
@@ -5056,6 +5081,7 @@ private fun AssistantScreen(
                                                         onClick = {
                                                             commandTarget = "AUTO"
                                                             manuallySelectedPcDeviceId = null
+                                                            manuallySelectedAndroidDeviceId = null
                                                             selectedDeviceId = null
                                                             targetMenuExpanded = false
                                                             feedback = null
@@ -5081,6 +5107,7 @@ private fun AssistantScreen(
                                                         onClick = {
                                                             commandTarget = "PHONE"
                                                             manuallySelectedPcDeviceId = null
+                                                            manuallySelectedAndroidDeviceId = null
                                                             selectedDeviceId = null
                                                             targetMenuExpanded = false
                                                             feedback = null
@@ -5162,6 +5189,7 @@ private fun AssistantScreen(
                                                                 onClick = {
                                                                     commandTarget = "PC"
                                                                     manuallySelectedPcDeviceId = device.id
+                                                                    manuallySelectedAndroidDeviceId = null
                                                                     selectedDeviceId = device.id
                                                                     targetMenuExpanded = false
                                                                     feedback = null
@@ -5197,6 +5225,7 @@ private fun AssistantScreen(
                                                         onClick = {
                                                             commandTarget = "PHONE"
                                                             manuallySelectedPcDeviceId = null
+                                                            manuallySelectedAndroidDeviceId = null
                                                             selectedDeviceId = null
                                                             targetMenuExpanded = false
                                                             feedback = null
@@ -5228,7 +5257,7 @@ private fun AssistantScreen(
                                                                         )
                                                                         Text(
                                                                             (if (isOnlineNow) "Android · Çevrimiçi" else "Android · Çevrimdışı") +
-                                                                                " · Bu sürümde uzaktan Android komut alıcısı yok",
+                                                                                " · Temel ses, ayar ve uygulama açma komutları",
                                                                             fontSize = 10.sp,
                                                                             maxLines = 2,
                                                                             overflow = TextOverflow.Ellipsis,
@@ -5237,8 +5266,19 @@ private fun AssistantScreen(
                                                                     }
                                                                 },
                                                                 leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
-                                                                enabled = false,
-                                                                onClick = {}
+                                                                trailingIcon = {
+                                                                    if (commandTarget == "ANDROID" && manuallySelectedAndroidDeviceId == device.id) {
+                                                                        Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                                    }
+                                                                },
+                                                                onClick = {
+                                                                    commandTarget = "ANDROID"
+                                                                    manuallySelectedAndroidDeviceId = device.id
+                                                                    manuallySelectedPcDeviceId = null
+                                                                    selectedDeviceId = null
+                                                                    targetMenuExpanded = false
+                                                                    feedback = null
+                                                                }
                                                             )
                                                         }
                                                     }
