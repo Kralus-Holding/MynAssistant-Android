@@ -3,6 +3,9 @@ name: Android APK
 on:
   push:
     branches: [ "main", "fix/android-pcfiles-list-files", "fix/android-063-native-library-runtime", "fix/android-full-audit-10-parts" ]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   pull_request:
     branches: [ "main", "fix/android-pcfiles-list-files" ]
   workflow_dispatch:
