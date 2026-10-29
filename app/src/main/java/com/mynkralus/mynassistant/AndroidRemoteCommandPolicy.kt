@@ -19,8 +19,7 @@ internal object AndroidRemoteCommandPolicy {
         "arama ekranını aç", "telefon uygulamasını aç", "arama aç", "telefonu aç",
         "chrome aç", "tarayıcı aç", "internet aç", "google aç",
         "youtube aç", "youtube'u aç", "youtubeu aç",
-        "play store aç", "play store'u aç", "play storeu aç",
-        "instagram aç", "instagramı aç", "telegram aç", "telegramı aç", "gmail aç", "gmail'i aç", "gmaili aç"
+        "play store aç", "play store'u aç", "play storeu aç"
     )
 
     fun isAllowed(rawCommand: String): Boolean {
