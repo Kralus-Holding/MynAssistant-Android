@@ -3153,23 +3153,17 @@ private fun AssistantScreen(
     }
     val otherAndroidDevices = androidDevices.filter { it.id != currentAndroidDeviceId }
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
-    val manuallySelectedPcStillRegistered = manuallySelectedPcDeviceId?.let { chosenId ->
-        pcDevices.any { it.id == chosenId }
-    } == true
-    val selectedPcId = if (manuallySelectedPcStillRegistered) {
-        manuallySelectedPcDeviceId
-    } else {
-        DevicePresencePolicy.preferredPcDeviceId(
-            pcDevices.map { device ->
-                PcDeviceRouteCandidate(
-                    id = device.id,
-                    connectionMode = device.connectionMode,
-                    isOnline = device.isOnlineAt(presenceNowMillis)
-                )
-            },
-            selectedDeviceId
-        )
-    }
+    val selectedPcId = DevicePresencePolicy.selectedPcDeviceId(
+        manuallySelectedPcDeviceId,
+        pcDevices.map { device ->
+            PcDeviceRouteCandidate(
+                id = device.id,
+                connectionMode = device.connectionMode,
+                isOnline = device.isOnlineAt(presenceNowMillis)
+            )
+        },
+        selectedDeviceId
+    )
     val selectedDevice = pcDevices.firstOrNull { it.id == selectedPcId }
 
     // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
