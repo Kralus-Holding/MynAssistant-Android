@@ -3294,11 +3294,7 @@ private fun AssistantScreen(
     val runAssistantCommand: (String) -> Unit = { rawCommand ->
         val textCommand = rawCommand.trim()
         val computerPrefix = COMPUTER_COMMAND_PREFIX.find(textCommand)
-        val target = when (commandTarget) {
-            "PHONE" -> "PHONE"
-            "PC" -> "PC"
-            else -> if (computerPrefix != null) "PC" else "PHONE"
-        }
+        val target = resolveAssistantCommandTarget(commandTarget, computerPrefix != null)
         val routedText = if (target == "PC" && computerPrefix != null) {
             textCommand.substring(computerPrefix.range.last + 1).trim()
         } else {
