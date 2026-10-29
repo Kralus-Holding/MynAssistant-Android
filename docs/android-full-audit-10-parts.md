@@ -32,7 +32,7 @@ Bağımsız olarak çalıştırılan Kotlin politika/uyandırma/dosya aktarımı
 | 7. Windows eşleştirmesi ve komut yönlendirme | İmzalı QR biçim ayrıştırıcısı, QR tarama/iptal/hata durumları, imza ve expiry alanlarını sunucuya gönderme eklendi. HTTP 409 hesap uyuşmazlığı için açıklayıcı hata politikası eklendi. | QR/HTTP politikaları izole test edildi. Sunucu PR #10 ve Windows PR #19 taslak/açık olduğundan canlı HMAC/expiry/tek kullanımlık kod ve gerçek çift cihaz eşleştirmesi doğrulanmadı. | KISMEN TAMAMLANDI |
 | 8. Sesli asistan ve native kütüphaneler | PR #32'deki LinkageError/ `MYN-WAKE-8033` tanılama yolu ve test korundu. ABI kontrolü workflow'da mevcut. | Tam 0.6.3 APK kurulmadı; native kütüphane paketlemesi ve “Hey Meyene” gerçek telefon doğrulaması yapılamadı. | DOĞRULANAMADI |
 | 9. PcFiles ve önceki özellikler | Mevcut dosya listeleme/indirme/yükleme/ZIP, boyut ve SHA-256 sınırları korunacak şekilde incelendi. | Kaynak ve mevcut sözleşme testleri görüldü; tam Gradle suite ve gerçek Windows dosya aktarım testi çalışmadı. | KISMEN TAMAMLANDI |
-| 10. Son paket ve APK teslimi | Sürüm hedefi 0.6.3 / versionCode 40 olarak dalda mevcut. Workflow, sürüm, imza, APK ZIP bütünlüğü, ABI ve SHA-256 kontrollerini içeriyor. | Run #566 / tekrar deneme 2, runner başlamadan başarısız oldu; yeni 0.6.3 APK/Release kanıtı yok. Eski 0.6.1/0.6.2 APK'ları 0.6.3 adıyla sunulmadı. | BLOKE — APK ÜRETİMİ DOĞRULANAMADI |
+| 10. Son paket ve APK teslimi | Sürüm hedefi 0.6.3 / versionCode 40 olarak dalda mevcut. Workflow, sürüm, imza, APK ZIP bütünlüğü, ABI ve SHA-256 kontrollerini içeriyor. | Run #567 / tekrar deneme 2, runner başlamadan başarısız oldu; yeni 0.6.3 APK/Release kanıtı yok. Eski 0.6.1/0.6.2 APK'ları 0.6.3 adıyla sunulmadı. | BLOKE — APK ÜRETİMİ DOĞRULANAMADI |
 
 ## 2. Gereksinim envanteri
 
@@ -144,14 +144,14 @@ Orijinal görsel dosyaları değiştirilmedi.
 | Android/Windows hedefe özel durum ve timeout geri bildirimi | BAŞARILI — 4/4 kaynak kapısı | Test ve CI guard'ları hedefe özel metin/politika kullanımını doğrular; gerçek UI testi değildir. |
 | Kaynak sabit e-posta taraması | BAŞARILI (statik) | Uygulamanın taranan MainActivity kaynağında sabit geliştirici/test e-posta adresi bulunmadı. Hesap izolasyonu runtime testi değildir. |
 | İzole Kotlin policy smoke suite | BAŞARILI — 134/134 | `kotlinc` ile yalnız politika/yardımcı dosyalar ve smoke harness derlenip çalıştırıldı; tam Android projesi değildi. |
-| Android `testDebugUnitTest assembleDebug` CI | DOĞRULANAMADI | Run #566 deneme 2: runner_id=0, runner_name boş, steps=0; kaynak derleme adımına ulaşmadı. |
+| Android `testDebugUnitTest assembleDebug` CI | DOĞRULANAMADI | Run #567 deneme 2: runner_id=0, runner_name boş, steps=0; kaynak derleme adımına ulaşmadı. |
 | Android/Windows gerçek cihaz testi | DOĞRULANAMADI | Bu oturumda gerçek telefon/PC üzerinde işlem yapılamadı. |
 | APK native ABI, imza, SHA-256, kurulum | DOĞRULANAMADI | Bu dal için doğrulanmış 0.6.3 APK artefaktı oluşmadı. |
 | Canlı Render eşleştirme / server HMAC | DOĞRULANAMADI | İlgili server PR merge/deploy kanıtı yok. |
 
 ### CI kanıtı
 
-Son kontrol edilen Actions run: [Run #566](https://github.com/Kralus-Holding/MynAssistant-Android/actions/runs/40971731235). Run #566 de `runner_id=0`, boş runner adı ve sıfır step ile başarısız oldu. Bu kayıt Kotlin/Gradle hatası göstermiyor; runner tahsis engelinin devam ettiğini gösteriyor.
+Son kontrol edilen Actions run: [Run #567](https://github.com/Kralus-Holding/MynAssistant-Android/actions/runs/40971988685). Run #567 de `runner_id=0`, boş runner adı ve sıfır step ile başarısız oldu. Bu kayıt Kotlin/Gradle hatası göstermiyor; runner tahsis engelinin devam ettiğini gösteriyor.
 
 ## 6. Açık riskler ve bloke olanlar
 
