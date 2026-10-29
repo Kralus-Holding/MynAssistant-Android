@@ -46,6 +46,30 @@ class RemoteCommandSubmissionPolicyTest {
     }
 
     @Test
+    fun commandStatusUsesCorrectPlatformWording() {
+        assertEquals(
+            "Komut seçili Android cihazının alması için kuyrukta bekliyor.",
+            remoteCommandStatusMessageForTarget("pending", true)
+        )
+        assertEquals(
+            "Android cihaz komutu çalıştırıyor...",
+            remoteCommandStatusMessageForTarget("running", true)
+        )
+        assertEquals(
+            "Komut kuyruğa alındı; Windows Agent tarafından alınması bekleniyor.",
+            remoteCommandStatusMessageForTarget("pending", false)
+        )
+    }
+
+    @Test
+    fun timeoutMessagesAreSpecificToTargetPlatformAndPhase() {
+        assertTrue(remoteCommandTimeoutMessage(true, false).contains("Android cihaz üzerinden"))
+        assertTrue(remoteCommandTimeoutMessage(true, true).contains("Android komutunun"))
+        assertTrue(remoteCommandTimeoutMessage(false, false).contains("Bilgisayardan"))
+        assertTrue(remoteCommandTimeoutMessage(false, true).contains("Komutun sunucu tarafından"))
+    }
+
+    @Test
     fun commandValidityWindowIsBoundedToOneMinute() {
         assertEquals(60_000L, REMOTE_COMMAND_VALIDITY_MILLIS)
     }
