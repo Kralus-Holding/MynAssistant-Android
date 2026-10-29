@@ -3400,6 +3400,7 @@ private fun AssistantScreen(
             registration.remove()
             androidCommandReceiverInFlightId = null
         }
+    }
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val selectedPcId = DevicePresencePolicy.selectedPcDeviceId(
         manuallySelectedPcDeviceId,
