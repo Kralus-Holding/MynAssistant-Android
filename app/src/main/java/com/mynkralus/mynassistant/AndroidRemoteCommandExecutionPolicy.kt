@@ -41,3 +41,23 @@ internal object AndroidRemoteCommandExecutionPolicy {
             commandAllowed &&
             !resultIndicatesFailure
 }
+
+/**
+ * Detects user-facing error results before a queued Android command is marked completed.
+ * Keep failure wording centralized so Turkish verb forms such as "çalıştırılamadı"
+ * cannot accidentally be reported as successful.
+ */
+internal fun androidCommandResultIndicatesFailure(result: String): Boolean =
+    listOf(
+        "henüz desteklenmiyor",
+        "desteklenmiyor",
+        "bulunamadı",
+        "açılamadı",
+        "başlatılamadı",
+        "okunamadı",
+        "gerekiyor",
+        "çalıştırılmadı",
+        "çalıştırılamadı",
+        "süresi doldu",
+        "oturumu değişti"
+    ).any { result.contains(it, ignoreCase = true) }
