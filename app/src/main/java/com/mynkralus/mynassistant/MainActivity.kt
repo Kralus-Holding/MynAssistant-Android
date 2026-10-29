@@ -2618,7 +2618,7 @@ private fun AssistantScreen(
                 feedback = recordIssue(
                     if (activeCommandIsAndroidTarget) "MYN-ANDROID-6007" else "MYN-PC-6007",
                     if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
-                    "$targetLabel üzerinden 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını hedef cihazda doğrula.",
+                    remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = false),
                     "",
                     "REMOTE_COMMAND_TIMEOUT; platform=" +
                         (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
@@ -2652,8 +2652,7 @@ private fun AssistantScreen(
                 feedback = recordIssue(
                     if (activeCommandIsAndroidTarget) "MYN-ANDROID-6009" else "MYN-PC-6009",
                     if (activeCommandIsAndroidTarget) "Android komutu" else "Bilgisayar komutu",
-                    (if (activeCommandIsAndroidTarget) "Android komutunun" else "Bilgisayar komutunun") +
-                        " sunucu tarafından onaylanması 20 saniyeyi geçti. İstek durumu belirsiz; yinelenen komut oluşmaması için yeni istek kilitlendi. İnternet bağlantısını kontrol et; ilk istek daha sonra tamamlanabilir.",
+                    remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = true),
                     "",
                     "COMMAND_SUBMISSION_TIMEOUT; platform=" +
                         (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
@@ -2753,16 +2752,10 @@ private fun AssistantScreen(
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
                             when (status) {
-                                "pending" -> feedback = if (activeCommandIsAndroidTarget) {
-                                    "Komut seçili Android cihazının alması için kuyrukta bekliyor."
-                                } else {
-                                    remoteCommandStatusMessage(status)
-                                }
-                                "running" -> feedback = if (activeCommandIsAndroidTarget) {
-                                    "Android cihaz komutu çalıştırıyor..."
-                                } else {
-                                    remoteCommandStatusMessage(status)
-                                }
+                                "pending" -> feedback =
+                                    remoteCommandStatusMessageForTarget(status, activeCommandIsAndroidTarget)
+                                "running" -> feedback =
+                                    remoteCommandStatusMessageForTarget(status, activeCommandIsAndroidTarget)
                                 "completed" -> {
                                     if (targetCommandName == "list_files") {
                                         try {
