@@ -3565,17 +3565,19 @@ private fun AssistantScreen(
                         }
                     }
                 } else {
-                    Text(when (page) {
-                        Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol"
-                        Page.REGISTER -> "Kayıt ol"
-                        Page.AUTH -> "Hesap ekle"
-                        Page.DEVICES -> "Cihazlarım"
-                        Page.SETTINGS -> "Ayarlar"
-                        Page.REMOTE -> "PC Kumandası"
-                        Page.FILES -> "PcFiles"
-                        Page.DIAGNOSTICS -> "Hata kayıtları"
-                        else -> "Ana sayfa"
-                    }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    if (page != Page.REMOTE) {
+                        Text(when (page) {
+                            Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol"
+                            Page.REGISTER -> "Kayıt ol"
+                            Page.AUTH -> "Hesap ekle"
+                            Page.DEVICES -> "Cihazlarım"
+                            Page.SETTINGS -> "Ayarlar"
+                            Page.REMOTE -> "PC Kumandası"
+                            Page.FILES -> "PcFiles"
+                            Page.DIAGNOSTICS -> "Hata kayıtları"
+                            else -> "Ana sayfa"
+                        }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    }
                     when (page) {
                         Page.LOGIN -> if (signedIn) {
                             AccountSettings(
@@ -4530,9 +4532,17 @@ private fun AssistantScreen(
                                 (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
                             Row(
                                 Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Text(
+                                    "PC Kumandası",
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 21.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 IconToggleButton(
                                     checked = showScreenPreview,
                                     onCheckedChange = {
