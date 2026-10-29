@@ -4452,7 +4452,7 @@ private fun AssistantScreen(
                                                             desktopPairingQrSignature = scannedQr.signature
                                                             desktopPairingQrExpiresAtUnix = scannedQr.expiresAtUnix
                                                             desktopPairingStatus =
-                                                                "İmzalı QR kodu okundu. Sunucu imzayı ve süreyi doğrulayacak; devam etmek için 'Bilgisayarı bağla' düğmesine dokun."
+                                                                "İmzalı QR kodu okundu. Güvenli eşleştirme için sunucuda QR imzası ve süre doğrulama desteği dağıtılmış olmalı. Devam etmek için 'Bilgisayarı bağla' düğmesine dokun."
                                                         }
                                                     }
                                                     .addOnCanceledListener {
