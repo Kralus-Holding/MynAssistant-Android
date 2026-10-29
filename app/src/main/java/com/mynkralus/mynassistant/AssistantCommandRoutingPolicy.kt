@@ -11,6 +11,7 @@ internal fun resolveAssistantCommandTarget(
     hasComputerPrefix: Boolean
 ): String = when (commandTarget.uppercase(Locale.ROOT)) {
     "PHONE" -> "PHONE"
+    "ANDROID" -> "ANDROID"
     "PC" -> "PC"
     else -> if (hasComputerPrefix) "PC" else "PHONE"
 }
