@@ -1268,6 +1268,8 @@ class MainActivity : ComponentActivity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Process death may skip onPause/onDestroy. Never trust a persisted foreground flag on a new process.
+        prefs.edit().putBoolean("android_device_foreground", false).apply()
         reconcileStaleWakeWordState(this)
         // Remove old local-only demo account data. Firebase now owns auth sessions.
         prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider")
