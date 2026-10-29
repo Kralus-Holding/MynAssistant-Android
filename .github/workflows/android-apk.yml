@@ -137,6 +137,7 @@ jobs:
           grep -q 'remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = true)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'MYN-ANDROID-6007' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'timeoutMessagesAreSpecificToTargetPlatformAndPhase' app/src/test/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicyTest.kt
+          grep -q 'Android komut durumu: $status' app/src/main/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicy.kt
           grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
           grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
           python3 - <<'PY'
