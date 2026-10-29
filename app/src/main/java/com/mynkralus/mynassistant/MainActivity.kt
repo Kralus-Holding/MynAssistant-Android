@@ -2069,6 +2069,7 @@ private fun AssistantScreen(
     var deviceNameEditError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var deviceNameSaveBusyId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
+    var devicesRefreshRevision by remember(firebaseUserId) { mutableIntStateOf(0) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     // Firestore callbacks outlive a single composition; keep the listener's selected ID current.
@@ -3072,7 +3073,7 @@ private fun AssistantScreen(
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    DisposableEffect(firebaseUserId) {
+    DisposableEffect(firebaseUserId, devicesRefreshRevision) {
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
         if (!firebaseUserId.isNullOrBlank()) {
             devicesLoading = true
@@ -3128,6 +3129,14 @@ private fun AssistantScreen(
             selectedDeviceId = null
         }
         onDispose { registration?.remove() }
+    }
+    LaunchedEffect(firebaseUserId, devicesLoading) {
+        if (!devicesLoading || firebaseUserId.isNullOrBlank()) return@LaunchedEffect
+        delay(12_000L)
+        if (devicesLoading) {
+            devicesLoading = false
+            devicesError = "Cihaz listesi zaman aşımına uğradı. Bağlantını kontrol edip yeniden dene."
+        }
     }
     val pcDevices = devices.filter { it.isPcTarget }
     val androidDevices = devices.filter {
@@ -3646,7 +3655,19 @@ private fun AssistantScreen(
                                 )
                                 if (devicesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                                 devicesError?.let { error ->
-                                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                        OutlinedButton(
+                                            onClick = {
+                                                devicesError = null
+                                                devicesLoading = true
+                                                devicesRefreshRevision += 1
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text("Yeniden dene")
+                                        }
+                                    }
                                 }
                                 if (!devicesLoading && pcDevices.isEmpty() && devicesError == null) {
                                     Card(
@@ -3665,9 +3686,12 @@ private fun AssistantScreen(
                                 }
                                 devices.forEach { device ->
                                     val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
+                                    val displayDeviceName = device.name.trim().ifBlank {
+                                        if (device.isPcTarget) "Windows bilgisayar" else "Android cihaz"
+                                    }
                                     val isEditingName = editingDeviceNameId == device.id
                                     var editedDeviceName by remember(device.id, device.name) {
-                                        mutableStateOf(deviceNameDrafts[device.id] ?: device.name)
+                                        mutableStateOf(deviceNameDrafts[device.id] ?: displayDeviceName)
                                     }
                                     Card(
                                         Modifier.fillMaxWidth(),
@@ -3693,7 +3717,7 @@ private fun AssistantScreen(
                                                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                                                     ) {
                                                         Text(
-                                                            device.name,
+                                                            displayDeviceName,
                                                             modifier = Modifier.weight(1f),
                                                             fontWeight = FontWeight.SemiBold,
                                                             fontSize = 16.sp,
@@ -3708,12 +3732,12 @@ private fun AssistantScreen(
                                                                     deviceNameDrafts = deviceNameDrafts - device.id
                                                                 } else {
                                                                     editingDeviceNameId = device.id
-                                                                    deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
-                                                                    editedDeviceName = device.name
+                                                                    deviceNameDrafts = deviceNameDrafts + (device.id to displayDeviceName)
+                                                                    editedDeviceName = displayDeviceName
                                                                 }
                                                                 feedback = null
                                                             },
-                                                            modifier = Modifier.size(30.dp)
+                                                            modifier = Modifier.size(48.dp)
                                                         ) {
                                                             Icon(
                                                                 if (isEditingName) Icons.Default.Close else Icons.Default.Edit,
@@ -5004,6 +5028,13 @@ private fun AssistantScreen(
                                                                 fontSize = 12.sp,
                                                                 color = MaterialTheme.colorScheme.error
                                                             )
+                                                            TextButton(
+                                                                onClick = {
+                                                                    devicesError = null
+                                                                    devicesLoading = true
+                                                                    devicesRefreshRevision += 1
+                                                                }
+                                                            ) { Text("Yeniden dene") }
                                                         }
                                                         pcDevices.isEmpty() -> {
                                                             Text(
