@@ -90,6 +90,19 @@ class AndroidRemoteCommandExecutionPolicyTest {
     }
 
     @Test
+    fun recognizesTurkishFailedExecutionForms() {
+        assertTrue(androidCommandResultIndicatesFailure("Telefon komutu çalıştırılamadı."))
+        assertTrue(androidCommandResultIndicatesFailure("Uygulama başlatılamadı."))
+        assertTrue(androidCommandResultIndicatesFailure("Komut süresi doldu."))
+    }
+
+    @Test
+    fun doesNotClassifySuccessfulTurkishCommandResultsAsFailure() {
+        assertFalse(androidCommandResultIndicatesFailure("YouTube açıldı."))
+        assertFalse(androidCommandResultIndicatesFailure("Sesi artırıldı."))
+    }
+
+    @Test
     fun failureResultIsNeverReportedAsCompleted() {
         assertFalse(
             AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted(
