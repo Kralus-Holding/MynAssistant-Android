@@ -3210,6 +3210,112 @@ private fun AssistantScreen(
         }
     }
     val otherAndroidDevices = androidDevices.filter { it.id != currentAndroidDeviceId }
+
+    // The Android receiver is active only while this app is in the foreground.
+    // Every claim re-checks owner, exact device ID, pending status and expiry in a transaction.
+    DisposableEffect(firebaseUserId, signedIn, currentAndroidDeviceId, androidCommandReceiverActive) {
+        val ownerUid = firebaseUserId?.takeIf { signedIn }
+        val ownDeviceId = currentAndroidDeviceId
+        if (ownerUid.isNullOrBlank() || ownDeviceId.isNullOrBlank() || !androidCommandReceiverActive) {
+            return@DisposableEffect onDispose {}
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        val registration = firestore.collection("commands")
+            .whereEqualTo("ownerId", ownerUid)
+            .whereEqualTo("deviceId", ownDeviceId)
+            .whereEqualTo("status", "pending")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("MynAndroidCommand", "Remote Android command listener unavailable")
+                    return@addSnapshotListener
+                }
+
+                snapshot?.documents.orEmpty().forEach { pendingDocument ->
+                    if (pendingDocument.getString("ownerId") != ownerUid ||
+                        pendingDocument.getString("deviceId") != ownDeviceId ||
+                        pendingDocument.getString("status") != "pending"
+                    ) return@forEach
+
+                    val commandReference = pendingDocument.reference
+                    firestore.runTransaction { transaction ->
+                        val current = transaction.get(commandReference)
+                        if (!current.exists() ||
+                            current.getString("ownerId") != ownerUid ||
+                            current.getString("deviceId") != ownDeviceId ||
+                            current.getString("status") != "pending"
+                        ) {
+                            return@runTransaction null
+                        }
+
+                        val expiryMillis = current.getTimestamp("expiresAt")?.toDate()?.time ?: 0L
+                        if (expiryMillis <= System.currentTimeMillis()) {
+                            transaction.update(commandReference, "status", "failed")
+                            transaction.update(
+                                commandReference,
+                                "result",
+                                "Komutun süresi dolmuş; Android cihazında çalıştırılmadı."
+                            )
+                            transaction.update(commandReference, "completedAt", FieldValue.serverTimestamp())
+                            return@runTransaction null
+                        }
+
+                        transaction.update(commandReference, "status", "running")
+                        transaction.update(commandReference, "startedAt", FieldValue.serverTimestamp())
+                        Pair(
+                            current.getString("command").orEmpty(),
+                            current.getString("text").orEmpty()
+                        )
+                    }.addOnSuccessListener { claim ->
+                        if (claim == null) return@addOnSuccessListener
+                        Handler(Looper.getMainLooper()).post {
+                            val foregroundNow = commandContext
+                                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                                .getBoolean("android_device_foreground", false)
+                            val commandName = claim.first
+                            val rawText = claim.second
+                            val commandAllowed = commandName == "text_command" &&
+                                AndroidRemoteCommandPolicy.isAllowed(rawText)
+
+                            val result = when {
+                                !foregroundNow ->
+                                    "Telefon uygulaması artık ön planda değil; komut çalıştırılmadı."
+                                commandName != "text_command" ->
+                                    "Bu Android cihazı bu komut türünü desteklemiyor."
+                                !commandAllowed ->
+                                    AndroidRemoteCommandPolicy.rejectionMessage()
+                                else -> runCatching {
+                                    executeAndroidTextCommand(commandContext, rawText)
+                                }.getOrElse {
+                                    "Telefon komutu çalıştırılamadı. Cihazın bağlantısını ve izinlerini kontrol et."
+                                }
+                            }
+                            val resultIndicatesFailure = listOf(
+                                "henüz desteklenmiyor", "desteklenmiyor", "bulunamadı",
+                                "açılamadı", "gerekiyor", "çalıştırılmadı"
+                            ).any { result.contains(it, ignoreCase = true) }
+                            val finalStatus = if (
+                                foregroundNow && commandAllowed && !resultIndicatesFailure
+                            ) "completed" else "failed"
+
+                            commandReference.update(
+                                mapOf(
+                                    "status" to finalStatus,
+                                    "result" to result,
+                                    "completedAt" to FieldValue.serverTimestamp(),
+                                    "receiverPlatform" to "Android"
+                                )
+                            ).addOnFailureListener {
+                                Log.w("MynAndroidCommand", "Remote Android command result could not be saved")
+                            }
+                        }
+                    }.addOnFailureListener {
+                        Log.w("MynAndroidCommand", "Remote Android command could not be claimed")
+                    }
+                }
+            }
+        onDispose { registration.remove() }
+    }
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
     val selectedPcId = DevicePresencePolicy.selectedPcDeviceId(
         manuallySelectedPcDeviceId,
