@@ -2722,8 +2722,20 @@ private fun AssistantScreen(
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
                             when (status) {
-                                "pending" -> feedback = remoteCommandStatusMessage(status)
-                                "running" -> feedback = remoteCommandStatusMessage(status)
+                                "pending" -> feedback = if (
+                                    devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
+                                ) {
+                                    "Komut seçili Android cihazının alması için kuyrukta bekliyor."
+                                } else {
+                                    remoteCommandStatusMessage(status)
+                                }
+                                "running" -> feedback = if (
+                                    devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
+                                ) {
+                                    "Android cihaz komutu çalıştırıyor..."
+                                } else {
+                                    remoteCommandStatusMessage(status)
+                                }
                                 "completed" -> {
                                     if (targetCommandName == "list_files") {
                                         try {
