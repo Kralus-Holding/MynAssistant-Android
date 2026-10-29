@@ -2589,6 +2589,7 @@ private fun AssistantScreen(
     var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
     var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var activeCommandName by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var activeCommandIsAndroidTarget by remember(firebaseUserId) { mutableStateOf(false) }
     var trackedCommandResultHandler by remember(firebaseUserId) {
         mutableStateOf<((String, String, String) -> Unit)?>(null)
     }
@@ -2613,11 +2614,15 @@ private fun AssistantScreen(
                 activeCommandListener = null
                 activeCommandName = null
                 pcFilesLoading = false
+                val targetLabel = if (activeCommandIsAndroidTarget) "Android cihaz" else "bilgisayar"
                 feedback = recordIssue(
-                    "MYN-PC-6007", "Bilgisayar komutu",
-                    "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula.",
+                    if (activeCommandIsAndroidTarget) "MYN-ANDROID-6007" else "MYN-PC-6007",
+                    if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                    "$targetLabel üzerinden 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını hedef cihazda doğrula.",
                     "",
-                    "REMOTE_COMMAND_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown")
+                    "REMOTE_COMMAND_TIMEOUT; platform=" +
+                        (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                        "; deviceId=" + (activeCommandDeviceId ?: "unknown")
                 )
                 val handler = trackedCommandResultHandler
                 trackedCommandResultHandler = null
@@ -2645,10 +2650,14 @@ private fun AssistantScreen(
                 commandSubmissionTimedOut = true
                 pcFilesLoading = false
                 feedback = recordIssue(
-                    "MYN-PC-6009", "Bilgisayar komutu",
-                    "Komutun sunucu tarafından onaylanması 20 saniyeyi geçti. İstek durumu belirsiz; yinelenen komut oluşmaması için yeni istek kilitlendi. İnternet bağlantısını kontrol et; ilk istek daha sonra tamamlanabilir.",
+                    if (activeCommandIsAndroidTarget) "MYN-ANDROID-6009" else "MYN-PC-6009",
+                    if (activeCommandIsAndroidTarget) "Android komutu" else "Bilgisayar komutu",
+                    (if (activeCommandIsAndroidTarget) "Android komutunun" else "Bilgisayar komutunun") +
+                        " sunucu tarafından onaylanması 20 saniyeyi geçti. İstek durumu belirsiz; yinelenen komut oluşmaması için yeni istek kilitlendi. İnternet bağlantısını kontrol et; ilk istek daha sonra tamamlanabilir.",
                     "",
-                    "COMMAND_SUBMISSION_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown") +
+                    "COMMAND_SUBMISSION_TIMEOUT; platform=" +
+                        (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                        "; deviceId=" + (activeCommandDeviceId ?: "unknown") +
                         "; command=" + (activeCommandName ?: "unknown")
                 )
             }
@@ -2670,7 +2679,7 @@ private fun AssistantScreen(
             feedback = if (commandSubmissionTimedOut) {
                 "Önceki komutun durumu belirsiz. Yinelenen komut gönderilmedi; bağlantıyı kontrol edip ilk isteğin sonucunu bekle."
             } else {
-                "Önceki bilgisayar komutu gönderiliyor veya sonucu bekleniyor. Yinelenen komut gönderilmedi."
+                "Önceki uzaktan komut gönderiliyor veya sonucu bekleniyor. Yinelenen komut gönderilmedi."
             }
             return@sendTrackedCommand
         }
@@ -2679,7 +2688,12 @@ private fun AssistantScreen(
         commandSubmissionInProgress = true
         activeCommandDeviceId = targetDeviceId
         activeCommandName = targetCommandName
-        feedback = "Komut bilgisayara gönderiliyor..."
+        activeCommandIsAndroidTarget = devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
+        feedback = if (activeCommandIsAndroidTarget) {
+            "Komut seçilen Android cihazına gönderiliyor..."
+        } else {
+            "Komut bilgisayara gönderiliyor..."
+        }
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
             if (commandId == null) {
                 commandSubmissionInProgress = false
@@ -2702,8 +2716,12 @@ private fun AssistantScreen(
                         if (error != null) {
                             pcFilesLoading = false
                             feedback = recordIssue(
-                                "MYN-PC-6001", "Bilgisayar komutu",
-                                "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
+                                if (activeCommandIsAndroidTarget) "MYN-ANDROID-6001" else "MYN-PC-6001",
+                                if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                if (activeCommandIsAndroidTarget)
+                                    "Android cihazdan işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene."
+                                else
+                                    "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
                                 targetPayload["text"]?.toString().orEmpty(),
                                 error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
                             )
@@ -2715,10 +2733,16 @@ private fun AssistantScreen(
                         } else if (snapshot == null || !snapshot.exists()) {
                             pcFilesLoading = false
                             feedback = recordIssue(
-                                "MYN-PC-6002", "Bilgisayar komutu",
-                                "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
+                                if (activeCommandIsAndroidTarget) "MYN-ANDROID-6002" else "MYN-PC-6002",
+                                if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                if (activeCommandIsAndroidTarget)
+                                    "Android cihaz komutunun sonucunu bulamadım. Hedef cihazın bağlantısını kontrol et."
+                                else
+                                    "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
                                 targetPayload["text"]?.toString().orEmpty(),
-                                "COMMAND_DOCUMENT_MISSING; id=" + commandId
+                                "COMMAND_DOCUMENT_MISSING; platform=" +
+                                    (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                                    "; id=" + commandId
                             )
                             activeCommandListener = null
                             activeCommandName = null
@@ -2729,16 +2753,12 @@ private fun AssistantScreen(
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
                             when (status) {
-                                "pending" -> feedback = if (
-                                    devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
-                                ) {
+                                "pending" -> feedback = if (activeCommandIsAndroidTarget) {
                                     "Komut seçili Android cihazının alması için kuyrukta bekliyor."
                                 } else {
                                     remoteCommandStatusMessage(status)
                                 }
-                                "running" -> feedback = if (
-                                    devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
-                                ) {
+                                "running" -> feedback = if (activeCommandIsAndroidTarget) {
                                     "Android cihaz komutu çalıştırıyor..."
                                 } else {
                                     remoteCommandStatusMessage(status)
@@ -2775,10 +2795,18 @@ private fun AssistantScreen(
                                 "failed" -> {
                                     pcFilesLoading = false
                                     feedback = recordIssue(
-                                        "MYN-PC-6003", "Bilgisayar komutu",
-                                        result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
+                                        if (activeCommandIsAndroidTarget) "MYN-ANDROID-6003" else "MYN-PC-6003",
+                                        if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                        result.ifBlank {
+                                            if (activeCommandIsAndroidTarget)
+                                                "Android cihaz komutu tamamlayamadı. Sorun kodunu paylaşabilirsin."
+                                            else
+                                                "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin."
+                                        },
                                         targetPayload["text"]?.toString().orEmpty(),
-                                        "REMOTE_COMMAND_FAILED; command=" + targetCommandName
+                                        "REMOTE_COMMAND_FAILED; platform=" +
+                                            (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                                            "; command=" + targetCommandName
                                     )
                                     activeCommandListener = null
                                     activeCommandName = null
@@ -2788,7 +2816,10 @@ private fun AssistantScreen(
                                 }
                                 "cancelled" -> {
                                     pcFilesLoading = false
-                                    feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
+                                    feedback = if (activeCommandIsAndroidTarget)
+                                        "Komut Android cihazında çalıştırılmadan önce iptal edildi."
+                                    else
+                                        "Komut bilgisayarda çalıştırılmadan önce iptal edildi."
                                     activeCommandListener = null
                                     activeCommandName = null
                                     val handler = trackedCommandResultHandler
@@ -2798,10 +2829,16 @@ private fun AssistantScreen(
                                 else -> {
                                     pcFilesLoading = false
                                     feedback = recordIssue(
-                                        "MYN-PC-6005", "Bilgisayar komutu",
-                                        "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
+                                        if (activeCommandIsAndroidTarget) "MYN-ANDROID-6005" else "MYN-PC-6005",
+                                        if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                        if (activeCommandIsAndroidTarget)
+                                            "Android cihaz beklenmeyen bir işlem durumu bildirdi."
+                                        else
+                                            "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
                                         targetPayload["text"]?.toString().orEmpty(),
-                                        "UNKNOWN_COMMAND_STATUS=" + status
+                                        "UNKNOWN_COMMAND_STATUS; platform=" +
+                                            (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                                            "; status=" + status
                                     )
                                     activeCommandListener = null
                                     activeCommandName = null
@@ -2829,10 +2866,13 @@ private fun AssistantScreen(
                     message.contains("başarısız", ignoreCase = true)
                 ) {
                     feedback = recordIssue(
-                        "MYN-PC-6006", "Bilgisayar bağlantısı",
+                        if (activeCommandIsAndroidTarget) "MYN-ANDROID-6006" else "MYN-PC-6006",
+                        if (activeCommandIsAndroidTarget) "Android cihaz bağlantısı" else "Bilgisayar bağlantısı",
                         message,
                         targetPayload["text"]?.toString().orEmpty(),
-                        "REMOTE_COMMAND_REJECTED; command=" + targetCommandName
+                        "REMOTE_COMMAND_REJECTED; platform=" +
+                            (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                            "; command=" + targetCommandName
                     )
                 } else {
                     feedback = message
