@@ -108,4 +108,39 @@ class DevicePresencePolicyTest {
         assertEquals(null, DevicePresencePolicy.preferredPcDeviceId(devices, "win-agent-123"))
     }
 
+    @Test
+    fun explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("win-offline", "firebase-agent", false),
+            PcDeviceRouteCandidate("win-online", "firebase-agent", true)
+        )
+        assertEquals(
+            "win-offline",
+            DevicePresencePolicy.selectedPcDeviceId("win-offline", devices, "win-online")
+        )
+    }
+
+    @Test
+    fun disappearedManualSelectionFallsBackToOnlineCloudAgent() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("win-online", "firebase-agent", true)
+        )
+        assertEquals(
+            "win-online",
+            DevicePresencePolicy.selectedPcDeviceId("win-removed", devices, "win-online")
+        )
+    }
+
+    @Test
+    fun explicitRegisteredLocalBridgeCanRemainSelected() {
+        val devices = listOf(
+            PcDeviceRouteCandidate("windows-user-123", "mynai-local-bridge", false),
+            PcDeviceRouteCandidate("win-agent-123", "firebase-agent", true)
+        )
+        assertEquals(
+            "windows-user-123",
+            DevicePresencePolicy.selectedPcDeviceId("windows-user-123", devices, "win-agent-123")
+        )
+    }
+
 }
