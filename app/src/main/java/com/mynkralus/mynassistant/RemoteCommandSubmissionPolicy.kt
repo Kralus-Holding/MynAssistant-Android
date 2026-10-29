@@ -47,6 +47,7 @@ internal fun remoteCommandStatusMessageForTarget(status: String, isAndroidTarget
             "Komut seçili Android cihazının alması için kuyrukta bekliyor."
         isAndroidTarget && status.equals("running", ignoreCase = true) ->
             "Android cihaz komutu çalıştırıyor..."
+        isAndroidTarget -> "Android komut durumu: $status"
         else -> remoteCommandStatusMessage(status)
     }
 
