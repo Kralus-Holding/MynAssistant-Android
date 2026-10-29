@@ -3379,11 +3379,7 @@ private fun AssistantScreen(
                     }.getOrElse {
                         "Telefon komutu çalıştırılamadı. Cihazın bağlantısını ve izinlerini kontrol et."
                     }
-                    val resultIndicatesFailure = listOf(
-                        "henüz desteklenmiyor", "desteklenmiyor", "bulunamadı",
-                        "açılamadı", "gerekiyor", "çalıştırılmadı", "süresi doldu",
-                        "oturumu değişti"
-                    ).any { result.contains(it, ignoreCase = true) }
+                    val resultIndicatesFailure = androidCommandResultIndicatesFailure(result)
                     val finalStatus = if (
                         AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted(
                             receiverDisposed = receiverDisposed,
