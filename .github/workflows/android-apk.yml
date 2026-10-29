@@ -130,6 +130,9 @@ jobs:
           test -s app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt
           grep -q 'AndroidRemoteCommandExecutionPolicy.rejectionMessage' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'androidCommandResultIndicatesFailure(result)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'recognizesTurkishFailedExecutionForms' app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt
+          grep -q 'çalıştırılamadı' app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicy.kt
           test -s app/src/main/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicy.kt
           test -s app/src/test/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicyTest.kt
           grep -q 'AndroidCommandClaimRetryPolicy.delayMillis(retryNumber)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
