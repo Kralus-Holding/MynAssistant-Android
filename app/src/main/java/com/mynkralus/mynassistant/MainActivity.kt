@@ -2113,6 +2113,23 @@ private fun AssistantScreen(
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
+    var androidCommandReceiverActive by remember(firebaseUserId) {
+        mutableStateOf(
+            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean("android_device_foreground", false)
+        )
+    }
+    DisposableEffect(commandContext) {
+        val foregroundPreferences = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val foregroundListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
+            if (key == "android_device_foreground") {
+                androidCommandReceiverActive = shared?.getBoolean(key, false) == true
+            }
+        }
+        foregroundPreferences.registerOnSharedPreferenceChangeListener(foregroundListener)
+        androidCommandReceiverActive = foregroundPreferences.getBoolean("android_device_foreground", false)
+        onDispose { foregroundPreferences.unregisterOnSharedPreferenceChangeListener(foregroundListener) }
+    }
     var wakeWordEnabled by remember {
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean("wake_word_enabled", false))
