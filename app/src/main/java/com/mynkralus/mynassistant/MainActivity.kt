@@ -104,6 +104,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
@@ -2110,6 +2111,9 @@ private fun AssistantScreen(
     var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var manuallySelectedAndroidDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
+    var showDiagnosticReportConfirmation by remember { mutableStateOf(false) }
+    var diagnosticReportSending by remember { mutableStateOf(false) }
+    var diagnosticReportStatus by remember { mutableStateOf<String?>(null) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
     val commandContext = LocalContext.current
@@ -4187,10 +4191,90 @@ private fun AssistantScreen(
                                 MynAssistantDiagnostics.read(commandContext)
                             }
                             Text(
-                                "Sorun kodları, nedenleri ve komut kayıtları yalnızca bu telefonda tutulur. İstersen kayıtları temizleyebilirsin.",
+                                "Hata kayıtları bu telefonda kalır. Aşağıdaki düğmeye dokunup gönderimi onaylarsan son 80 tanılama kaydı, uygulama sürümü ve giriş yaptığın MynAssistant hesabı destek adresine e-posta ile gönderilir. Kişisel dosyaların veya ekran görüntülerin gönderilmez.",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
+                            OutlinedButton(
+                                onClick = { showDiagnosticReportConfirmation = true },
+                                enabled = !diagnosticReportSending && signedIn,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Email, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (diagnosticReportSending) "Gönderiliyor..." else "Hata raporunu e-postayla gönder")
+                            }
+                            if (!signedIn) {
+                                Text("E-posta raporu göndermek için MynAssistant hesabına giriş yap.", fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.tertiary)
+                            }
+                            diagnosticReportStatus?.let {
+                                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                            }
+                            if (showDiagnosticReportConfirmation) {
+                                AlertDialog(
+                                    onDismissRequest = { if (!diagnosticReportSending) showDiagnosticReportConfirmation = false },
+                                    title = { Text("Hata raporu gönderilsin mi?") },
+                                    text = {
+                                        Text(
+                                            "Son 80 hata kaydı, uygulama sürümü, hata kodları ve MynAssistant hesap kimliğin destek ekibine e-posta ile gönderilecek. Gönderim öncesi oturum belirteçleri ve gizli anahtarlar sunucuda ayıklanır. Kişisel dosyalar veya ekran görüntüleri eklenmez."
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            enabled = !diagnosticReportSending,
+                                            onClick = {
+                                                val user = FirebaseAuth.getInstance().currentUser
+                                                if (user == null) {
+                                                    diagnosticReportStatus = "Oturum bulunamadı. Yeniden giriş yap."
+                                                    showDiagnosticReportConfirmation = false
+                                                } else {
+                                                    diagnosticReportSending = true
+                                                    showDiagnosticReportConfirmation = false
+                                                    val reportDetails = entries.take(80).joinToString("\n\n") { entry ->
+                                                        buildString {
+                                                            append(entry.id)
+                                                            append(" | ")
+                                                            append(entry.category)
+                                                            append(" | ")
+                                                            append(java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
+                                                                .format(java.util.Date(entry.createdAt)))
+                                                            if (entry.command.isNotBlank()) {
+                                                                append("\nKomut: ")
+                                                                append(entry.command)
+                                                            }
+                                                            if (entry.details.isNotBlank()) {
+                                                                append("\nAyrıntı: ")
+                                                                append(entry.details)
+                                                            }
+                                                        }
+                                                    }.take(60_000)
+                                                    val report = JSONObject()
+                                                        .put("source", "android")
+                                                        .put("appVersion", BuildConfig.VERSION_NAME)
+                                                        .put("errorCode", entries.firstOrNull()?.id ?: "MYN-USER-REPORT")
+                                                        .put("message", "Kullanıcı Ayarlar → Hata kayıtları bölümünden destek raporu gönderdi.")
+                                                        .put("details", reportDetails.ifBlank { "Cihazda kayıtlı hata bulunmuyor; kullanıcı destek raporu gönderdi." })
+                                                    MynAssistantAccountBackend.sendDiagnosticReport(user, report) { success, message ->
+                                                        diagnosticReportSending = false
+                                                        diagnosticReportStatus = if (success) {
+                                                            "Hata raporu destek ekibine gönderildi."
+                                                        } else {
+                                                            "E-posta gönderilemedi: $message"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ) { Text("Gönder") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(
+                                            enabled = !diagnosticReportSending,
+                                            onClick = { showDiagnosticReportConfirmation = false }
+                                        ) { Text("Vazgeç") }
+                                    }
+                                )
+                            }
                             if (entries.isEmpty()) {
                                 Card(Modifier.fillMaxWidth()) {
                                     Text("Henüz hata kaydı yok.", Modifier.padding(16.dp))
