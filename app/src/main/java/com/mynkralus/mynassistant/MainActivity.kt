@@ -2276,6 +2276,19 @@ private fun AssistantScreen(
     var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
     var permissionResultTick by remember { mutableIntStateOf(0) }
     var startupPermissionRequestPending by remember { mutableStateOf(false) }
+    DisposableEffect(commandContext) {
+        val lifecycle = (commandContext as? ComponentActivity)?.lifecycle
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                permissionResultTick += 1
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+    val permissionItems = remember(permissionResultTick) {
+        MynAssistantPermissionCatalog.read(commandContext)
+    }
     var showAccessibilitySetupDialog by remember { mutableStateOf(false) }
     val runtimePermissions = remember { requiredRuntimePermissionList() }
     var startSpeechAfterPermission by remember { mutableStateOf(false) }
@@ -2432,6 +2445,67 @@ private fun AssistantScreen(
             }
         }
     }
+    val openApplicationInfo: () -> Unit = {
+        commandContext.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + commandContext.packageName)
+            )
+        )
+    }
+    val openPermissionSettings: (MynPermissionItem) -> Unit = { item ->
+        try {
+            when (item.action) {
+                MynPermissionAction.REQUEST_RUNTIME -> {
+                    if (item.state == MynPermissionState.GRANTED) {
+                        openApplicationInfo()
+                    } else {
+                        val missing = item.runtimePermissions.filter { permission ->
+                            androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
+                                android.content.pm.PackageManager.PERMISSION_GRANTED
+                        }
+                        if (missing.isEmpty()) {
+                            feedback = "Bu izin zaten açık."
+                        } else {
+                            permissionLauncher.launch(missing.toTypedArray())
+                        }
+                    }
+                }
+                MynPermissionAction.OVERLAY_SETTINGS -> {
+                    commandContext.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + commandContext.packageName)
+                        )
+                    )
+                }
+                MynPermissionAction.ACCESSIBILITY_SETTINGS -> {
+                    commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+                MynPermissionAction.NOTIFICATION_SETTINGS -> {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        commandContext.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, commandContext.packageName)
+                            }
+                        )
+                    } else {
+                        openApplicationInfo()
+                    }
+                }
+                MynPermissionAction.APPLICATION_INFO -> openApplicationInfo()
+            }
+        } catch (error: Exception) {
+            feedback = recordIssue(
+                "MYN-PERM-4003",
+                "İzinler",
+                "İlgili Android izin ayarı açılamadı. Uygulama bilgileri ekranından izinleri yönetebilirsin.",
+                item.id,
+                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+            )
+        }
+    }
+
     val requestWakeWordActivation: () -> Unit = {
         if (wakeWordEnabled) {
             stopMynWakeWordService(commandContext)
@@ -4661,11 +4735,91 @@ private fun AssistantScreen(
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
                             }
                             if (settingsCategory == "İzinler") {
-                            Text(
-                                "Rehber izni verildiğinde, bu telefona senkronize edilmiş Google, SIM ve diğer kişi hesaplarındaki kayıtlar aranır.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                            )
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        "MynAssistant'ın kullandığı izinler. Durumlar Android'den canlı okunur; bir izne dokunarak isteyebilir veya ilgili sistem ayarını açabilirsin.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                    )
+                                    permissionItems.forEach { item ->
+                                        val stateColor = when (item.state) {
+                                            MynPermissionState.GRANTED -> Color(0xFF54C58A)
+                                            MynPermissionState.PARTIAL -> MaterialTheme.colorScheme.tertiary
+                                            MynPermissionState.DENIED -> MaterialTheme.colorScheme.error
+                                            MynPermissionState.MANAGED -> MaterialTheme.colorScheme.secondary
+                                        }
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surface
+                                            )
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                                verticalArrangement = Arrangement.spacedBy(7.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        item.title,
+                                                        modifier = Modifier.weight(1f),
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 14.sp
+                                                    )
+                                                    Text(
+                                                        item.statusText,
+                                                        color = stateColor,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                                Text(
+                                                    item.description,
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                                )
+                                                OutlinedButton(
+                                                    onClick = { openPermissionSettings(item) },
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Icon(Icons.Default.Settings, contentDescription = null)
+                                                    Spacer(Modifier.width(7.dp))
+                                                    Text(
+                                                        when (item.state) {
+                                                            MynPermissionState.GRANTED -> "Yönet"
+                                                            MynPermissionState.PARTIAL -> "Erişimi yönet"
+                                                            MynPermissionState.DENIED -> item.actionText
+                                                            MynPermissionState.MANAGED -> item.actionText
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                openApplicationInfo()
+                                            } catch (error: Exception) {
+                                                feedback = recordIssue(
+                                                    "MYN-PERM-4003",
+                                                    "İzinler",
+                                                    "Uygulama bilgileri açılamadı.",
+                                                    "",
+                                                    error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Info, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Uygulama bilgileri ve kısıtlanmış ayarlar")
+                                    }
+                                }
                             }
 
                             if (settingsCategory == "Hesap") {
