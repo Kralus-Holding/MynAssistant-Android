@@ -22,6 +22,20 @@ internal object MynAssistantAccountBackend {
     private const val MAX_PROFILE_IMAGE_BYTES = 5L * 1024L * 1024L
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    fun sendDiagnosticReport(
+        user: FirebaseUser,
+        report: JSONObject,
+        callback: (Boolean, String) -> Unit
+    ) {
+        withIdToken(user, callback) { token ->
+            postJson(
+                path = "/api/v1/diagnostics/report",
+                idToken = token,
+                body = report
+            )
+        }
+    }
+
     fun sendEmailVerification(user: FirebaseUser, callback: (Boolean, String) -> Unit) {
         withIdToken(user, callback) { token ->
             postJson(

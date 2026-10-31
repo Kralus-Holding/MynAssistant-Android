@@ -20,6 +20,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseUser
@@ -43,6 +46,7 @@ import com.google.firebase.firestore.SetOptions
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -58,6 +62,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -86,30 +91,34 @@ import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardReturn
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Send
 import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
@@ -129,6 +138,7 @@ import kotlinx.coroutines.delay
 
 private val Accent = Color(0xFF8B9CFF)
 private val Mint = Color(0xFF9DD9D2)
+private val ANDROID_SETTINGS_CATEGORIES = listOf("Genel", "Agent", "Hesap", "İzinler", "Eklentiler", "Başlangıç", "Hata günlükleri", "Kısayollar")
 private const val PREFS = "mynassistant_prefs"
 private const val GOOGLE_ACCOUNTS_KEY = "saved_google_accounts"
 private const val ANDROID_INSTALLATION_ID_KEY = "android_installation_id"
@@ -272,8 +282,65 @@ private fun saveFirebaseProfile(
 private data class PcBridgeResult(
     val connected: Boolean,
     val success: Boolean,
-    val message: String
+    val message: String,
+    val payload: String? = null
 )
+
+internal fun resolvePcFileListingPayload(payload: String?, fallbackMessage: String): String =
+    payload?.takeIf { it.isNotBlank() } ?: fallbackMessage
+
+private data class PcFileEntry(
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+    val size: Long,
+    val modifiedUtc: String
+)
+
+private data class PcFileListing(
+    val currentPath: String,
+    val parentPath: String?,
+    val entries: List<PcFileEntry>,
+    val truncated: Boolean,
+    val warnings: List<String>
+)
+
+private fun parsePcFileListing(payload: String): PcFileListing {
+    val listingJson = JSONObject(payload)
+    val entriesJson = listingJson.optJSONArray("entries")
+        ?: throw IllegalArgumentException("Dosya listesi yanıtında entries alanı yok.")
+    val entries = buildList {
+        for (index in 0 until entriesJson.length()) {
+            val item = entriesJson.optJSONObject(index) ?: continue
+            val name = item.optString("name").takeIf { it.isNotBlank() } ?: continue
+            val path = item.optString("path")
+            if (path.isBlank()) continue
+            add(
+                PcFileEntry(
+                    name = name,
+                    path = path,
+                    isDirectory = item.optBoolean("isDirectory", false),
+                    size = item.optLong("size", 0L).coerceAtLeast(0L),
+                    modifiedUtc = item.optString("modifiedUtc")
+                )
+            )
+        }
+    }
+    val warnings = listingJson.optJSONArray("warnings")?.let { warningsJson ->
+        buildList {
+            for (index in 0 until warningsJson.length()) {
+                warningsJson.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }.orEmpty()
+    return PcFileListing(
+        currentPath = if (listingJson.isNull("currentPath")) "" else listingJson.optString("currentPath", ""),
+        parentPath = if (listingJson.isNull("parentPath")) null else listingJson.optString("parentPath", ""),
+        entries = entries,
+        truncated = listingJson.optBoolean("truncated", false),
+        warnings = warnings
+    )
+}
 
 /**
  * Executes the Android-side command subset locally on this handset.
@@ -983,12 +1050,20 @@ private fun callMynAiBridge(baseUrl: String, token: String, command: String? = n
             val ok = response.optBoolean("ok", result?.optBoolean("ok", false) ?: false)
             val message = result?.optString("message").orEmpty()
             val actionText = result?.optJSONObject("data")?.optString("action_text").orEmpty()
+            // The local bridge returns file-list JSON in action_text. Keep it out of
+            // human-readable feedback/status fields so the UI never displays raw JSON.
+            val actionPayload = actionText.takeIf { it.isNotBlank() && it.trimStart().startsWith("{") }
+            val messagePayload = message.trim().let { candidate ->
+                candidate.takeIf { it.startsWith("{") }
+                    ?: candidate.substringAfter('\n', "").trim().takeIf { it.startsWith("{") }
+            }
+            val payload = actionPayload ?: messagePayload
             val displayText = when {
-                message.isBlank() -> actionText.ifBlank { "Komut yanıtlandı." }
-                actionText.isBlank() || actionText == message -> message
+                message.isBlank() -> if (payload != null) "Komut yanıtlandı." else actionText.ifBlank { "Komut yanıtlandı." }
+                actionText.isBlank() || actionText == message || actionPayload != null -> message
                 else -> message + "\n" + actionText
             }
-            PcBridgeResult(true, ok, displayText)
+            PcBridgeResult(true, ok, displayText, payload)
         }
     } catch (error: Exception) {
         PcBridgeResult(
@@ -1195,6 +1270,8 @@ class MainActivity : ComponentActivity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         incomingWakeCommand.value = intent.getStringExtra(EXTRA_MYN_WAKE_COMMAND)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Process death may skip onPause/onDestroy. Never trust a persisted foreground flag on a new process.
+        prefs.edit().putBoolean("android_device_foreground", false).apply()
         reconcileStaleWakeWordState(this)
         // Remove old local-only demo account data. Firebase now owns auth sessions.
         prefs.edit().remove("signed_in").remove("demo_password").remove("auth_provider")
@@ -1666,7 +1743,12 @@ class MainActivity : ComponentActivity() {
                                 "deviceId" to deviceId,
                                 "command" to commandName,
                                 "status" to "pending",
-                                "createdAt" to FieldValue.serverTimestamp()
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                // Firestore can queue this write while offline. Keep the original
+                                // deadline so a delayed sync cannot execute a stale PC action later.
+                                "expiresAt" to com.google.firebase.Timestamp(
+                                    java.util.Date(System.currentTimeMillis() + REMOTE_COMMAND_VALIDITY_MILLIS)
+                                )
                             )
                             commandData.putAll(payload)
                             FirebaseFirestore.getInstance().collection("commands")
@@ -1811,12 +1893,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         activityResumed = false
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("android_device_foreground", false)
+            .apply()
         stopAndroidDeviceHeartbeat()
         FirebaseAuth.getInstance().currentUser?.let { updateAndroidDevicePresence(it, online = false) }
         super.onPause()
     }
 
     override fun onDestroy() {
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("android_device_foreground", false)
+            .apply()
         stopAndroidDeviceHeartbeat()
         FirebaseAuth.getInstance().removeAuthStateListener(firebaseAuthStateListener)
         super.onDestroy()
@@ -1913,6 +2001,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("android_device_foreground", true)
+            .apply()
         startAndroidDeviceHeartbeat(FirebaseAuth.getInstance().currentUser)
         reconcileStaleWakeWordState(this)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -1973,6 +2064,7 @@ private fun AssistantScreen(
     onWakeCommandConsumed: () -> Unit = {}
 ) {
     var page by remember { mutableStateOf(Page.HOME) }
+    var settingsCategory by remember { mutableStateOf("Genel") }
     val pageHistory = remember { mutableStateListOf<Page>() }
     var drawer by remember { mutableStateOf(false) }
     var showExitConfirmation by remember { mutableStateOf(false) }
@@ -1991,6 +2083,7 @@ private fun AssistantScreen(
     var deviceNameEditError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var deviceNameSaveBusyId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var devicesLoading by remember(firebaseUserId) { mutableStateOf(!firebaseUserId.isNullOrBlank()) }
+    var devicesRefreshRevision by remember(firebaseUserId) { mutableIntStateOf(0) }
     var devicesError by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var selectedDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     // Firestore callbacks outlive a single composition; keep the listener's selected ID current.
@@ -2013,12 +2106,43 @@ private fun AssistantScreen(
         }
     }
 
-    var commandTarget by remember { mutableStateOf("AUTO") }
+    var commandTarget by remember(firebaseUserId) { mutableStateOf("AUTO") }
     var targetMenuExpanded by remember { mutableStateOf(false) }
+    // Explicit per-device choices must not silently fall back to a different target.
+    var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var manuallySelectedAndroidDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    val commandContext = LocalContext.current
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
+    var diagnosticAutoEmailEnabled by remember {
+        mutableStateOf(
+            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean("diagnostics_auto_email_enabled", false)
+        )
+    }
+    var diagnosticReportSending by remember { mutableStateOf(false) }
+    var diagnosticReportStatus by remember { mutableStateOf<String?>(null) }
+    var showDiagnosticReportConfirmation by remember { mutableStateOf(false) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
-    val commandContext = LocalContext.current
+    var androidCommandReceiverInFlightId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var androidCommandReceiverClaimRetryCount by remember(firebaseUserId) { mutableIntStateOf(0) }
+    var androidCommandReceiverActive by remember(firebaseUserId) {
+        mutableStateOf(
+            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean("android_device_foreground", false)
+        )
+    }
+    DisposableEffect(commandContext) {
+        val foregroundPreferences = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val foregroundListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
+            if (key == "android_device_foreground") {
+                androidCommandReceiverActive = shared?.getBoolean(key, false) == true
+            }
+        }
+        foregroundPreferences.registerOnSharedPreferenceChangeListener(foregroundListener)
+        androidCommandReceiverActive = foregroundPreferences.getBoolean("android_device_foreground", false)
+        onDispose { foregroundPreferences.unregisterOnSharedPreferenceChangeListener(foregroundListener) }
+    }
     var wakeWordEnabled by remember {
         mutableStateOf(commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean("wake_word_enabled", false))
@@ -2090,6 +2214,50 @@ private fun AssistantScreen(
             technicalDetails
         )
         diagnosticsRevision += 1
+
+        // Automatic reports are sent only after an explicit opt-in and only when
+        // a Firebase user is signed in. A five-minute device cooldown prevents
+        // a fast error loop from flooding the support mailbox.
+        val diagnosticPreferences = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        val now = System.currentTimeMillis()
+        val lastAutomaticReport = diagnosticPreferences.getLong("diagnostics_auto_email_last_sent_ms", 0L)
+        if (diagnosticAutoEmailEnabled && currentUser != null &&
+            now - lastAutomaticReport >= 5 * 60 * 1000L &&
+            !diagnosticReportSending
+        ) {
+            diagnosticReportSending = true
+            diagnosticPreferences.edit()
+                .putLong("diagnostics_auto_email_last_sent_ms", now)
+                .apply()
+            val recentEntries = MynAssistantDiagnostics.read(commandContext).take(80)
+            val automaticDetails = recentEntries.asReversed().joinToString("\n\n") { entry ->
+                buildString {
+                    append(entry.id).append(" | ").append(entry.category)
+                    if (entry.command.isNotBlank()) append("\nKomut: ").append(entry.command)
+                    if (entry.details.isNotBlank()) append("\nAyrıntı: ").append(entry.details)
+                }
+            }.take(60_000)
+            val appVersion = runCatching {
+                commandContext.packageManager.getPackageInfo(commandContext.packageName, 0).versionName
+            }.getOrNull() ?: "unknown"
+            val automaticReport = JSONObject().apply {
+                put("source", "android")
+                put("appVersion", appVersion)
+                put("errorCode", issueId)
+                put("message", "Kullanıcı otomatik hata raporlamasını etkinleştirdi; yeni bir hata oluştu.")
+                put("details", automaticDetails)
+            }
+            MynAssistantAccountBackend.sendDiagnosticReport(currentUser, automaticReport) { success, message ->
+                diagnosticReportSending = false
+                diagnosticReportStatus = if (success) {
+                    "Otomatik hata raporu destek ekibine gönderildi."
+                } else {
+                    "Otomatik hata raporu gönderilemedi: $message"
+                }
+            }
+        }
+
         userMessage + "\nSorun kodu: " + issueId
     }
     val refreshWakeWordUi: () -> Unit = {
@@ -2109,6 +2277,19 @@ private fun AssistantScreen(
     var pendingPermissionResultTick by remember { mutableIntStateOf(0) }
     var permissionResultTick by remember { mutableIntStateOf(0) }
     var startupPermissionRequestPending by remember { mutableStateOf(false) }
+    DisposableEffect(commandContext) {
+        val lifecycle = (commandContext as? ComponentActivity)?.lifecycle
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                permissionResultTick += 1
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+    val permissionItems = remember(permissionResultTick) {
+        MynAssistantPermissionCatalog.read(commandContext)
+    }
     var showAccessibilitySetupDialog by remember { mutableStateOf(false) }
     val runtimePermissions = remember { requiredRuntimePermissionList() }
     var startSpeechAfterPermission by remember { mutableStateOf(false) }
@@ -2265,6 +2446,67 @@ private fun AssistantScreen(
             }
         }
     }
+    val openApplicationInfo: () -> Unit = {
+        commandContext.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + commandContext.packageName)
+            )
+        )
+    }
+    val openPermissionSettings: (MynPermissionItem) -> Unit = { item ->
+        try {
+            when (item.action) {
+                MynPermissionAction.REQUEST_RUNTIME -> {
+                    if (item.state == MynPermissionState.GRANTED) {
+                        openApplicationInfo()
+                    } else {
+                        val missing = item.runtimePermissions.filter { permission ->
+                            androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
+                                android.content.pm.PackageManager.PERMISSION_GRANTED
+                        }
+                        if (missing.isEmpty()) {
+                            feedback = "Bu izin zaten açık."
+                        } else {
+                            permissionLauncher.launch(missing.toTypedArray())
+                        }
+                    }
+                }
+                MynPermissionAction.OVERLAY_SETTINGS -> {
+                    commandContext.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + commandContext.packageName)
+                        )
+                    )
+                }
+                MynPermissionAction.ACCESSIBILITY_SETTINGS -> {
+                    commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+                MynPermissionAction.NOTIFICATION_SETTINGS -> {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        commandContext.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, commandContext.packageName)
+                            }
+                        )
+                    } else {
+                        openApplicationInfo()
+                    }
+                }
+                MynPermissionAction.APPLICATION_INFO -> openApplicationInfo()
+            }
+        } catch (error: Exception) {
+            feedback = recordIssue(
+                "MYN-PERM-4003",
+                "İzinler",
+                "İlgili Android izin ayarı açılamadı. Uygulama bilgileri ekranından izinleri yönetebilirsin.",
+                item.id,
+                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+            )
+        }
+    }
+
     val requestWakeWordActivation: () -> Unit = {
         if (wakeWordEnabled) {
             stopMynWakeWordService(commandContext)
@@ -2337,8 +2579,14 @@ private fun AssistantScreen(
     var pcBridgeStatus by remember(firebaseUserId) { mutableStateOf("Bilgisayar bağlantısı henüz test edilmedi.") }
     var localPcConnected by remember(firebaseUserId) { mutableStateOf(false) }
     var pcBridgeBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var pcFileListing by remember(firebaseUserId) { mutableStateOf<PcFileListing?>(null) }
+    var pcFilesDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var pcFilesLoading by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
+    var desktopPairingQrSignature by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var desktopPairingQrExpiresAtUnix by remember(firebaseUserId) { mutableStateOf<Long?>(null) }
     var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
+    var desktopPairingScanBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingStatus by remember(firebaseUserId) {
         mutableStateOf("Windows uygulamasından yeni bir eşleştirme kodu al.")
     }
@@ -2348,6 +2596,12 @@ private fun AssistantScreen(
             .uppercase(Locale.ROOT)
         if (normalizedCode.length != 10) {
             desktopPairingStatus = "Windows uygulamasında gösterilen 10 karakterli kodu gir."
+            return
+        }
+        val qrSignature = desktopPairingQrSignature
+        val qrExpiresAtUnix = desktopPairingQrExpiresAtUnix
+        if ((qrSignature == null) != (qrExpiresAtUnix == null)) {
+            desktopPairingStatus = "QR imza bilgisi eksik. QR kodunu yeniden tara veya eşleştirme kodunu elle gir."
             return
         }
 
@@ -2387,8 +2641,13 @@ private fun AssistantScreen(
                             setRequestProperty("Authorization", "Bearer $idToken")
                         }
 
-                        val requestBody = JSONObject()
-                            .put("code", normalizedCode)
+                        val requestJson = JSONObject().put("code", normalizedCode)
+                        if (qrSignature != null && qrExpiresAtUnix != null) {
+                            requestJson
+                                .put("qrSignature", qrSignature)
+                                .put("qrExpiresAtUnix", qrExpiresAtUnix)
+                        }
+                        val requestBody = requestJson
                             .toString()
                             .toByteArray(Charsets.UTF_8)
                         connection.outputStream.use { it.write(requestBody) }
@@ -2438,6 +2697,8 @@ private fun AssistantScreen(
                         desktopPairingStatus = message
                         if (approved) {
                             desktopPairingCode = ""
+                            desktopPairingQrSignature = null
+                            desktopPairingQrExpiresAtUnix = null
                             feedback = message
                         }
                     }
@@ -2452,10 +2713,23 @@ private fun AssistantScreen(
     var activeCommandListener by remember(firebaseUserId) {
         mutableStateOf<com.google.firebase.firestore.ListenerRegistration?>(null)
     }
+    // Prevent duplicate writes during the network gap before Firestore returns a command ID.
+    var commandSubmissionInProgress by remember(firebaseUserId) { mutableStateOf(false) }
+    var commandSubmissionStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
+    var commandSubmissionTimedOut by remember(firebaseUserId) { mutableStateOf(false) }
     var activeCommandStartedAt by remember(firebaseUserId) { mutableStateOf(0L) }
     var activeCommandDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var activeCommandName by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var activeCommandIsAndroidTarget by remember(firebaseUserId) { mutableStateOf(false) }
+    var trackedCommandResultHandler by remember(firebaseUserId) {
+        mutableStateOf<((String, String, String) -> Unit)?>(null)
+    }
+    var pendingPcDownloadEntry by remember(firebaseUserId) { mutableStateOf<PcFileEntry?>(null) }
+    var pendingPcDownloadUri by remember(firebaseUserId) { mutableStateOf<Uri?>(null) }
+    var pendingPcUploadDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var pendingPcUploadDestinationPath by remember(firebaseUserId) { mutableStateOf<String?>(null) }
 
-    // A Firestore document may remain pending/running forever if the PC disconnects.
+    // A Firestore document may remain pending/running forever if a remote device disconnects.
     // Stop observing after a bounded interval and report a timeout, never success.
     LaunchedEffect(firebaseUserId, activeCommandListener, activeCommandStartedAt) {
         val startedAt = activeCommandStartedAt
@@ -2466,13 +2740,54 @@ private fun AssistantScreen(
                 kotlinx.coroutines.delay(timeoutMillis - elapsed)
             }
             if (activeCommandListener != null && activeCommandStartedAt == startedAt) {
+                val timedOutCommand = activeCommandName
                 activeCommandListener?.remove()
                 activeCommandListener = null
+                activeCommandName = null
+                pcFilesLoading = false
                 feedback = recordIssue(
-                    "MYN-PC-6007", "Bilgisayar komutu",
-                    "Bilgisayardan 60 saniye içinde sonuç gelmedi. Bağlantıyı kontrol et; komutun çalışıp çalışmadığını bilgisayardan doğrula.",
+                    if (activeCommandIsAndroidTarget) "MYN-ANDROID-6007" else "MYN-PC-6007",
+                    if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                    remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = false),
                     "",
-                    "REMOTE_COMMAND_TIMEOUT; deviceId=" + (activeCommandDeviceId ?: "unknown")
+                    "REMOTE_COMMAND_TIMEOUT; platform=" +
+                        (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                        "; deviceId=" + (activeCommandDeviceId ?: "unknown")
+                )
+                val handler = trackedCommandResultHandler
+                trackedCommandResultHandler = null
+                if (timedOutCommand != null) handler?.invoke(timedOutCommand, "timeout", "")
+                pendingPcDownloadEntry = null
+                pendingPcDownloadUri = null
+            }
+        }
+    }
+
+    // Firestore may delay acknowledgement while offline. Stop the spinner after 20 seconds,
+    // but retain the submission lock because the queued write may still reach the target later.
+    LaunchedEffect(firebaseUserId, commandSubmissionInProgress, commandSubmissionStartedAt) {
+        val startedAt = commandSubmissionStartedAt
+        if (commandSubmissionInProgress && startedAt > 0L) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed < REMOTE_COMMAND_SUBMISSION_TIMEOUT_MILLIS) {
+                kotlinx.coroutines.delay(REMOTE_COMMAND_SUBMISSION_TIMEOUT_MILLIS - elapsed)
+            }
+            if (isRemoteCommandSubmissionTimeoutExpired(
+                    commandSubmissionInProgress,
+                    startedAt,
+                    System.currentTimeMillis()
+                )) {
+                commandSubmissionTimedOut = true
+                pcFilesLoading = false
+                feedback = recordIssue(
+                    if (activeCommandIsAndroidTarget) "MYN-ANDROID-6009" else "MYN-PC-6009",
+                    if (activeCommandIsAndroidTarget) "Android komutu" else "Bilgisayar komutu",
+                    remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = true),
+                    "",
+                    "COMMAND_SUBMISSION_TIMEOUT; platform=" +
+                        (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                        "; deviceId=" + (activeCommandDeviceId ?: "unknown") +
+                        "; command=" + (activeCommandName ?: "unknown")
                 )
             }
         }
@@ -2486,85 +2801,448 @@ private fun AssistantScreen(
 
     val sendTrackedRemoteCommand: (String, String, Map<String, Any>) -> Unit = sendTrackedCommand@{
             targetDeviceId, targetCommandName, targetPayload ->
-        if (activeCommandListener != null) {
-            feedback = "Önceki bilgisayar komutunun sonucu henüz gelmedi. Yinelenen komut göndermemek için yeni istek gönderilmedi."
+        if (!isRemoteCommandSubmissionAllowed(
+                commandSubmissionInProgress,
+                activeCommandListener != null
+            )) {
+            feedback = if (commandSubmissionTimedOut) {
+                "Önceki komutun durumu belirsiz. Yinelenen komut gönderilmedi; bağlantıyı kontrol edip ilk isteğin sonucunu bekle."
+            } else {
+                "Önceki uzaktan komut gönderiliyor veya sonucu bekleniyor. Yinelenen komut gönderilmedi."
+            }
             return@sendTrackedCommand
         }
+        commandSubmissionTimedOut = false
+        commandSubmissionStartedAt = System.currentTimeMillis()
+        commandSubmissionInProgress = true
         activeCommandDeviceId = targetDeviceId
-        feedback = "Komut bilgisayara gönderiliyor..."
+        activeCommandName = targetCommandName
+        activeCommandIsAndroidTarget = devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
+        feedback = if (activeCommandIsAndroidTarget) {
+            "Komut seçilen Android cihazına gönderiliyor..."
+        } else {
+            "Komut bilgisayara gönderiliyor..."
+        }
         sendRemoteCommand(targetDeviceId, targetCommandName, targetPayload) { message, commandId ->
-            feedback = message
+            if (commandId == null) {
+                commandSubmissionInProgress = false
+                commandSubmissionStartedAt = 0L
+                commandSubmissionTimedOut = false
+            }
+            feedback = if (
+                commandId != null &&
+                devices.firstOrNull { it.id == targetDeviceId }?.isPcTarget == false
+            ) {
+                "Komut seçtiğin Android cihazına iletildi; çalıştırma sonucu bekleniyor."
+            } else {
+                message
+            }
             if (commandId != null) {
                 val registration = FirebaseFirestore.getInstance()
                     .collection("commands")
                     .document(commandId)
                     .addSnapshotListener { snapshot, error ->
                         if (error != null) {
+                            pcFilesLoading = false
                             feedback = recordIssue(
-                                "MYN-PC-6001", "Bilgisayar komutu",
-                                "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
+                                if (activeCommandIsAndroidTarget) "MYN-ANDROID-6001" else "MYN-PC-6001",
+                                if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                if (activeCommandIsAndroidTarget)
+                                    "Android cihazdan işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene."
+                                else
+                                    "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
                                 targetPayload["text"]?.toString().orEmpty(),
                                 error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
                             )
                             activeCommandListener = null
+                            activeCommandName = null
+                            val handler = trackedCommandResultHandler
+                            trackedCommandResultHandler = null
+                            handler?.invoke(targetCommandName, "error", "")
                         } else if (snapshot == null || !snapshot.exists()) {
+                            pcFilesLoading = false
                             feedback = recordIssue(
-                                "MYN-PC-6002", "Bilgisayar komutu",
-                                "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
+                                if (activeCommandIsAndroidTarget) "MYN-ANDROID-6002" else "MYN-PC-6002",
+                                if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                if (activeCommandIsAndroidTarget)
+                                    "Android cihaz komutunun sonucunu bulamadım. Hedef cihazın bağlantısını kontrol et."
+                                else
+                                    "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
                                 targetPayload["text"]?.toString().orEmpty(),
-                                "COMMAND_DOCUMENT_MISSING; id=" + commandId
+                                "COMMAND_DOCUMENT_MISSING; platform=" +
+                                    (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                                    "; id=" + commandId
                             )
                             activeCommandListener = null
+                            activeCommandName = null
+                            val handler = trackedCommandResultHandler
+                            trackedCommandResultHandler = null
+                            handler?.invoke(targetCommandName, "missing", "")
                         } else {
                             val status = snapshot.getString("status").orEmpty()
                             val result = snapshot.getString("result").orEmpty()
                             when (status) {
-                                "pending" -> feedback = "Komut bilgisayara ulaştı; işlemesi bekleniyor."
-                                "running" -> feedback = "Bilgisayar komutu uyguluyor..."
+                                "pending" -> feedback =
+                                    remoteCommandStatusMessageForTarget(status, activeCommandIsAndroidTarget)
+                                "running" -> feedback =
+                                    remoteCommandStatusMessageForTarget(status, activeCommandIsAndroidTarget)
                                 "completed" -> {
-                                    feedback = result.ifBlank { "Komut tamamlandı." }
+                                    if (targetCommandName == "list_files") {
+                                        try {
+                                            val listing = parsePcFileListing(result)
+                                            pcFileListing = listing
+                                            pcFilesDeviceId = targetDeviceId
+                                            feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
+                                        } catch (parseError: Exception) {
+                                            pcFileListing = null
+                                            feedback = recordIssue(
+                                                "MYN-PC-6008", "Bilgisayar dosyaları",
+                                                "Bilgisayardan gelen dosya listesi okunamadı. Windows yardımcı uygulamasını güncelleyip yeniden dene.",
+                                                "",
+                                                "FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
+                                            )
+                                        }
+                                    } else if (targetCommandName == "download_file") {
+                                        // The payload contains file bytes. Never show or log it as ordinary command text.
+                                        feedback = "Dosya verisi alındı; boyut ve SHA-256 doğrulanıyor..."
+                                    } else {
+                                        feedback = result.ifBlank { "Komut tamamlandı." }
+                                    }
+                                    pcFilesLoading = false
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "completed", result)
                                 }
                                 "failed" -> {
+                                    pcFilesLoading = false
                                     feedback = recordIssue(
-                                        "MYN-PC-6003", "Bilgisayar komutu",
-                                        result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
+                                        if (activeCommandIsAndroidTarget) "MYN-ANDROID-6003" else "MYN-PC-6003",
+                                        if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                        result.ifBlank {
+                                            if (activeCommandIsAndroidTarget)
+                                                "Android cihaz komutu tamamlayamadı. Sorun kodunu paylaşabilirsin."
+                                            else
+                                                "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin."
+                                        },
                                         targetPayload["text"]?.toString().orEmpty(),
-                                        "REMOTE_COMMAND_FAILED; result=" + result
+                                        "REMOTE_COMMAND_FAILED; platform=" +
+                                            (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                                            "; command=" + targetCommandName
                                     )
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "failed", result)
                                 }
                                 "cancelled" -> {
-                                    feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
+                                    pcFilesLoading = false
+                                    feedback = if (activeCommandIsAndroidTarget)
+                                        "Komut Android cihazında çalıştırılmadan önce iptal edildi."
+                                    else
+                                        "Komut bilgisayarda çalıştırılmadan önce iptal edildi."
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "cancelled", "")
                                 }
                                 else -> {
+                                    pcFilesLoading = false
                                     feedback = recordIssue(
-                                        "MYN-PC-6005", "Bilgisayar komutu",
-                                        "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
+                                        if (activeCommandIsAndroidTarget) "MYN-ANDROID-6005" else "MYN-PC-6005",
+                                        if (activeCommandIsAndroidTarget) "Android cihaz komutu" else "Bilgisayar komutu",
+                                        if (activeCommandIsAndroidTarget)
+                                            "Android cihaz beklenmeyen bir işlem durumu bildirdi."
+                                        else
+                                            "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
                                         targetPayload["text"]?.toString().orEmpty(),
-                                        "UNKNOWN_COMMAND_STATUS=" + status
+                                        "UNKNOWN_COMMAND_STATUS; platform=" +
+                                            (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                                            "; status=" + status
                                     )
                                     activeCommandListener = null
+                                    activeCommandName = null
+                                    val handler = trackedCommandResultHandler
+                                    trackedCommandResultHandler = null
+                                    handler?.invoke(targetCommandName, "unknown", status)
                                 }
                             }
                         }
                     }
                 activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
-            } else if (
-                message.contains("hata", ignoreCase = true) ||
-                message.contains("gönderilemedi", ignoreCase = true) ||
-                message.contains("başarısız", ignoreCase = true)
-            ) {
-                feedback = recordIssue(
-                    "MYN-PC-6006", "Bilgisayar bağlantısı",
-                    message,
-                    targetPayload["text"]?.toString().orEmpty(),
-                    "REMOTE_COMMAND_REJECTED; message=" + message
-                )
+                commandSubmissionStartedAt = 0L
+                commandSubmissionTimedOut = false
+                commandSubmissionInProgress = false
+                if (targetCommandName in setOf("list_files", "download_file", "upload_file", "zip_folder")) {
+                    pcFilesLoading = true
+                }
+            } else {
+                pcFilesLoading = false
+                activeCommandName = null
+                if (
+                    message.contains("hata", ignoreCase = true) ||
+                    message.contains("gönderilemedi", ignoreCase = true) ||
+                    message.contains("başarısız", ignoreCase = true)
+                ) {
+                    feedback = recordIssue(
+                        if (activeCommandIsAndroidTarget) "MYN-ANDROID-6006" else "MYN-PC-6006",
+                        if (activeCommandIsAndroidTarget) "Android cihaz bağlantısı" else "Bilgisayar bağlantısı",
+                        message,
+                        targetPayload["text"]?.toString().orEmpty(),
+                        "REMOTE_COMMAND_REJECTED; platform=" +
+                            (if (activeCommandIsAndroidTarget) "Android" else "Windows") +
+                            "; command=" + targetCommandName
+                    )
+                } else {
+                    feedback = message
+                }
+                val handler = trackedCommandResultHandler
+                trackedCommandResultHandler = null
+                handler?.invoke(targetCommandName, "rejected", message)
             }
         }
+    }
+
+    val requestPcFileList: (String, String) -> Unit = requestFiles@{ targetDeviceId, path ->
+        if (activeCommandListener != null) {
+            feedback = "Önceki bilgisayar komutu tamamlanmalı. Yeni dosya isteği gönderilmedi."
+        } else {
+            selectedDeviceId = targetDeviceId
+            pcFilesDeviceId = targetDeviceId
+            pcFilesLoading = true
+            if (path.isBlank()) pcFileListing = null
+            sendTrackedRemoteCommand(targetDeviceId, "list_files", mapOf("path" to path))
+        }
+    }
+
+    val pcFileDownloadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val entry = pendingPcDownloadEntry
+        val targetDeviceId = pcFilesDeviceId
+        if (uri == null) {
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+            feedback = "Dosya indirme iptal edildi."
+            return@rememberLauncherForActivityResult
+        }
+
+        val targetDevice = devices.firstOrNull { it.id == targetDeviceId }
+        if (entry == null || targetDeviceId.isNullOrBlank() ||
+            targetDevice == null || targetDevice.connectionMode != "firebase-agent" ||
+            !targetDevice.isOnlineAt(presenceNowMillis)
+        ) {
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+            feedback = "Dosya indirmek için aynı çevrimiçi Windows Agent cihazını seç."
+            return@rememberLauncherForActivityResult
+        }
+        if (activeCommandListener != null) {
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+            feedback = "Önceki bilgisayar komutu tamamlanmalı. Yeni indirme başlatılmadı."
+            return@rememberLauncherForActivityResult
+        }
+
+        pendingPcDownloadUri = uri
+        pcFilesLoading = true
+        feedback = "Dosya bilgisayardan alınıyor..."
+        trackedCommandResultHandler = downloadResult@{ commandName, status, result ->
+            val selectedEntry = pendingPcDownloadEntry
+            val saveUri = pendingPcDownloadUri
+            pendingPcDownloadEntry = null
+            pendingPcDownloadUri = null
+
+            if (commandName != "download_file") {
+                pcFilesLoading = false
+                feedback = "Beklenmeyen komut yanıtı alındı; dosya kaydedilmedi."
+                return@downloadResult
+            }
+            if (status != "completed") {
+                pcFilesLoading = false
+                feedback = recordIssue(
+                    "MYN-PC-6010", "Dosya indirme",
+                    "Dosya indirilemedi. Bağlantıyı kontrol edip tekrar dene.",
+                    "",
+                    "FILE_DOWNLOAD_COMMAND_FAILED; status=" + status
+                )
+                return@downloadResult
+            }
+
+            val verifiedPayload = try {
+                val json = JSONObject(result)
+                verifyPcFileDownloadPayload(
+                    name = json.getString("name"),
+                    path = json.getString("path"),
+                    size = json.getLong("size"),
+                    expectedSha256 = json.getString("sha256"),
+                    contentBase64 = json.getString("contentBase64")
+                ).also { payload ->
+                    if (selectedEntry == null || payload.name != selectedEntry.name || payload.path != selectedEntry.path) {
+                        throw IllegalArgumentException("Dosya yanıtı seçilen öğeyle eşleşmiyor.")
+                    }
+                }
+            } catch (error: Exception) {
+                pcFilesLoading = false
+                feedback = recordIssue(
+                    "MYN-PC-6011", "Dosya bütünlüğü",
+                    "İndirilen dosyanın boyutu veya SHA-256 değeri doğrulanamadı. Dosya kaydedilmedi.",
+                    "",
+                    "FILE_DOWNLOAD_VALIDATION_FAILED; type=" + error.javaClass.simpleName
+                )
+                return@downloadResult
+            }
+
+            if (saveUri == null) {
+                pcFilesLoading = false
+                feedback = "Dosyanın kaydedileceği hedef seçilmedi."
+                return@downloadResult
+            }
+
+            pcFilesLoading = true
+            feedback = "Boyut ve SHA-256 doğrulandı; dosya telefona kaydediliyor..."
+            Thread {
+                var saveError: Exception? = null
+                try {
+                    val output = commandContext.applicationContext.contentResolver
+                        .openOutputStream(saveUri, "wt")
+                        ?: throw java.io.IOException("Seçilen hedef dosya yazmaya açılamadı.")
+                    output.use {
+                        it.write(verifiedPayload.content)
+                        it.flush()
+                    }
+                } catch (error: Exception) {
+                    saveError = error
+                }
+
+                Handler(Looper.getMainLooper()).post {
+                    pcFilesLoading = false
+                    if (saveError == null) {
+                        feedback = "Dosya indirildi ve SHA-256 doğrulandı: ${verifiedPayload.name} (${verifiedPayload.size} bayt)."
+                    } else {
+                        feedback = recordIssue(
+                            "MYN-PC-6012", "Dosya kaydetme",
+                            "Dosya doğrulandı ancak seçilen telefona kaydedilemedi.",
+                            "",
+                            "FILE_DOWNLOAD_SAVE_FAILED; type=" + saveError.javaClass.simpleName
+                        )
+                    }
+                }
+            }.start()
+        }
+
+        sendTrackedRemoteCommand(targetDeviceId, "download_file", mapOf("path" to entry.path))
+    }
+
+    val pcFileUploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val targetDeviceId = pendingPcUploadDeviceId
+        val destinationPath = pendingPcUploadDestinationPath
+        pendingPcUploadDeviceId = null
+        pendingPcUploadDestinationPath = null
+
+        if (uri == null) {
+            feedback = "Dosya seçimi iptal edildi."
+            return@rememberLauncherForActivityResult
+        }
+        val targetDevice = devices.firstOrNull { it.id == targetDeviceId }
+        if (targetDeviceId.isNullOrBlank() || destinationPath.isNullOrBlank() ||
+            targetDevice == null || targetDevice.connectionMode != "firebase-agent" ||
+            !targetDevice.isOnlineAt(presenceNowMillis) ||
+            pcFilesDeviceId != targetDeviceId || pcFileListing?.currentPath != destinationPath
+        ) {
+            feedback = "Hedef klasör veya bilgisayar değişti. Dosya gönderilmedi; listeyi yeniden iste."
+            return@rememberLauncherForActivityResult
+        }
+        if (activeCommandListener != null || commandSubmissionInProgress || pcFilesLoading) {
+            feedback = "Önceki bilgisayar işlemi bitmeli. Dosya gönderilmedi."
+            return@rememberLauncherForActivityResult
+        }
+
+        pcFilesLoading = true
+        feedback = "Telefon dosyası okunuyor ve doğrulanıyor..."
+        Thread {
+            var preparedFields: Map<String, Any>? = null
+            var readFailure: Exception? = null
+            try {
+                val displayName = try {
+                    commandContext.contentResolver.query(
+                        uri,
+                        arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                        null,
+                        null,
+                        null
+                    )?.use { cursor ->
+                        val column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+                    }
+                } catch (_: Exception) {
+                    null
+                } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "phone-upload.bin"
+
+                val bytes = commandContext.contentResolver.openInputStream(uri)?.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        if (output.size().toLong() + count > MAX_PC_FILE_UPLOAD_BYTES) {
+                            throw IllegalArgumentException(
+                                "Bu sürüm tek dosyada en fazla $MAX_PC_FILE_UPLOAD_BYTES bayt yükler. Büyük dosyalar için parçalı aktarım henüz etkin değil."
+                            )
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                } ?: throw java.io.IOException("Seçilen telefondaki dosya okunamadı.")
+
+                preparedFields = buildPcFileUploadPayload(
+                    name = displayName,
+                    destinationPath = destinationPath,
+                    content = bytes
+                ).toCommandFields()
+            } catch (error: Exception) {
+                readFailure = error
+            }
+
+            Handler(Looper.getMainLooper()).post {
+                val error = readFailure
+                if (error != null) {
+                    pcFilesLoading = false
+                    feedback = recordIssue(
+                        "MYN-PC-6013", "Dosya yükleme",
+                        error.message ?: "Dosya okunamadı veya yükleme boyutu sınırını aştı.",
+                        "",
+                        "PHONE_FILE_UPLOAD_PREPARE_FAILED; type=" + error.javaClass.simpleName
+                    )
+                    return@post
+                }
+
+                val liveTarget = devices.firstOrNull { it.id == targetDeviceId }
+                if (targetDeviceId.isNullOrBlank() || destinationPath.isNullOrBlank() ||
+                    pcFilesDeviceId != targetDeviceId || pcFileListing?.currentPath != destinationPath ||
+                    liveTarget == null || liveTarget.connectionMode != "firebase-agent" ||
+                    !liveTarget.isOnlineAt(System.currentTimeMillis())
+                ) {
+                    pcFilesLoading = false
+                    feedback = "Hedef bilgisayar veya klasör değişti. Dosya gönderilmedi."
+                    return@post
+                }
+                val fields = preparedFields
+                if (fields == null) {
+                    pcFilesLoading = false
+                    feedback = "Dosya yükleme isteği hazırlanamadı."
+                    return@post
+                }
+                feedback = "Dosya Windows bilgisayarına gönderiliyor..."
+                sendTrackedRemoteCommand(targetDeviceId, "upload_file", fields)
+            }
+        }.start()
     }
 
     DisposableEffect(commandContext) {
@@ -2623,7 +3301,7 @@ private fun AssistantScreen(
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    DisposableEffect(firebaseUserId) {
+    DisposableEffect(firebaseUserId, devicesRefreshRevision) {
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
         if (!firebaseUserId.isNullOrBlank()) {
             devicesLoading = true
@@ -2680,9 +3358,236 @@ private fun AssistantScreen(
         }
         onDispose { registration?.remove() }
     }
+    LaunchedEffect(firebaseUserId, devicesLoading) {
+        if (!devicesLoading || firebaseUserId.isNullOrBlank()) return@LaunchedEffect
+        delay(12_000L)
+        if (devicesLoading) {
+            devicesLoading = false
+            devicesError = "Cihaz listesi zaman aşımına uğradı. Bağlantını kontrol edip yeniden dene."
+        }
+    }
     val pcDevices = devices.filter { it.isPcTarget }
+    val androidDevices = devices.filter {
+        !it.isPcTarget && (
+            it.platform.equals("Android", ignoreCase = true) ||
+                it.id.startsWith("android-", ignoreCase = true)
+            )
+    }
+    val currentAndroidDeviceId = remember(firebaseUserId, devices) {
+        val activeUid = firebaseUserId.orEmpty()
+        val installationId = commandContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(ANDROID_INSTALLATION_ID_KEY, null)
+        if (activeUid.isBlank() || installationId.isNullOrBlank()) {
+            null
+        } else {
+            runCatching {
+                val digest = MessageDigest.getInstance("SHA-256")
+                    .digest("$activeUid:$installationId".toByteArray(Charsets.UTF_8))
+                val suffix = digest.take(12).joinToString("") { byte ->
+                    "%02x".format(byte.toInt() and 0xff)
+                }
+                "android-$suffix"
+            }.getOrNull()
+        }
+    }
+    val otherAndroidDevices = androidDevices.filter { it.id != currentAndroidDeviceId }
+
+    // The Android receiver is active only while this app is in the foreground.
+    // Every claim re-checks owner, exact device ID, pending status and expiry in a transaction.
+    DisposableEffect(firebaseUserId, signedIn, currentAndroidDeviceId, androidCommandReceiverActive) {
+        val ownerUid = firebaseUserId?.takeIf { signedIn }
+        val ownDeviceId = currentAndroidDeviceId
+        if (ownerUid.isNullOrBlank() || ownDeviceId.isNullOrBlank() || !androidCommandReceiverActive) {
+            return@DisposableEffect onDispose {}
+        }
+
+        val firestore = FirebaseFirestore.getInstance()
+        var receiverDisposed = false
+        lateinit var processNextPendingAndroidCommand: () -> Unit
+        lateinit var claimAndRunAndroidCommand: (com.google.firebase.firestore.DocumentSnapshot) -> Unit
+
+        processNextPendingAndroidCommand = {
+            if (!receiverDisposed &&
+                androidCommandReceiverInFlightId == null &&
+                FirebaseAuth.getInstance().currentUser?.uid == ownerUid &&
+                commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getBoolean("android_device_foreground", false)
+            ) {
+                firestore.collection("commands")
+                    .whereEqualTo("ownerId", ownerUid)
+                    .whereEqualTo("deviceId", ownDeviceId)
+                    .whereEqualTo("status", "pending")
+                    .get(com.google.firebase.firestore.Source.SERVER)
+                    .addOnSuccessListener { pendingSnapshot ->
+                        if (!receiverDisposed && androidCommandReceiverInFlightId == null) {
+                            pendingSnapshot.documents.firstOrNull()?.let { claimAndRunAndroidCommand(it) }
+                        }
+                    }
+                    .addOnFailureListener {
+                        Log.w("MynAndroidCommand", "Pending Android commands could not be refreshed")
+                    }
+            }
+        }
+
+        claimAndRunAndroidCommand = claimCommand@{ pendingDocument ->
+            if (receiverDisposed || androidCommandReceiverInFlightId != null) {
+                return@claimCommand
+            }
+            if (pendingDocument.getString("ownerId") != ownerUid ||
+                pendingDocument.getString("deviceId") != ownDeviceId ||
+                pendingDocument.getString("status") != "pending"
+            ) {
+                processNextPendingAndroidCommand()
+                return@claimCommand
+            }
+
+            val commandReference = pendingDocument.reference
+            androidCommandReceiverInFlightId = pendingDocument.id
+            firestore.runTransaction { transaction ->
+                val current = transaction.get(commandReference)
+                if (!current.exists() ||
+                    current.getString("ownerId") != ownerUid ||
+                    current.getString("deviceId") != ownDeviceId ||
+                    current.getString("status") != "pending"
+                ) {
+                    return@runTransaction null
+                }
+
+                val expiryMillis = current.getTimestamp("expiresAt")?.toDate()?.time ?: 0L
+                if (expiryMillis <= System.currentTimeMillis()) {
+                    transaction.update(commandReference, "status", "failed")
+                    transaction.update(
+                        commandReference,
+                        "result",
+                        "Komutun süresi dolmuş; Android cihazında çalıştırılmadı."
+                    )
+                    transaction.update(commandReference, "completedAt", FieldValue.serverTimestamp())
+                    return@runTransaction null
+                }
+
+                transaction.update(commandReference, "status", "running")
+                transaction.update(commandReference, "startedAt", FieldValue.serverTimestamp())
+                Triple(
+                    current.getString("command").orEmpty(),
+                    current.getString("text").orEmpty(),
+                    expiryMillis
+                )
+            }.addOnSuccessListener { claim ->
+                if (claim == null) {
+                    if (androidCommandReceiverInFlightId == pendingDocument.id) {
+                        androidCommandReceiverInFlightId = null
+                    }
+                    processNextPendingAndroidCommand()
+                    return@addOnSuccessListener
+                }
+                androidCommandReceiverClaimRetryCount = 0
+                Handler(Looper.getMainLooper()).post {
+                    val foregroundNow = commandContext
+                        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .getBoolean("android_device_foreground", false)
+                    val sameAuthenticatedAccount =
+                        FirebaseAuth.getInstance().currentUser?.uid == ownerUid
+                    val notExpiredAtExecution =
+                        claim.third > System.currentTimeMillis()
+                    val commandName = claim.first
+                    val rawText = claim.second
+                    val commandAllowed = commandName == "text_command" &&
+                        AndroidRemoteCommandPolicy.isAllowed(rawText)
+
+                    val executionRejection = AndroidRemoteCommandExecutionPolicy.rejectionMessage(
+                        receiverDisposed = receiverDisposed,
+                        sameAuthenticatedAccount = sameAuthenticatedAccount,
+                        notExpiredAtExecution = notExpiredAtExecution,
+                        foreground = foregroundNow,
+                        commandName = commandName,
+                        commandAllowed = commandAllowed
+                    )
+                    val result = executionRejection ?: runCatching {
+                        executeAndroidTextCommand(commandContext, rawText)
+                    }.getOrElse {
+                        "Telefon komutu çalıştırılamadı. Cihazın bağlantısını ve izinlerini kontrol et."
+                    }
+                    val resultIndicatesFailure = androidCommandResultIndicatesFailure(result)
+                    val finalStatus = if (
+                        AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted(
+                            receiverDisposed = receiverDisposed,
+                            sameAuthenticatedAccount = sameAuthenticatedAccount,
+                            notExpiredAtExecution = notExpiredAtExecution,
+                            foreground = foregroundNow,
+                            commandAllowed = commandAllowed,
+                            resultIndicatesFailure = resultIndicatesFailure
+                        )
+                    ) "completed" else "failed"
+
+                    commandReference.update(
+                        mapOf(
+                            "status" to finalStatus,
+                            "result" to result,
+                            "completedAt" to FieldValue.serverTimestamp(),
+                            "receiverPlatform" to "Android"
+                        )
+                    ).addOnCompleteListener {
+                        if (androidCommandReceiverInFlightId == pendingDocument.id) {
+                            androidCommandReceiverInFlightId = null
+                        }
+                        processNextPendingAndroidCommand()
+                    }.addOnFailureListener {
+                        Log.w("MynAndroidCommand", "Remote Android command result could not be saved")
+                    }
+                }
+            }.addOnFailureListener { error ->
+                Log.w("MynAndroidCommand", "Remote Android command could not be claimed", error)
+                if (androidCommandReceiverInFlightId == pendingDocument.id) {
+                    androidCommandReceiverInFlightId = null
+                }
+                val retryNumber = androidCommandReceiverClaimRetryCount + 1
+                androidCommandReceiverClaimRetryCount = retryNumber
+                val retryDelayMillis = AndroidCommandClaimRetryPolicy.delayMillis(retryNumber)
+                if (retryDelayMillis != null) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        val sameAccountStillActive =
+                            FirebaseAuth.getInstance().currentUser?.uid == ownerUid
+                        val foregroundStillActive = commandContext
+                            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            .getBoolean("android_device_foreground", false)
+                        if (!receiverDisposed && sameAccountStillActive && foregroundStillActive &&
+                            androidCommandReceiverClaimRetryCount == retryNumber
+                        ) {
+                            processNextPendingAndroidCommand()
+                        }
+                    }, retryDelayMillis)
+                } else {
+                    Log.e(
+                        "MynAndroidCommand",
+                        "Remote Android command claim retries exhausted; waiting for the next queue change"
+                    )
+                }
+            }
+        }
+
+        val registration = firestore.collection("commands")
+            .whereEqualTo("ownerId", ownerUid)
+            .whereEqualTo("deviceId", ownDeviceId)
+            .whereEqualTo("status", "pending")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("MynAndroidCommand", "Remote Android command listener unavailable")
+                    return@addSnapshotListener
+                }
+                if (androidCommandReceiverInFlightId == null) {
+                    snapshot?.documents?.firstOrNull()?.let { claimAndRunAndroidCommand(it) }
+                }
+            }
+        onDispose {
+            receiverDisposed = true
+            registration.remove()
+            androidCommandReceiverInFlightId = null
+        }
+    }
     val localPcDeviceId = firebaseUserId?.let { "windows-" + it }
-    val selectedPcId = DevicePresencePolicy.preferredPcDeviceId(
+    val selectedPcId = DevicePresencePolicy.selectedPcDeviceId(
+        manuallySelectedPcDeviceId,
         pcDevices.map { device ->
             PcDeviceRouteCandidate(
                 id = device.id,
@@ -2819,15 +3724,23 @@ private fun AssistantScreen(
     val runAssistantCommand: (String) -> Unit = { rawCommand ->
         val textCommand = rawCommand.trim()
         val computerPrefix = COMPUTER_COMMAND_PREFIX.find(textCommand)
-        val target = when (commandTarget) {
-            "PHONE" -> "PHONE"
-            "PC" -> "PC"
-            else -> if (computerPrefix != null) "PC" else "PHONE"
-        }
+        val target = resolveAssistantCommandTarget(commandTarget, computerPrefix != null)
         val routedText = if (target == "PC" && computerPrefix != null) {
             textCommand.substring(computerPrefix.range.last + 1).trim()
         } else {
             textCommand
+        }
+        val manualPcSelection = target == "PC" && !manuallySelectedPcDeviceId.isNullOrBlank()
+        val manualPcDevice = if (manualPcSelection) {
+            pcDevices.firstOrNull { it.id == manuallySelectedPcDeviceId }
+        } else {
+            null
+        }
+        val manualAndroidSelection = target == "ANDROID" && !manuallySelectedAndroidDeviceId.isNullOrBlank()
+        val manualAndroidDevice = if (manualAndroidSelection) {
+            androidDevices.firstOrNull { it.id == manuallySelectedAndroidDeviceId }
+        } else {
+            null
         }
         val contactAction = contactActionKind(textCommand)
         val phoneNumber = extractPhoneNumber(textCommand)
@@ -2835,6 +3748,23 @@ private fun AssistantScreen(
 
         when {
             textCommand.isBlank() -> feedback = "Önce bir komut yaz."
+            target == "ANDROID" && !signedIn ->
+                feedback = "Uzak Android komutu göndermek için aynı MynAssistant hesabında oturum aç."
+            target == "ANDROID" && manualAndroidDevice == null ->
+                feedback = "Seçtiğin Android cihaz artık bu hesapta kayıtlı görünmüyor. Cihaz listesini yenileyip yeniden seç."
+            target == "ANDROID" && manualAndroidDevice?.isOnlineAt(presenceNowMillis) != true ->
+                feedback = "Seçtiğin Android cihaz çevrimdışı. Komut başka bir cihaza yönlendirilmedi."
+            target == "ANDROID" && !AndroidRemoteCommandPolicy.isAllowed(textCommand) ->
+                feedback = AndroidRemoteCommandPolicy.rejectionMessage()
+            target == "ANDROID" -> {
+                val targetDevice = manualAndroidDevice
+                if (targetDevice == null) {
+                    feedback = "Önce gerçek bir Android cihaz seç."
+                } else {
+                    feedback = "Komut seçtiğin Android cihazına gönderiliyor..."
+                    sendTrackedRemoteCommand(targetDevice.id, "text_command", mapOf("text" to textCommand))
+                }
+            }
             target == "PHONE" && relationshipAssignment != null -> {
                 val missing = if (
                     androidx.core.content.ContextCompat.checkSelfPermission(
@@ -2962,6 +3892,27 @@ private fun AssistantScreen(
             }
             routedText.isBlank() -> feedback = "Bilgisayar için komutu da yaz. Örn. bilgisayar Chrome aç."
             !signedIn -> feedback = "Bilgisayara komut göndermek için önce giriş yap."
+            manualPcSelection && manualPcDevice == null ->
+                feedback = "Seçtiğin bilgisayar artık bu hesapta kayıtlı görünmüyor. Cihaz listesini yenileyip tekrar seç."
+            manualPcSelection && manualPcDevice != null &&
+                manualPcDevice.id == localPcDeviceId && localPcConnected -> {
+                feedback = "Komut seçtiğin bilgisayara gönderiliyor..."
+                sendLocalPcText(routedText)
+            }
+            manualPcSelection && manualPcDevice != null &&
+                manualPcDevice.connectionMode.equals("firebase-agent", ignoreCase = true) &&
+                manualPcDevice.isOnlineAt(presenceNowMillis) -> {
+                feedback = "Komut seçtiğin bilgisayara gönderiliyor..."
+                sendTrackedRemoteCommand(manualPcDevice.id, "text_command", mapOf("text" to routedText))
+            }
+            manualPcSelection && manualPcDevice != null &&
+                manualPcDevice.id == localPcDeviceId ->
+                feedback = "Seçtiğin yerel bilgisayar çevrimdışı. Bağlantıyı yeniden test et."
+            manualPcSelection && manualPcDevice != null &&
+                !manualPcDevice.isOnlineAt(presenceNowMillis) ->
+                feedback = "Seçtiğin bilgisayar çevrimdışı. Komut başka bir cihaza yönlendirilmedi."
+            manualPcSelection ->
+                feedback = "Seçilen bilgisayarın bağlantı türü bu komut akışını desteklemiyor."
             selectedDevice?.isOnlineAt(presenceNowMillis) == true && selectedDevice.connectionMode == "firebase-agent" -> {
                 feedback = "Komut bilgisayarına gönderiliyor..."
                 sendTrackedRemoteCommand(selectedDevice.id, "text_command", mapOf("text" to routedText))
@@ -3066,17 +4017,19 @@ private fun AssistantScreen(
                         }
                     }
                 } else {
-                    Text(when (page) {
-                        Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol"
-                        Page.REGISTER -> "Kayıt ol"
-                        Page.AUTH -> "Hesap ekle"
-                        Page.DEVICES -> "Cihazlarım"
-                        Page.SETTINGS -> "Ayarlar"
-                        Page.REMOTE -> "PC Kumandası"
-                        Page.FILES -> "PcFiles"
-                        Page.DIAGNOSTICS -> "Hata kayıtları"
-                        else -> "Ana sayfa"
-                    }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    if (page != Page.REMOTE) {
+                        Text(when (page) {
+                            Page.LOGIN -> if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol"
+                            Page.REGISTER -> "Kayıt ol"
+                            Page.AUTH -> "Hesap ekle"
+                            Page.DEVICES -> "Cihazlarım"
+                            Page.SETTINGS -> "Ayarlar"
+                            Page.REMOTE -> "PC Kumandası"
+                            Page.FILES -> "PcFiles"
+                            Page.DIAGNOSTICS -> "Hata kayıtları"
+                            else -> "Ana sayfa"
+                        }, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    }
                     when (page) {
                         Page.LOGIN -> if (signedIn) {
                             AccountSettings(
@@ -3146,7 +4099,19 @@ private fun AssistantScreen(
                                 )
                                 if (devicesLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                                 devicesError?.let { error ->
-                                    Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                        OutlinedButton(
+                                            onClick = {
+                                                devicesError = null
+                                                devicesLoading = true
+                                                devicesRefreshRevision += 1
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text("Yeniden dene")
+                                        }
+                                    }
                                 }
                                 if (!devicesLoading && pcDevices.isEmpty() && devicesError == null) {
                                     Card(
@@ -3165,9 +4130,12 @@ private fun AssistantScreen(
                                 }
                                 devices.forEach { device ->
                                     val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
+                                    val displayDeviceName = device.name.trim().ifBlank {
+                                        if (device.isPcTarget) "Windows bilgisayar" else "Android cihaz"
+                                    }
                                     val isEditingName = editingDeviceNameId == device.id
                                     var editedDeviceName by remember(device.id, device.name) {
-                                        mutableStateOf(deviceNameDrafts[device.id] ?: device.name)
+                                        mutableStateOf(deviceNameDrafts[device.id] ?: displayDeviceName)
                                     }
                                     Card(
                                         Modifier.fillMaxWidth(),
@@ -3193,7 +4161,7 @@ private fun AssistantScreen(
                                                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                                                     ) {
                                                         Text(
-                                                            device.name,
+                                                            displayDeviceName,
                                                             modifier = Modifier.weight(1f),
                                                             fontWeight = FontWeight.SemiBold,
                                                             fontSize = 16.sp,
@@ -3208,12 +4176,12 @@ private fun AssistantScreen(
                                                                     deviceNameDrafts = deviceNameDrafts - device.id
                                                                 } else {
                                                                     editingDeviceNameId = device.id
-                                                                    deviceNameDrafts = deviceNameDrafts + (device.id to device.name)
-                                                                    editedDeviceName = device.name
+                                                                    deviceNameDrafts = deviceNameDrafts + (device.id to displayDeviceName)
+                                                                    editedDeviceName = displayDeviceName
                                                                 }
                                                                 feedback = null
                                                             },
-                                                            modifier = Modifier.size(30.dp)
+                                                            modifier = Modifier.size(48.dp)
                                                         ) {
                                                             Icon(
                                                                 if (isEditingName) Icons.Default.Close else Icons.Default.Edit,
@@ -3348,10 +4316,122 @@ private fun AssistantScreen(
                                 MynAssistantDiagnostics.read(commandContext)
                             }
                             Text(
-                                "Sorun kodları, nedenleri ve komut kayıtları yalnızca bu telefonda tutulur. İstersen kayıtları temizleyebilirsin.",
+                                "Hata kayıtları bu telefonda saklanır. Otomatik gönderimi açarsan yeni hatalarda son tanılama kayıtları, uygulama sürümü ve giriş yaptığın MynAssistant hesabı destek e-postasına gönderilir. Kişisel dosyalar ve ekran görüntüleri gönderilmez.",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Hataları otomatik e-postayla bildir", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        if (signedIn) "Yalnızca giriş yaptığında gönderir; 5 dakikalık gönderim sınırı vardır."
+                                        else "Otomatik bildirim için önce MynAssistant hesabına giriş yap.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                    )
+                                }
+                                Switch(
+                                    checked = diagnosticAutoEmailEnabled,
+                                    enabled = signedIn && !diagnosticReportSending,
+                                    onCheckedChange = { enabled ->
+                                        diagnosticAutoEmailEnabled = enabled
+                                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                                            .edit().putBoolean("diagnostics_auto_email_enabled", enabled).apply()
+                                        diagnosticReportStatus = if (enabled) {
+                                            "Otomatik hata e-postası etkinleştirildi."
+                                        } else {
+                                            "Otomatik hata e-postası kapatıldı."
+                                        }
+                                    }
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { showDiagnosticReportConfirmation = true },
+                                enabled = !diagnosticReportSending && signedIn,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Email, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (diagnosticReportSending) "Gönderiliyor..." else "Hata raporunu e-postayla gönder")
+                            }
+                            if (!signedIn) {
+                                Text("E-posta raporu göndermek için MynAssistant hesabına giriş yap.", fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.tertiary)
+                            }
+                            diagnosticReportStatus?.let {
+                                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                            }
+                            if (showDiagnosticReportConfirmation) {
+                                AlertDialog(
+                                    onDismissRequest = { if (!diagnosticReportSending) showDiagnosticReportConfirmation = false },
+                                    title = { Text("Hata raporu gönderilsin mi?") },
+                                    text = {
+                                        Text(
+                                            "Son 80 hata kaydı, uygulama sürümü, hata kodları ve MynAssistant hesap kimliğin destek ekibine e-posta ile gönderilecek. Gönderim öncesi oturum belirteçleri ve gizli anahtarlar sunucuda ayıklanır. Kişisel dosyalar veya ekran görüntüleri eklenmez."
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            enabled = !diagnosticReportSending,
+                                            onClick = {
+                                                val user = FirebaseAuth.getInstance().currentUser
+                                                if (user == null) {
+                                                    diagnosticReportStatus = "Oturum bulunamadı. Yeniden giriş yap."
+                                                    showDiagnosticReportConfirmation = false
+                                                } else {
+                                                    diagnosticReportSending = true
+                                                    showDiagnosticReportConfirmation = false
+                                                    val reportDetails = entries.take(80).joinToString("\n\n") { entry ->
+                                                        buildString {
+                                                            append(entry.id)
+                                                            append(" | ")
+                                                            append(entry.category)
+                                                            append(" | ")
+                                                            append(java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
+                                                                .format(java.util.Date(entry.createdAt)))
+                                                            if (entry.command.isNotBlank()) {
+                                                                append("\nKomut: ")
+                                                                append(entry.command)
+                                                            }
+                                                            if (entry.details.isNotBlank()) {
+                                                                append("\nAyrıntı: ")
+                                                                append(entry.details)
+                                                            }
+                                                        }
+                                                    }.take(60_000)
+                                                    val appVersion = runCatching {
+                                                        commandContext.packageManager.getPackageInfo(commandContext.packageName, 0).versionName
+                                                    }.getOrNull() ?: "unknown"
+                                                    val report = JSONObject().apply {
+                                                        put("source", "android")
+                                                        put("appVersion", appVersion)
+                                                        put("errorCode", entries.firstOrNull()?.id ?: "MYN-USER-REPORT")
+                                                        put("message", "Kullanıcı Ayarlar → Hata kayıtları bölümünden destek raporu gönderdi.")
+                                                        put("details", reportDetails.ifBlank { "Cihazda kayıtlı hata bulunmuyor; kullanıcı destek raporu gönderdi." })
+                                                    }
+                                                    MynAssistantAccountBackend.sendDiagnosticReport(user, report) { success, message ->
+                                                        diagnosticReportSending = false
+                                                        diagnosticReportStatus = if (success) {
+                                                            "Hata raporu destek ekibine gönderildi."
+                                                        } else {
+                                                            "E-posta gönderilemedi: $message"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ) { Text("Gönder") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(
+                                            enabled = !diagnosticReportSending,
+                                            onClick = { showDiagnosticReportConfirmation = false }
+                                        ) { Text("Vazgeç") }
+                                    }
+                                )
+                            }
                             if (entries.isEmpty()) {
                                 Card(Modifier.fillMaxWidth()) {
                                     Text("Henüz hata kaydı yok.", Modifier.padding(16.dp))
@@ -3410,7 +4490,7 @@ private fun AssistantScreen(
                                 Text("Şu anda aktif ve bağlı bilgisayar yok.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
                                 connectedDevices.forEach { device ->
-                                    val deviceOnlineNow = true
+                                    val deviceOnlineNow = device.isOnlineAt(presenceNowMillis)
                                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3427,21 +4507,43 @@ private fun AssistantScreen(
                                                     feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
                                                 } else if (device.connectionMode == "firebase-agent") {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
-                                                    sendTrackedRemoteCommand(device.id, "text_command", mapOf("text" to "bilgisayar dosyalarını listele"))
+                                                    requestPcFileList(device.id, "")
                                                 } else if (device.id == localPcDeviceId && localPcConnected) {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
+                                                    pcFilesDeviceId = device.id
+                                                    pcFilesLoading = true
                                                     sendPcBridgeCommand(pcBridgeUrl, pcBridgeToken, "dosyaları listele") { result ->
                                                         localPcConnected = result.connected
                                                         pcBridgeStatus = result.message
-                                                        feedback = result.message
+                                                        pcFilesLoading = false
+                                                        if (result.connected && result.success) {
+                                                            try {
+                                                                val listing = parsePcFileListing(
+                                                                    resolvePcFileListingPayload(result.payload, result.message)
+                                                                )
+                                                                pcFileListing = listing
+                                                                pcFilesDeviceId = device.id
+                                                                feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
+                                                            } catch (parseError: Exception) {
+                                                                pcFileListing = null
+                                                                feedback = recordIssue(
+                                                                    "MYN-PC-6008", "Bilgisayar dosyaları",
+                                                                    "Yerel Windows köprüsünden gelen dosya listesi okunamadı. Yardımcı uygulamayı güncelleyip yeniden dene.",
+                                                                    "",
+                                                                    "LOCAL_FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
+                                                                )
+                                                            }
+                                                        } else {
+                                                            feedback = result.message
+                                                        }
                                                     }
                                                 } else {
                                                     feedback = "Bu bağlantı türünde dosya listeleme henüz desteklenmiyor."
                                                 }
-                                            }, modifier = Modifier.fillMaxWidth()) {
+                                            }, modifier = Modifier.fillMaxWidth(), enabled = !(pcFilesLoading && pcFilesDeviceId == device.id)) {
                                                 Icon(Icons.Default.FolderOpen, contentDescription = null)
                                                 Spacer(Modifier.width(8.dp))
-                                                Text("Dosya listesini iste")
+                                                Text(if (pcFilesLoading && pcFilesDeviceId == device.id) "Dosya listesi alınıyor..." else "Dosya listesini iste")
                                             }
                                             Text(
                                                 "Bilgisayardaki klasörleri burada görüntülemek için Windows yardımcı uygulamasının dosya listesini göndermesi gerekir.",
@@ -3452,97 +4554,287 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+                            if (pcFilesLoading) {
+                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                            }
+                            pcFileListing?.takeIf { pcFilesDeviceId != null }?.let { listing ->
+                                val fileTargetDevice = connectedDevices.firstOrNull { it.id == pcFilesDeviceId }
+                                Card(
+                                    Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                ) {
+                                    Column(
+                                        Modifier.fillMaxWidth().padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text("Bilgisayar dosyaları", fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            listing.currentPath.ifBlank { "İzin verilen klasörler" },
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .66f),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (listing.currentPath.isNotBlank() &&
+                                            fileTargetDevice?.connectionMode == "firebase-agent") {
+                                            val canUpload = !pcFilesLoading &&
+                                                activeCommandListener == null &&
+                                                !commandSubmissionInProgress &&
+                                                fileTargetDevice.isOnlineAt(presenceNowMillis)
+                                            Button(
+                                                onClick = {
+                                                    pendingPcUploadDeviceId = pcFilesDeviceId
+                                                    pendingPcUploadDestinationPath = listing.currentPath
+                                                    pcFileUploadLauncher.launch(arrayOf("*/*"))
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                enabled = canUpload
+                                            ) {
+                                                Icon(Icons.Default.Send, contentDescription = null)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Telefondan bilgisayara yükle")
+                                            }
+                                        }
+                                        if (listing.parentPath != null) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    pcFilesDeviceId?.let { id -> requestPcFileList(id, listing.parentPath) }
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                enabled = !pcFilesLoading
+                                            ) {
+                                                Icon(Icons.Default.ChevronRight, contentDescription = null)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(if (listing.parentPath.isBlank()) "İzin verilen klasörlere dön" else "Üst klasör")
+                                            }
+                                        }
+                                        if (listing.entries.isEmpty() && !pcFilesLoading) {
+                                            Text(
+                                                "Bu klasörde görüntülenebilir öğe yok.",
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f),
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                        listing.entries.forEach { entry ->
+                                            Row(
+                                                Modifier.fillMaxWidth()
+                                                    .clickable(enabled = entry.isDirectory && !pcFilesLoading) {
+                                                        pcFilesDeviceId?.let { id -> requestPcFileList(id, entry.path) }
+                                                    }
+                                                    .padding(vertical = 7.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    if (entry.isDirectory) Icons.Default.FolderOpen else Icons.Default.MoreHoriz,
+                                                    contentDescription = if (entry.isDirectory) "Klasör" else "Dosya",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(entry.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                    Text(
+                                                        if (entry.isDirectory) "Klasör" else entry.size.toString() + " bayt",
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .62f)
+                                                    )
+                                                }
+                                                if (entry.isDirectory) {
+                                                    val canZip = !pcFilesLoading &&
+                                                        activeCommandListener == null &&
+                                                        !commandSubmissionInProgress &&
+                                                        fileTargetDevice != null &&
+                                                        fileTargetDevice.connectionMode == "firebase-agent" &&
+                                                        fileTargetDevice.isOnlineAt(presenceNowMillis)
+                                                    TextButton(
+                                                        onClick = {
+                                                            pcFilesLoading = true
+                                                            sendTrackedRemoteCommand(
+                                                                pcFilesDeviceId.orEmpty(),
+                                                                "zip_folder",
+                                                                mapOf("path" to entry.path)
+                                                            )
+                                                        },
+                                                        enabled = canZip
+                                                    ) {
+                                                        Text("ZIP")
+                                                    }
+                                                    Icon(Icons.Default.ChevronRight, contentDescription = "Klasörü aç")
+                                                } else {
+                                                    val canDownload = !pcFilesLoading &&
+                                                        activeCommandListener == null &&
+                                                        !commandSubmissionInProgress &&
+                                                        entry.size <= MAX_PC_FILE_DOWNLOAD_BYTES &&
+                                                        fileTargetDevice != null &&
+                                                        fileTargetDevice.connectionMode == "firebase-agent" &&
+                                                        fileTargetDevice.isOnlineAt(presenceNowMillis)
+                                                    IconButton(
+                                                        onClick = {
+                                                            pendingPcDownloadEntry = entry
+                                                            pcFileDownloadLauncher.launch(entry.name)
+                                                        },
+                                                        enabled = canDownload,
+                                                        modifier = Modifier.size(44.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Download,
+                                                            contentDescription = if (canDownload) "Dosyayı telefona indir" else "Dosya indirme kullanılamıyor"
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            if (!entry.isDirectory && entry.size > MAX_PC_FILE_DOWNLOAD_BYTES) {
+                                                Text(
+                                                    "Bu sürüm tek yanıtla en fazla 500.000 bayt indirir; büyük dosya aktarımı için parçalı aktarım henüz etkin değil.",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.tertiary
+                                                )
+                                            } else if (!entry.isDirectory && fileTargetDevice?.connectionMode != "firebase-agent") {
+                                                Text(
+                                                    "Dosya indirme bu bağlantı türünde henüz desteklenmiyor.",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
+                                                )
+                                            }
+                                            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = .2f))
+                                        }
+                                        if (listing.truncated) {
+                                            Text("Bu klasör çok büyük; ilk 200 öğe gösteriliyor.", fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .66f))
+                                        }
+                                        listing.warnings.forEach { warning ->
+                                            Text(warning, fontSize = 12.sp, color = MaterialTheme.colorScheme.tertiary)
+                                        }
+                                        Text(
+                                            "Güvenlik: yalnızca izin verilen kullanıcı klasörleri kullanılır. İndirme ve yükleme en fazla 500.000 baytla sınırlıdır; yüklemede ve indirmede SHA-256 doğrulanır. ZIP işlemi izin verilen klasörlerde çalışır; büyük dosya parçalama ve devam ettirme henüz etkin değildir.",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
+                                        )
+                                    }
+                                }
+                            }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
                         Page.SETTINGS -> {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ANDROID_SETTINGS_CATEGORIES.forEach { category ->
+                                    FilterChip(
+                                        selected = settingsCategory == category,
+                                        onClick = { settingsCategory = category },
+                                        label = { Text(category, maxLines = 1) }
+                                    )
+                                }
+                            }
+                            if (settingsCategory == "Genel") {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
                                 Switch(checked = dark, onCheckedChange = { toggleTheme() })
                             }
                             Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
-                            Text(
-                                "Rehber izni verildiğinde, bu telefona senkronize edilmiş Google, SIM ve diğer kişi hesaplarındaki kayıtlar aranır.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                            )
-                            Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(24.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                            ) {
-                                Column(
-                                    Modifier.fillMaxWidth().padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Computer,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Windows bilgisayarını eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                            Text(
-                                                "Windows uygulamasında oluşturulan tek kullanımlık kodu gir. Kod 5 dakika içinde sona erer.",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                            }
+                            if (settingsCategory == "İzinler") {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        "MynAssistant'ın kullandığı izinler. Durumlar Android'den canlı okunur; bir izne dokunarak isteyebilir veya ilgili sistem ayarını açabilirsin.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                    )
+                                    permissionItems.forEach { item ->
+                                        val stateColor = when (item.state) {
+                                            MynPermissionState.GRANTED -> Color(0xFF54C58A)
+                                            MynPermissionState.PARTIAL -> MaterialTheme.colorScheme.tertiary
+                                            MynPermissionState.DENIED -> MaterialTheme.colorScheme.error
+                                            MynPermissionState.MANAGED -> MaterialTheme.colorScheme.secondary
+                                        }
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surface
                                             )
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                                verticalArrangement = Arrangement.spacedBy(7.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        item.title,
+                                                        modifier = Modifier.weight(1f),
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 14.sp
+                                                    )
+                                                    Text(
+                                                        item.statusText,
+                                                        color = stateColor,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                                Text(
+                                                    item.description,
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                                )
+                                                OutlinedButton(
+                                                    onClick = { openPermissionSettings(item) },
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Icon(Icons.Default.Settings, contentDescription = null)
+                                                    Spacer(Modifier.width(7.dp))
+                                                    Text(
+                                                        when (item.state) {
+                                                            MynPermissionState.GRANTED -> "Yönet"
+                                                            MynPermissionState.PARTIAL -> "Erişimi yönet"
+                                                            MynPermissionState.DENIED -> item.actionText
+                                                            MynPermissionState.MANAGED -> item.actionText
+                                                        }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
-                                    OutlinedTextField(
-                                        value = desktopPairingCode,
-                                        onValueChange = { entered ->
-                                            desktopPairingCode = entered
-                                                .filter { it.isLetterOrDigit() }
-                                                .uppercase(Locale.ROOT)
-                                                .take(10)
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                openApplicationInfo()
+                                            } catch (error: Exception) {
+                                                feedback = recordIssue(
+                                                    "MYN-PERM-4003",
+                                                    "İzinler",
+                                                    "Uygulama bilgileri açılamadı.",
+                                                    "",
+                                                    error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
+                                                )
+                                            }
                                         },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        label = { Text("Windows eşleştirme kodu") },
-                                        placeholder = { Text("ABCDE23456") },
-                                        singleLine = true,
-                                        enabled = signedIn && !desktopPairingBusy,
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Ascii,
-                                            imeAction = ImeAction.Done
-                                        ),
-                                        supportingText = {
-                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
-                                        }
-                                    )
-                                    Button(
-                                        onClick = { approveDesktopPairing() },
-                                        enabled = signedIn && !desktopPairingBusy &&
-                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        if (desktopPairingBusy) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                        }
-                                        Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
+                                        Icon(Icons.Default.Info, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Uygulama bilgileri ve kısıtlanmış ayarlar")
                                     }
-                                    Text(
-                                        desktopPairingStatus,
-                                        fontSize = 12.sp,
-                                        color = when {
-                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
-                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
-                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
-                                                Color(0xFF2E9D62)
-                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                                        }
-                                    )
                                 }
                             }
+
+                            if (settingsCategory == "Hesap") {
+                            Text(if (signedIn) "MynAssistant hesabın etkin. Telefon-PC bağlantısını Agent sekmesinden yönet." else "Şu anda giriş yapılmamış.")
+                            OutlinedButton(
+                                onClick = { navigateToPage(if (signedIn) Page.LOGIN else Page.AUTH) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.AccountCircle, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Hesap ve profil ayarları")
+                            }
+                            }
+                            if (settingsCategory == "Başlangıç") {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(24.dp),
@@ -3720,6 +5012,8 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+                            }
+                            if (settingsCategory == "Hata günlükleri") {
                             OutlinedButton(
                                 onClick = { navigateToPage(Page.DIAGNOSTICS) },
                                 modifier = Modifier.fillMaxWidth()
@@ -3728,6 +5022,8 @@ private fun AssistantScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Hata kayıtları")
                             }
+                            }
+                            if (settingsCategory == "İzinler") {
                             OutlinedButton(
                                 onClick = {
                                     val missing = requiredRuntimePermissionList().filter { permission ->
@@ -3746,7 +5042,9 @@ private fun AssistantScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Eksik izinleri iste")
                             }
+                            }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
+                            if (settingsCategory == "Eklentiler") {
                             HorizontalDivider()
                             Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -3768,6 +5066,8 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+                            }
+                            if (settingsCategory == "Agent") {
                             HorizontalDivider()
                             Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(
@@ -3811,9 +5111,200 @@ private fun AssistantScreen(
                                     }
                                 }
                             }
+
+                            HorizontalDivider()
+                            Text("QR ile güvenli Telefon-PC eşleştirmesi", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Computer,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Windows bilgisayarını QR ile eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "Windows MynAssistant → Ayarlar → Agent bölümünde gösterilen QR kodunu tara. İstersen 10 karakterli kodu elle de girebilirsin.",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = desktopPairingCode,
+                                        onValueChange = { entered ->
+                                            desktopPairingCode = entered
+                                                .filter { it.isLetterOrDigit() }
+                                                .uppercase(Locale.ROOT)
+                                                .take(10)
+                                            desktopPairingQrSignature = null
+                                            desktopPairingQrExpiresAtUnix = null
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Windows eşleştirme kodu") },
+                                        placeholder = { Text("ABCDE23456") },
+                                        singleLine = true,
+                                        enabled = signedIn && !desktopPairingBusy,
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Ascii,
+                                            imeAction = ImeAction.Done
+                                        ),
+                                        supportingText = {
+                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
+                                        }
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (!signedIn || desktopPairingScanBusy || desktopPairingBusy) {
+                                                return@OutlinedButton
+                                            }
+                                            desktopPairingScanBusy = true
+                                            desktopPairingStatus = "QR tarayıcı hazırlanıyor..."
+                                            try {
+                                                val options = GmsBarcodeScannerOptions.Builder()
+                                                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                                                    .enableAutoZoom()
+                                                    .build()
+                                                GmsBarcodeScanning.getClient(commandContext, options).startScan()
+                                                    .addOnSuccessListener { barcode ->
+                                                        desktopPairingScanBusy = false
+                                                        val scannedQr = DesktopPairingQrPayloadParser.parse(barcode.rawValue)
+                                                        if (scannedQr == null) {
+                                                            desktopPairingCode = ""
+                                                            desktopPairingQrSignature = null
+                                                            desktopPairingQrExpiresAtUnix = null
+                                                            desktopPairingStatus =
+                                                                "QR kodu geçersiz veya imzasız. Windows uygulamasında yeni bir QR kodu oluştur ya da 10 karakterli kodu elle gir."
+                                                        } else {
+                                                            desktopPairingCode = scannedQr.code
+                                                            desktopPairingQrSignature = scannedQr.signature
+                                                            desktopPairingQrExpiresAtUnix = scannedQr.expiresAtUnix
+                                                            desktopPairingStatus =
+                                                                "İmzalı QR kodu okundu. Bilgisayarı bağlamak için onayla."
+                                                        }
+                                                    }
+                                                    .addOnCanceledListener {
+                                                        desktopPairingScanBusy = false
+                                                        desktopPairingStatus =
+                                                            "QR taraması iptal edildi. İstersen kodu elle girebilirsin."
+                                                    }
+                                                    .addOnFailureListener {
+                                                        desktopPairingScanBusy = false
+                                                        desktopPairingStatus =
+                                                            "QR taraması başlatılamadı. Google Play Hizmetlerini güncelle veya kodu elle gir."
+                                                    }
+                                            } catch (_: Exception) {
+                                                desktopPairingScanBusy = false
+                                                desktopPairingStatus =
+                                                    "QR tarayıcı başlatılamadı. İnternet bağlantısını kontrol et veya kodu elle gir."
+                                            }
+                                        },
+                                        enabled = signedIn && !desktopPairingBusy && !desktopPairingScanBusy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingScanBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
+                                    }
+                                    Button(
+                                        onClick = { approveDesktopPairing() },
+                                        enabled = signedIn && !desktopPairingBusy &&
+                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
+                                    }
+                                    Text(
+                                        desktopPairingStatus,
+                                        fontSize = 12.sp,
+                                        color = when {
+                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
+                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
+                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
+                                                Color(0xFF2E9D62)
+                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                        }
+                                    )
+                                }
+                            }
+                            }
+                            if (settingsCategory == "Kısayollar") {
+                                Text(
+                                    "Sık kullanılan bölümlere buradan geçebilirsin.",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                )
+                                OutlinedButton(
+                                    onClick = { navigateToPage(Page.HOME) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Home, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Ana sayfa ve komut alanı")
+                                }
+                                OutlinedButton(
+                                    onClick = { navigateToPage(Page.DEVICES) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Devices, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Cihazlarım")
+                                }
+                                OutlinedButton(
+                                    onClick = { navigateToPage(Page.REMOTE) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.SettingsRemote, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("PC Kumandası")
+                                }
+                            }
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
+                            val remoteUiPreferences = remember {
+                                commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            }
+                            val remoteUiPreferencePrefix =
+                                "remote_visibility_${firebaseUserId.orEmpty()}_${device?.id.orEmpty()}"
+                            var showScreenPreview by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_screen", true))
+                            }
+                            var showTouchpadPanel by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_touchpad", true))
+                            }
+                            var showKeyboardPanel by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_keyboard", true))
+                            }
+                            fun saveRemoteVisibility(control: String, visible: Boolean) {
+                                remoteUiPreferences.edit()
+                                    .putBoolean("${remoteUiPreferencePrefix}_${control}", visible)
+                                    .apply()
+                            }
                             var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
                                 mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
                             }
@@ -3831,6 +5322,62 @@ private fun AssistantScreen(
                             val remoteOnline = localBridgeSelected ||
                                 (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
                             Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "PC Kumandası",
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 21.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                IconToggleButton(
+                                    checked = showScreenPreview,
+                                    onCheckedChange = {
+                                        showScreenPreview = it
+                                        saveRemoteVisibility("screen", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Tv,
+                                        contentDescription = if (showScreenPreview) "Ekran görünümünü gizle" else "Ekran görünümünü göster",
+                                        tint = if (showScreenPreview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                                IconToggleButton(
+                                    checked = showTouchpadPanel,
+                                    onCheckedChange = {
+                                        showTouchpadPanel = it
+                                        saveRemoteVisibility("touchpad", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.TouchApp,
+                                        contentDescription = if (showTouchpadPanel) "Touchpad alanını gizle" else "Touchpad alanını göster",
+                                        tint = if (showTouchpadPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                                IconToggleButton(
+                                    checked = showKeyboardPanel,
+                                    onCheckedChange = {
+                                        showKeyboardPanel = it
+                                        saveRemoteVisibility("keyboard", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Keyboard,
+                                        contentDescription = if (showKeyboardPanel) "Klavye satırını gizle" else "Klavye satırını göster",
+                                        tint = if (showKeyboardPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                            }
+                            Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -3844,7 +5391,7 @@ private fun AssistantScreen(
                                             localBridgeSelected -> "Bağlı • Yerel bağlantı"
                                             device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
                                             device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
-                                            remoteOnline -> "Bağlı • " + device.platform
+                                            remoteOnline -> "Çevrimiçi • son heartbeat güncel"
                                             else -> "Çevrimdışı • Bilgisayar bekleniyor"
                                         },
                                         fontSize = 11.sp,
@@ -3862,7 +5409,14 @@ private fun AssistantScreen(
                                     Box(Modifier.size(9.dp))
                                 }
                             }
-                            if (device?.connectionMode == "firebase-agent") {
+                            if (device?.connectionMode == "firebase-agent" && remoteOnline) {
+                                Text(
+                                    "Çevrimiçi durumu son heartbeat'i gösterir; her komutun teslim sonucu ayrıca doğrulanır.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                )
+                            }
+                            if (device?.connectionMode == "firebase-agent" && showScreenPreview) {
                                 Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                 if (screenBitmap != null) {
                                     Image(
@@ -3875,7 +5429,7 @@ private fun AssistantScreen(
                                         contentScale = ContentScale.Fit
                                     )
                                     Text(
-                                        "Ekran önizlemesi yaklaşık 1–2 saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
+                                        "Ekran önizlemesi bağlantı ve bilgisayar durumuna göre yenilenir; sabit gecikme garantisi yoktur.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )
@@ -3911,6 +5465,8 @@ private fun AssistantScreen(
                             TvRemotePanel(
                                 enabled = remoteOnline,
                                 mouseEnabled = remoteOnline && !localBridgeSelected,
+                                showTouchpad = showTouchpadPanel,
+                                showKeyboard = showKeyboardPanel,
                                 onCommand = { commandName, payload ->
                                     if (!signedIn) {
                                         feedback = "Devam etmek için önce giriş yap."
@@ -3920,7 +5476,8 @@ private fun AssistantScreen(
                                             "volume_up" -> sendLocalPcText("ses 10 arttir")
                                             "volume_down" -> sendLocalPcText("ses 10 azalt")
                                             "home" -> sendLocalPcText("masaustunu goster")
-                                            "power" -> feedback = "Bilgisayarı uzaktan açma özelliği henüz desteklenmiyor."
+                                            "lock_pc" -> sendLocalPcText("bilgisayari kilitle")
+                                            "close_app" -> sendLocalPcText("uygulamayi kapat")
                                             "mouse_move", "mouse_click", "mouse_right_click" ->
                                                 feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
                                             else -> feedback = "Klavye ve fare girişleri bu yerel bağlantı türünde henüz desteklenmiyor."
@@ -4062,55 +5619,273 @@ private fun AssistantScreen(
                             ) {
                                 Box {
                                     Column(
-                                        modifier = Modifier.width(52.dp).clip(RoundedCornerShape(18.dp))
+                                        modifier = Modifier.width(48.dp)
+                                            .clip(RoundedCornerShape(16.dp))
                                             .clickable { targetMenuExpanded = true }
-                                            .padding(vertical = 3.dp),
+                                            .padding(vertical = 8.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center
                                     ) {
                                         Icon(
-                                            when (commandTarget) {
-                                                "PHONE" -> Icons.Default.Devices
-                                                "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.SmartToy
-                                            },
-                                            contentDescription = when (commandTarget) {
-                                                "PHONE" -> "Hedef: bu Android telefonu"
-                                                "PC" -> "Hedef: Windows bilgisayar"
-                                                else -> "Hedef: otomatik yönlendirme"
+                                            Icons.Default.Add,
+                                            contentDescription = when {
+                                                commandTarget == "PHONE" -> "Hedef bu Android telefonu; cihaz seç"
+                                                commandTarget == "ANDROID" && manuallySelectedAndroidDeviceId != null ->
+                                                    "Hedef seçili uzak Android cihazı; cihaz değiştir"
+                                                commandTarget == "PC" && manuallySelectedPcDeviceId != null ->
+                                                    "Hedef seçili Windows cihazı; cihaz değiştir"
+                                                commandTarget == "PC" -> "Hedef Windows bilgisayar; cihaz seç"
+                                                else -> "Komut hedefi ve cihaz seç"
                                             },
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        Text(
-                                            when (commandTarget) {
-                                                "PHONE" -> "Telefon"
-                                                "PC" -> "PC"
-                                                else -> "Oto"
-                                            },
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f),
-                                            maxLines = 1
+                                            modifier = Modifier.size(27.dp)
                                         )
                                     }
-                                    DropdownMenu(
-                                        expanded = targetMenuExpanded,
-                                        onDismissRequest = { targetMenuExpanded = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Otomatik — komuta göre seç") },
-                                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
-                                            onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Bu telefon (Android)") },
-                                            leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
-                                            onClick = { commandTarget = "PHONE"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Bilgisayarım (Windows)") },
-                                            leadingIcon = { Icon(Icons.Default.Computer, contentDescription = null) },
-                                            onClick = { commandTarget = "PC"; targetMenuExpanded = false; feedback = null }
+                                    if (targetMenuExpanded) {
+                                        AlertDialog(
+                                            onDismissRequest = { targetMenuExpanded = false },
+                                            title = { Text("Komut hedefi ve cihaz seç") },
+                                            text = {
+                                                Column(
+                                                    Modifier.fillMaxWidth()
+                                                        .heightIn(max = 430.dp)
+                                                        .verticalScroll(rememberScrollState()),
+                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                ) {
+                                                    Text(
+                                                        "Komut hedefi",
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text("Otomatik hedef")
+                                                                Text(
+                                                                    "Komuta göre telefon veya kullanılabilir bilgisayar",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                                                        trailingIcon = {
+                                                            if (commandTarget == "AUTO" && manuallySelectedPcDeviceId == null) {
+                                                                Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            commandTarget = "AUTO"
+                                                            manuallySelectedPcDeviceId = null
+                                                            manuallySelectedAndroidDeviceId = null
+                                                            selectedDeviceId = null
+                                                            targetMenuExpanded = false
+                                                            feedback = null
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text("Bu telefon (Android)")
+                                                                Text(
+                                                                    "Komutlar bu telefonda çalışır",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                                        trailingIcon = {
+                                                            if (commandTarget == "PHONE") {
+                                                                Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            commandTarget = "PHONE"
+                                                            manuallySelectedPcDeviceId = null
+                                                            manuallySelectedAndroidDeviceId = null
+                                                            selectedDeviceId = null
+                                                            targetMenuExpanded = false
+                                                            feedback = null
+                                                        }
+                                                    )
+
+                                                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                                    Text(
+                                                        "Kayıtlı Windows cihazları",
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    when {
+                                                        !signedIn -> {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Windows cihazları için giriş yap") },
+                                                                leadingIcon = { Icon(Icons.Default.Login, contentDescription = null) },
+                                                                onClick = {
+                                                                    targetMenuExpanded = false
+                                                                    navigateToPage(Page.AUTH)
+                                                                }
+                                                            )
+                                                        }
+                                                        devicesLoading -> {
+                                                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                                                            Text("Cihazlar yükleniyor…", fontSize = 12.sp)
+                                                        }
+                                                        devicesError != null -> {
+                                                            Text(
+                                                                devicesError.orEmpty(),
+                                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                                fontSize = 12.sp,
+                                                                color = MaterialTheme.colorScheme.error
+                                                            )
+                                                            TextButton(
+                                                                onClick = {
+                                                                    devicesError = null
+                                                                    devicesLoading = true
+                                                                    devicesRefreshRevision += 1
+                                                                }
+                                                            ) { Text("Yeniden dene") }
+                                                        }
+                                                        pcDevices.isEmpty() -> {
+                                                            Text(
+                                                                "Bu hesapta kayıtlı Windows cihazı bulunamadı. Windows uygulamasını aynı hesapla açıp tekrar dene.",
+                                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                                fontSize = 12.sp
+                                                            )
+                                                        }
+                                                        else -> pcDevices.forEach { device ->
+                                                            val isOnlineNow = if (device.id == localPcDeviceId) {
+                                                                localPcConnected
+                                                            } else {
+                                                                device.isOnlineAt(presenceNowMillis)
+                                                            }
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Column {
+                                                                        Text(
+                                                                            device.name.ifBlank { "Windows bilgisayar" },
+                                                                            maxLines = 1,
+                                                                            overflow = TextOverflow.Ellipsis
+                                                                        )
+                                                                        Text(
+                                                                            if (isOnlineNow) "Windows · Çevrimiçi" else "Windows · Çevrimdışı",
+                                                                            fontSize = 11.sp,
+                                                                            color = if (isOnlineNow) Color(0xFF49B86E)
+                                                                            else MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                        )
+                                                                    }
+                                                                },
+                                                                leadingIcon = { Icon(Icons.Default.Computer, contentDescription = null) },
+                                                                trailingIcon = {
+                                                                    if (manuallySelectedPcDeviceId == device.id) {
+                                                                        Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                                    }
+                                                                },
+                                                                onClick = {
+                                                                    commandTarget = "PC"
+                                                                    manuallySelectedPcDeviceId = device.id
+                                                                    manuallySelectedAndroidDeviceId = null
+                                                                    selectedDeviceId = device.id
+                                                                    targetMenuExpanded = false
+                                                                    feedback = null
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+
+                                                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                                    Text(
+                                                        "Kayıtlı Android cihazları",
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text("Bu telefon")
+                                                                Text(
+                                                                    "Etkin oturumdaki Android cihazı",
+                                                                    fontSize = 11.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                                        trailingIcon = {
+                                                            if (commandTarget == "PHONE") {
+                                                                Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            commandTarget = "PHONE"
+                                                            manuallySelectedPcDeviceId = null
+                                                            manuallySelectedAndroidDeviceId = null
+                                                            selectedDeviceId = null
+                                                            targetMenuExpanded = false
+                                                            feedback = null
+                                                        }
+                                                    )
+                                                    if (!signedIn) {
+                                                        Text(
+                                                            "Diğer kayıtlı cihazlar için hesabına giriş yap.",
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                            fontSize = 12.sp
+                                                        )
+                                                    } else if (otherAndroidDevices.isEmpty()) {
+                                                        Text(
+                                                            "Bu hesaba kayıtlı başka Android cihazı bulunamadı.",
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                            fontSize = 12.sp,
+                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                        )
+                                                    } else {
+                                                        otherAndroidDevices.forEach { device ->
+                                                            val isOnlineNow = device.isOnlineAt(presenceNowMillis)
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Column {
+                                                                        Text(
+                                                                            device.name.ifBlank { "Android cihaz" },
+                                                                            maxLines = 1,
+                                                                            overflow = TextOverflow.Ellipsis
+                                                                        )
+                                                                        Text(
+                                                                            (if (isOnlineNow) "Android · Çevrimiçi" else "Android · Çevrimdışı") +
+                                                                                " · MynAssistant açıkken temel ses/ayar/uygulama komutları",
+                                                                            fontSize = 10.sp,
+                                                                            maxLines = 2,
+                                                                            overflow = TextOverflow.Ellipsis,
+                                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                                                        )
+                                                                    }
+                                                                },
+                                                                leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
+                                                                trailingIcon = {
+                                                                    if (commandTarget == "ANDROID" && manuallySelectedAndroidDeviceId == device.id) {
+                                                                        Icon(Icons.Default.CheckCircle, contentDescription = "Seçili")
+                                                                    }
+                                                                },
+                                                                onClick = {
+                                                                    commandTarget = "ANDROID"
+                                                                    manuallySelectedAndroidDeviceId = device.id
+                                                                    manuallySelectedPcDeviceId = null
+                                                                    selectedDeviceId = null
+                                                                    targetMenuExpanded = false
+                                                                    feedback = null
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            confirmButton = {
+                                                TextButton(onClick = { targetMenuExpanded = false }) {
+                                                    Text("Kapat")
+                                                }
+                                            }
                                         )
                                     }
                                 }
@@ -4421,7 +6196,6 @@ private fun AssistantScreen(
                         DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
-                        Text("MynAssistant • Android 0.6.1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     }
                     Spacer(Modifier.fillMaxSize().clickable { drawer = false })
                 }
@@ -5079,20 +6853,20 @@ private fun MynLogo(size: androidx.compose.ui.unit.Dp = 58.dp) {
         )
     }
 }
-
 @Composable
 private fun TvRemotePanel(
     onCommand: (String, Map<String, Any>) -> Unit,
     enabled: Boolean,
     mouseEnabled: Boolean = enabled,
+    showTouchpad: Boolean = true,
+    showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val buttons = listOf(
-        Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
+        Triple("Kilitle", Icons.Default.Lock, "lock_pc"),
+        Triple("Uygulamayı kapat", Icons.Default.Close, "close_app"),
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
-        Triple("...", Icons.Default.MoreHoriz, "placeholder"),
         Triple("Sesi artır", Icons.Default.VolumeUp, "volume_up"),
-        // The Home control uses a real home icon and sends the desktop Home command.
         Triple("Ana sayfa", Icons.Default.Home, "home"),
         Triple("Sesi kıs", Icons.Default.VolumeDown, "volume_down")
     )
@@ -5121,7 +6895,6 @@ private fun TvRemotePanel(
                 }
             }
         }
-        var touchpadEnabled by remember { mutableStateOf(true) }
         var keyboardText by remember { mutableStateOf("") }
 
         fun submitRemoteKeyboardText() {
@@ -5135,9 +6908,9 @@ private fun TvRemotePanel(
             }
         }
 
-        val touchpadGestureModifier = if (mouseEnabled && touchpadEnabled) {
+        val touchpadGestureModifier = if (mouseEnabled) {
             Modifier
-                .pointerInput(mouseEnabled, touchpadEnabled) {
+                .pointerInput(mouseEnabled) {
                     var deltaX = 0f
                     var deltaY = 0f
                     detectDragGestures(
@@ -5154,7 +6927,7 @@ private fun TvRemotePanel(
                         }
                     )
                 }
-                .pointerInput(mouseEnabled, touchpadEnabled) {
+                .pointerInput(mouseEnabled) {
                     detectTapGestures(
                         onTap = { onCommand("mouse_click", emptyMap()) },
                         onLongPress = { onCommand("mouse_right_click", emptyMap()) }
@@ -5165,92 +6938,40 @@ private fun TvRemotePanel(
         }
 
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // The touchpad keeps its controls inside the surface so there is no redundant
-        // explanatory overlay over the dotted area. Gestures are attached only to Canvas,
-        // allowing the top-right enable/disable control to remain an independent target.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(250.dp)
-                .clip(RoundedCornerShape(24.dp))
-        ) {
-            Canvas(
+        if (showTouchpad) {
+            Box(
                 Modifier
-                    .fillMaxSize()
-                    .then(touchpadGestureModifier)
-            ) {
-                drawRect(Color(0xFF414141))
-                val spacing = 20.dp.toPx()
-                var y = spacing * .58f
-                var rowIndex = 0
-                while (y < size.height) {
-                    val stagger = (rowIndex % 2) * spacing * .48f
-                    var x = spacing * .35f + stagger
-                    while (x < size.width) {
-                        val normalizedX = (x / size.width).coerceIn(0f, 1f)
-                        val normalizedY = (y / size.height).coerceIn(0f, 1f)
-                        val upperLeftDistance = kotlin.math.sqrt(
-                            ((normalizedX - .15f) / .68f) * ((normalizedX - .15f) / .68f) +
-                            ((normalizedY - .16f) / .54f) * ((normalizedY - .16f) / .54f)
-                        )
-                        val lowerRightDistance = kotlin.math.sqrt(
-                            ((normalizedX - .86f) / .67f) * ((normalizedX - .86f) / .67f) +
-                            ((normalizedY - .69f) / .48f) * ((normalizedY - .69f) / .48f)
-                        )
-                        val upperLeftCluster = (1f - upperLeftDistance).coerceIn(0f, 1f)
-                        val lowerRightCluster = (1f - lowerRightDistance).coerceIn(0f, 1f)
-                        val visibility = maxOf(upperLeftCluster, lowerRightCluster)
-                        val behindTitle = x < 112.dp.toPx() && y < 42.dp.toPx()
-                        if (visibility > .08f && !behindTitle) {
-                            val wave = (kotlin.math.sin((normalizedX * 3.8f + normalizedY * 2.9f) * 3.14159f) + 1f) * .5f
-                            val radius = (0.72f + visibility * 1.25f + wave * .52f).dp.toPx()
-                            val alpha = (0.10f + visibility * .25f + wave * .035f).coerceIn(.10f, .38f)
-                            drawCircle(
-                                color = Color.White.copy(alpha = alpha),
-                                radius = radius,
-                                center = androidx.compose.ui.geometry.Offset(x, y)
-                            )
-                        }
-                        x += spacing
-                    }
-                    y += spacing
-                    rowIndex++
-                }
-                if (!mouseEnabled || !touchpadEnabled) {
-                    drawRect(Color.Black.copy(alpha = if (!mouseEnabled) .10f else .14f))
-                }
-            }
-
-            Row(
-                Modifier
-                    .align(Alignment.TopStart)
                     .fillMaxWidth()
-                    .padding(start = 14.dp, top = 8.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .height(250.dp)
+                    .clip(RoundedCornerShape(24.dp))
             ) {
-                Text(
-                    "Touchpad",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = Color.White.copy(alpha = .84f)
-                )
-                Spacer(Modifier.weight(1f))
-                IconButton(
-                    onClick = { touchpadEnabled = !touchpadEnabled },
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(Color.White.copy(alpha = .08f), CircleShape)
-                ) {
-                    Icon(
-                        if (touchpadEnabled) Icons.Default.TouchApp else Icons.Default.Block,
-                        contentDescription = if (touchpadEnabled) "Touchpad'i kapat" else "Touchpad'i aç",
-                        tint = if (touchpadEnabled) Color.White.copy(alpha = .92f) else Color.White.copy(alpha = .58f),
-                        modifier = Modifier.size(25.dp)
+                // Keep the touch surface intentionally plain: the approved design is a
+                // solid grey canvas with the "Touchpad" label, not decorative white dots.
+                // Gestures stay on the Canvas so title controls do not emit remote mouse clicks.
+                Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier)) {
+                    drawRect(Color(0xFF414141))
+                }
+
+                if (!mouseEnabled) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = .10f))
                     )
                 }
+
+                Text(
+                    "Touchpad",
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 14.dp, top = 8.dp),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = .88f)
+                )
             }
         }
-
+        if (showKeyboard) {
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -5292,5 +7013,7 @@ private fun TvRemotePanel(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f)
             )
         }
+        }
     }
 }
+

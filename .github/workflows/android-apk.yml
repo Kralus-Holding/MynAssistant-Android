@@ -2,9 +2,12 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files", "fix/android-063-native-library-runtime", "fix/android-full-audit-10-parts" ]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files" ]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,7 @@ permissions:
 jobs:
   build:
     name: Build debug APK
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out source
@@ -66,6 +69,9 @@ jobs:
         run: |
           test "$(grep -c 'vosk-android' app/build.gradle.kts)" -eq 1
           grep -q 'sherpa-onnx' app/build.gradle.kts
+          grep -q 'catch (error: LinkageError)' app/src/main/java/com/mynkralus/mynassistant/MynSherpaWakeWordEngine.kt
+          grep -q 'MYN-WAKE-8033' app/src/main/java/com/mynkralus/mynassistant/MynWakeWordService.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/WakeNativeLibraryLoadExceptionTest.kt
           if grep -q 'com.google.firebase:firebase-storage' app/build.gradle.kts; then
             echo "Firebase Storage is not allowed in the strict free-start build"
             exit 1
@@ -74,8 +80,119 @@ jobs:
           grep -q 'android:name=".MynWakeWordService"' app/src/main/AndroidManifest.xml
           grep -q 'android:name=".MynAssistantAccessibilityService"' app/src/main/AndroidManifest.xml
           grep -q '"PC Kumandası" -> Icons.Default.SettingsRemote' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q '"Touchpad",' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'sendTrackedRemoteCommand(targetDeviceId, "list_files"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'private data class PcFileListing' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'private fun parsePcFileListing(payload: String)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'resolvePcFileListingPayload(result.payload, result.message)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/PcFileListingPayloadTest.kt
+          grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Çevrimiçi • son heartbeat güncel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'her komutun teslim sonucu ayrıca doğrulanır' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -Fq 'yaklaşık 1–2 saniyede bir güncellenir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Screen preview must not promise unmeasured 1–2 second latency."
+            exit 1
+          fi
+          grep -q '"Touchpad"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Color(0xFF414141)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Icons.Default.Add' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -Fq 'else -> "Oto"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "The visible Oto target label must be replaced by the plus control."
+            exit 1
+          fi
+          grep -q 'resolveAssistantCommandTarget(commandTarget, computerPrefix != null)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
+          grep -q 'DevicePresencePolicy.selectedPcDeviceId' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'devicesRefreshRevision' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q '12_000L' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'ANDROID_SETTINGS_CATEGORIES.forEach' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MynAssistantPermissionCatalog.read(commandContext)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'id = "restricted_settings"' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'Manifest.permission.WRITE_EXTERNAL_STORAGE' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'Manifest.permission.FOREGROUND_SERVICE_MICROPHONE' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'MynPermissionAction.APPLICATION_INFO' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'kodu elle de girebilirsin' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'DesktopPairingQrPayloadParser.parse(barcode.rawValue)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'displayDeviceName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'play-services-code-scanner:16.1.0' app/build.gradle.kts
+          grep -q 'com.google.mlkit.vision.DEPENDENCIES' app/src/main/AndroidManifest.xml
+          grep -q 'MYNASSISTANT-PAIR' app/src/main/java/com/mynkralus/mynassistant/DesktopPairingQrPayload.kt
+          grep -q 'GmsBarcodeScanning.getClient' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'qrSignature' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/DesktopPairingQrPayloadParserTest.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicyTest.kt
+          grep -q 'target == "ANDROID" ->' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'whereEqualTo("ownerId", ownerUid)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'whereEqualTo("deviceId", ownDeviceId)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'android_device_foreground' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Never trust a persisted foreground flag on a new process' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'AndroidRemoteCommandPolicy.isAllowed(rawText)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
+          grep -q 'rejectionMessage' app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandPolicyTest.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt
+          grep -q 'AndroidRemoteCommandExecutionPolicy.rejectionMessage' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'AndroidRemoteCommandExecutionPolicy.shouldMarkCompleted' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'androidCommandResultIndicatesFailure(result)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'recognizesTurkishFailedExecutionForms' app/src/test/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicyTest.kt
+          grep -q 'çalıştırılamadı' app/src/main/java/com/mynkralus/mynassistant/AndroidRemoteCommandExecutionPolicy.kt
+          test -s app/src/main/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicy.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/AndroidCommandClaimRetryPolicyTest.kt
+          grep -q 'AndroidCommandClaimRetryPolicy.delayMillis(retryNumber)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'get(com.google.firebase.firestore.Source.SERVER)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'remoteCommandStatusMessageForTarget(status, activeCommandIsAndroidTarget)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'remoteCommandTimeoutMessage(activeCommandIsAndroidTarget, submissionTimeout = true)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MYN-ANDROID-6007' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'timeoutMessagesAreSpecificToTargetPlatformAndPhase' app/src/test/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicyTest.kt
+          grep -q 'Android komut durumu: $status' app/src/main/java/com/mynkralus/mynassistant/RemoteCommandSubmissionPolicy.kt
+          grep -q 'resolveAssistantCommandTarget' app/src/test/java/com/mynkralus/mynassistant/AssistantCommandRoutingPolicyTest.kt
+          grep -q 'explicitOfflineCloudAgentRemainsSelectedInsteadOfAnotherOnlinePc' app/src/test/java/com/mynkralus/mynassistant/DevicePresencePolicyTest.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt").read_text(encoding="utf-8")
+          start = source.index("private fun TvRemotePanel(")
+          remote = source[start:]
+          if "drawCircle(" in remote or "while (y < size.height)" in remote:
+              raise SystemExit("Touchpad must keep the plain grey surface without decorative dots.")
+          for expected in ('"Touchpad"', "Color(0xFF414141)", 'showTouchpad = showTouchpadPanel', 'showKeyboard = showKeyboardPanel'):
+              if expected not in remote and expected not in source:
+                  raise SystemExit(f"Expected remote-control behavior missing: {expected}")
+
+          # The exact pre-adaptive square PNG is intentional; fail if someone silently
+          # swaps in a circular/adaptive export.
+          import subprocess
+          expected_icon_blob = "97b1f85688c3233885b4c4929652565dd4f07ab3"
+          actual_icon_blob = subprocess.check_output(
+              ["git", "rev-parse", "HEAD:app/src/main/res/drawable-nodpi/mynassistant_launcher.png"],
+              text=True,
+          ).strip()
+          if actual_icon_blob != expected_icon_blob:
+              raise SystemExit(f"Launcher square icon changed unexpectedly: {actual_icon_blob}")
+
+          controls_start = source.index("val remoteUiPreferencePrefix")
+          controls_end = source.index("TvRemotePanel(", controls_start)
+          remote_controls = source[controls_start:controls_end]
+          if remote_controls.count("IconToggleButton(") < 3:
+              raise SystemExit("Remote control must retain three separate visibility buttons.")
+          for expected in (
+              "Icons.Default.Tv", "Icons.Default.TouchApp", "Icons.Default.Keyboard",
+              'saveRemoteVisibility("screen", it)',
+              'saveRemoteVisibility("touchpad", it)',
+              'saveRemoteVisibility("keyboard", it)',
+              'contentDescription = if (showScreenPreview)',
+              'contentDescription = if (showTouchpadPanel)',
+              'contentDescription = if (showKeyboardPanel)',
+          ):
+              if expected not in remote_controls:
+                  raise SystemExit(f"Independent remote visibility control is missing: {expected}")
+          PY
+          grep -q 'remote_visibility_' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'showTouchpad = showTouchpadPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'showKeyboard = showKeyboardPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Icons.Default.Save' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFFE0F5E8)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
@@ -114,47 +231,82 @@ jobs:
           fi
           grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'MynAssistant • Android 0.6.1' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'profilePhotos/{userId}/{fileName}' storage.rules
-          grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml
-          grep -q '<adaptive-icon' app/src/main/res/mipmap-anydpi-v26/mynassistant_launcher.xml
-          grep -q 'android:width="50dp"' app/src/main/res/drawable/mynassistant_launcher_foreground.xml
+          grep -q 'android:icon="@drawable/mynassistant_launcher"' app/src/main/AndroidManifest.xml
+          if grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml; then
+            echo "Square launcher configuration must not be overridden by the adaptive round icon."
+            exit 1
+          fi
           VERSION_CODE=$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')
           VERSION_NAME=$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)
-          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 38 ] || [ "$VERSION_NAME" != "0.6.1" ]; then
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 40 ] || [ "$VERSION_NAME" != "0.6.3" ]; then
             echo "Invalid or old Android version"
             exit 1
           fi
           echo "Verified app version: $VERSION_NAME (versionCode $VERSION_CODE)"
-          APK_SIZE=$(stat -c%s app/build/outputs/apk/debug/app-debug.apk)
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          APK_SIZE=$(stat -c%s "$APK_PATH")
           echo "Verified APK bytes: $APK_SIZE"
           if [ "$APK_SIZE" -lt 100000000 ]; then
             echo "APK is unexpectedly small; verify Vosk/Sherpa packaging"
             exit 1
           fi
+          if ! unzip -tq "$APK_PATH" >/dev/null; then
+            echo "::error::APK archive integrity check failed."
+            exit 1
+          fi
+
+          # Verify the runtime libraries needed by Vosk/JNA and sherpa-onnx
+          # are packaged for both supported ARM Android userspaces.
+          APK_ENTRIES="$(unzip -Z1 "$APK_PATH")"
+          for ABI in arm64-v8a armeabi-v7a; do
+            for LIB in libvosk.so libjnidispatch.so libonnxruntime.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so libsherpa-onnx-jni.so; do
+              if ! printf '%s\n' "$APK_ENTRIES" | grep -Fxq "lib/$ABI/$LIB"; then
+                echo "::error::Missing native library in APK: lib/$ABI/$LIB"
+                exit 1
+              fi
+            done
+          done
+          echo "Verified required native libraries for arm64-v8a and armeabi-v7a."
+
+          mkdir -p build/release
+          RELEASE_APK="build/release/MynAssistant-Android-0.6.3.apk"
+          cp "$APK_PATH" "$RELEASE_APK"
+          APK_SHA256=$(sha256sum "$RELEASE_APK" | awk '{print tolower($1)}')
+          printf "%s  MynAssistant-Android-0.6.3.apk\n" "$APK_SHA256" > "$RELEASE_APK.sha256"
+          test -s "$RELEASE_APK.sha256"
+          echo "Verified APK SHA-256: $APK_SHA256"
 
       - name: Upload APK as an Actions artifact
         uses: actions/upload-artifact@v7
         with:
-          name: MynAssistant-Android-0.6.1-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MynAssistant-Android-0.6.3-debug-${{ github.sha }}
+          path: |
+            build/release/MynAssistant-Android-0.6.3.apk
+            build/release/MynAssistant-Android-0.6.3.apk.sha256
           if-no-files-found: error
           retention-days: 7
 
       - name: Publish APK as a prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/android-pcfiles-list-files' || github.ref == 'refs/heads/fix/android-063-native-library-runtime')
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: mynassistant-android-apk-${{ github.sha }}
-          name: MynAssistant Android Preview (${{ github.sha }})
+          tag_name: mynassistant-android-0.6.3-${{ github.sha }}
+          name: MynAssistant Android 0.6.3 Preview (${{ github.sha }})
           body: |
-            Automated debug APK built from ${{ github.ref_name }}.
+            Automated 0.6.3 preview debug APK built from ${{ github.ref_name }} at commit ${{ github.sha }}.
 
-            The stable debug signing certificate is verified by CI.
-            This is a prerelease build, not a Play Store release.
+            Version: 0.6.3 (versionCode 40).
+            CI verifies Android unit tests, stable debug signing, APK archive integrity and the required Vosk/JNA/sherpa-onnx native libraries for both ARM ABIs.
+            The APK has an accompanying SHA-256 sidecar. Runtime wake-word accuracy and physical-device installation are still manual test gates.
+            This is a debug-signed prerelease, not a Play Store release.
           prerelease: true
           make_latest: false
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: |
+            build/release/MynAssistant-Android-0.6.3.apk
+            build/release/MynAssistant-Android-0.6.3.apk.sha256
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Manual build retry trigger: 2026-10-31 (comment only; no build behavior changed).

@@ -13,8 +13,8 @@ android {
         applicationId = "com.mynkralus.mynassistant"
         minSdk = 26
         targetSdk = 36
-        versionCode = 38
-        versionName = "0.6.1"
+        versionCode = 40
+        versionName = "0.6.3"
 
         // Include both ARM ABIs so the test APK also installs on devices whose
         // Android userspace is 32-bit, while avoiding unrelated x86 emulator runtimes.
@@ -58,6 +58,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-gif:2.7.0")
     implementation("com.google.android.gms:play-services-auth:21.4.0")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
     implementation("androidx.activity:activity-compose:1.10.1")
