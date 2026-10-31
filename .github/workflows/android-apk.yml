@@ -301,3 +301,5 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Manual build retry trigger: 2026-10-31 (comment only; no build behavior changed).
