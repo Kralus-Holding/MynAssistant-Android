@@ -108,6 +108,13 @@ jobs:
           grep -q 'devicesRefreshRevision' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q '12_000L' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'ANDROID_SETTINGS_CATEGORIES.forEach' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MynAssistantPermissionCatalog.read(commandContext)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'id = "restricted_settings"' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'Manifest.permission.WRITE_EXTERNAL_STORAGE' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'Manifest.permission.FOREGROUND_SERVICE_MICROPHONE' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'MynPermissionAction.APPLICATION_INFO' app/src/main/java/com/mynkralus/mynassistant/MynAssistantPermissionCatalog.kt
+          grep -q 'Yanındaki QR simgesine' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'DesktopPairingQrPayloadParser.parse(barcode.rawValue)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'displayDeviceName' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'play-services-code-scanner:16.1.0' app/build.gradle.kts
