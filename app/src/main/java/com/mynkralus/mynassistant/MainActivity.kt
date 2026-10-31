@@ -95,6 +95,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Devices
