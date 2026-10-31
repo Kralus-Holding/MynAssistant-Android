@@ -4503,144 +4503,7 @@ private fun AssistantScreen(
                             }
 
                             if (settingsCategory == "Hesap") {
-                            Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(24.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                            ) {
-                                Column(
-                                    Modifier.fillMaxWidth().padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Computer,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Windows bilgisayarını eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                            Text(
-                                                "Windows uygulamasında oluşturulan tek kullanımlık kodu gir. Kod 5 dakika içinde sona erer.",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
-                                            )
-                                        }
-                                    }
-                                    OutlinedTextField(
-                                        value = desktopPairingCode,
-                                        onValueChange = { entered ->
-                                            desktopPairingCode = entered
-                                                .filter { it.isLetterOrDigit() }
-                                                .uppercase(Locale.ROOT)
-                                                .take(10)
-                                            desktopPairingQrSignature = null
-                                            desktopPairingQrExpiresAtUnix = null
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        label = { Text("Windows eşleştirme kodu") },
-                                        placeholder = { Text("ABCDE23456") },
-                                        singleLine = true,
-                                        enabled = signedIn && !desktopPairingBusy,
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Ascii,
-                                            imeAction = ImeAction.Done
-                                        ),
-                                        supportingText = {
-                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
-                                        }
-                                    )
-                                    OutlinedButton(
-                                        onClick = {
-                                            if (!signedIn || desktopPairingScanBusy || desktopPairingBusy) {
-                                                return@OutlinedButton
-                                            }
-                                            desktopPairingScanBusy = true
-                                            desktopPairingStatus = "QR tarayıcı hazırlanıyor..."
-                                            try {
-                                                val options = GmsBarcodeScannerOptions.Builder()
-                                                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                                                    .enableAutoZoom()
-                                                    .build()
-                                                GmsBarcodeScanning.getClient(commandContext, options).startScan()
-                                                    .addOnSuccessListener { barcode ->
-                                                        desktopPairingScanBusy = false
-                                                        val scannedQr = DesktopPairingQrPayloadParser.parse(barcode.rawValue)
-                                                        if (scannedQr == null) {
-                                                            desktopPairingCode = ""
-                                                            desktopPairingQrSignature = null
-                                                            desktopPairingQrExpiresAtUnix = null
-                                                            desktopPairingStatus =
-                                                                "QR kodu geçersiz veya imzasız. Windows uygulamasında yeni bir QR kodu oluştur ya da 10 karakterli kodu elle gir."
-                                                        } else {
-                                                            desktopPairingCode = scannedQr.code
-                                                            desktopPairingQrSignature = scannedQr.signature
-                                                            desktopPairingQrExpiresAtUnix = scannedQr.expiresAtUnix
-                                                            desktopPairingStatus =
-                                                                "İmzalı QR kodu okundu. Güvenli eşleştirme için sunucuda QR imzası ve süre doğrulama desteği dağıtılmış olmalı. Devam etmek için 'Bilgisayarı bağla' düğmesine dokun."
-                                                        }
-                                                    }
-                                                    .addOnCanceledListener {
-                                                        desktopPairingScanBusy = false
-                                                        desktopPairingStatus =
-                                                            "QR taraması iptal edildi. İstersen kodu elle girebilirsin."
-                                                    }
-                                                    .addOnFailureListener {
-                                                        desktopPairingScanBusy = false
-                                                        desktopPairingStatus =
-                                                            "QR taraması başlatılamadı. Google Play Hizmetlerini güncelle veya kodu elle gir."
-                                                    }
-                                            } catch (_: Exception) {
-                                                desktopPairingScanBusy = false
-                                                desktopPairingStatus =
-                                                    "QR tarayıcı başlatılamadı. İnternet bağlantısını kontrol et veya kodu elle gir."
-                                            }
-                                        },
-                                        enabled = signedIn && !desktopPairingBusy && !desktopPairingScanBusy,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        if (desktopPairingScanBusy) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(16.dp),
-                                                strokeWidth = 2.dp
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                        }
-                                        Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
-                                    }
-                                    Button(
-                                        onClick = { approveDesktopPairing() },
-                                        enabled = signedIn && !desktopPairingBusy &&
-                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        if (desktopPairingBusy) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                        }
-                                        Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
-                                    }
-                                    Text(
-                                        desktopPairingStatus,
-                                        fontSize = 12.sp,
-                                        color = when {
-                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
-                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
-                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
-                                                Color(0xFF2E9D62)
-                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                                        }
-                                    )
-                                }
-                            }
+                            Text(if (signedIn) "MynAssistant hesabın etkin. Telefon-PC bağlantısını Agent sekmesinden yönet." else "Şu anda giriş yapılmamış.")
                             OutlinedButton(
                                 onClick = { navigateToPage(if (signedIn) Page.LOGIN else Page.AUTH) },
                                 modifier = Modifier.fillMaxWidth()
@@ -4925,6 +4788,146 @@ private fun AssistantScreen(
                                         Spacer(Modifier.width(8.dp))
                                         Text("Cihazlarımı gör")
                                     }
+                                }
+                            }
+
+                            HorizontalDivider()
+                            Text("QR ile güvenli Telefon-PC eşleştirmesi", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Computer,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Windows bilgisayarını QR ile eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "Windows MynAssistant → Ayarlar → Agent bölümünde gösterilen QR kodunu tara. İstersen 10 karakterli kodu elle de girebilirsin.",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
+                                            )
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = desktopPairingCode,
+                                        onValueChange = { entered ->
+                                            desktopPairingCode = entered
+                                                .filter { it.isLetterOrDigit() }
+                                                .uppercase(Locale.ROOT)
+                                                .take(10)
+                                            desktopPairingQrSignature = null
+                                            desktopPairingQrExpiresAtUnix = null
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Windows eşleştirme kodu") },
+                                        placeholder = { Text("ABCDE23456") },
+                                        singleLine = true,
+                                        enabled = signedIn && !desktopPairingBusy,
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Ascii,
+                                            imeAction = ImeAction.Done
+                                        ),
+                                        supportingText = {
+                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
+                                        }
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (!signedIn || desktopPairingScanBusy || desktopPairingBusy) {
+                                                return@OutlinedButton
+                                            }
+                                            desktopPairingScanBusy = true
+                                            desktopPairingStatus = "QR tarayıcı hazırlanıyor..."
+                                            try {
+                                                val options = GmsBarcodeScannerOptions.Builder()
+                                                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                                                    .enableAutoZoom()
+                                                    .build()
+                                                GmsBarcodeScanning.getClient(commandContext, options).startScan()
+                                                    .addOnSuccessListener { barcode ->
+                                                        desktopPairingScanBusy = false
+                                                        val scannedQr = DesktopPairingQrPayloadParser.parse(barcode.rawValue)
+                                                        if (scannedQr == null) {
+                                                            desktopPairingCode = ""
+                                                            desktopPairingQrSignature = null
+                                                            desktopPairingQrExpiresAtUnix = null
+                                                            desktopPairingStatus =
+                                                                "QR kodu geçersiz veya imzasız. Windows uygulamasında yeni bir QR kodu oluştur ya da 10 karakterli kodu elle gir."
+                                                        } else {
+                                                            desktopPairingCode = scannedQr.code
+                                                            desktopPairingQrSignature = scannedQr.signature
+                                                            desktopPairingQrExpiresAtUnix = scannedQr.expiresAtUnix
+                                                            desktopPairingStatus =
+                                                                "İmzalı QR kodu okundu. Bilgisayarı bağlamak için onayla."
+                                                        }
+                                                    }
+                                                    .addOnCanceledListener {
+                                                        desktopPairingScanBusy = false
+                                                        desktopPairingStatus =
+                                                            "QR taraması iptal edildi. İstersen kodu elle girebilirsin."
+                                                    }
+                                                    .addOnFailureListener {
+                                                        desktopPairingScanBusy = false
+                                                        desktopPairingStatus =
+                                                            "QR taraması başlatılamadı. Google Play Hizmetlerini güncelle veya kodu elle gir."
+                                                    }
+                                            } catch (_: Exception) {
+                                                desktopPairingScanBusy = false
+                                                desktopPairingStatus =
+                                                    "QR tarayıcı başlatılamadı. İnternet bağlantısını kontrol et veya kodu elle gir."
+                                            }
+                                        },
+                                        enabled = signedIn && !desktopPairingBusy && !desktopPairingScanBusy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingScanBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
+                                    }
+                                    Button(
+                                        onClick = { approveDesktopPairing() },
+                                        enabled = signedIn && !desktopPairingBusy &&
+                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
+                                    }
+                                    Text(
+                                        desktopPairingStatus,
+                                        fontSize = 12.sp,
+                                        color = when {
+                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
+                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
+                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
+                                                Color(0xFF2E9D62)
+                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
+                                        }
+                                    )
                                 }
                             }
                             }
