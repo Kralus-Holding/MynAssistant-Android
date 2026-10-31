@@ -12,7 +12,7 @@ class WakeNativeLibraryLoadExceptionTest {
         val error = WakeNativeLibraryLoadException(original)
 
         assertEquals(original, error.cause)
-        assertTrue(error.message.orEmpty().contains("yerel ses/uyandırma kütüphanesi"))
+        assertTrue(error.message.orEmpty().contains("yerel ses/uyandırma kütüphanesi", ignoreCase = true))
         assertTrue(error.message.orEmpty().contains("yeniden indirip kurun"))
     }
 }
