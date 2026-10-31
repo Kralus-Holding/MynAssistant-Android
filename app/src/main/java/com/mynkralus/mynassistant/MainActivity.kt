@@ -2237,12 +2237,16 @@ private fun AssistantScreen(
                     if (entry.details.isNotBlank()) append("\nAyrıntı: ").append(entry.details)
                 }
             }.take(60_000)
-            val automaticReport = JSONObject()
-                .put("source", "android")
-                .put("appVersion", BuildConfig.VERSION_NAME)
-                .put("errorCode", issueId)
-                .put("message", "Kullanıcı otomatik hata raporlamasını etkinleştirdi; yeni bir hata oluştu.")
-                .put("details", automaticDetails)
+            val appVersion = runCatching {
+                commandContext.packageManager.getPackageInfo(commandContext.packageName, 0).versionName
+            }.getOrNull() ?: "unknown"
+            val automaticReport = JSONObject().apply {
+                put("source", "android")
+                put("appVersion", appVersion)
+                put("errorCode", issueId)
+                put("message", "Kullanıcı otomatik hata raporlamasını etkinleştirdi; yeni bir hata oluştu.")
+                put("details", automaticDetails)
+            }
             MynAssistantAccountBackend.sendDiagnosticReport(currentUser, automaticReport) { success, message ->
                 diagnosticReportSending = false
                 diagnosticReportStatus = if (success) {
@@ -4323,12 +4327,16 @@ private fun AssistantScreen(
                                                             }
                                                         }
                                                     }.take(60_000)
-                                                    val report = JSONObject()
-                                                        .put("source", "android")
-                                                        .put("appVersion", BuildConfig.VERSION_NAME)
-                                                        .put("errorCode", entries.firstOrNull()?.id ?: "MYN-USER-REPORT")
-                                                        .put("message", "Kullanıcı Ayarlar → Hata kayıtları bölümünden destek raporu gönderdi.")
-                                                        .put("details", reportDetails.ifBlank { "Cihazda kayıtlı hata bulunmuyor; kullanıcı destek raporu gönderdi." })
+                                                    val appVersion = runCatching {
+                                                        commandContext.packageManager.getPackageInfo(commandContext.packageName, 0).versionName
+                                                    }.getOrNull() ?: "unknown"
+                                                    val report = JSONObject().apply {
+                                                        put("source", "android")
+                                                        put("appVersion", appVersion)
+                                                        put("errorCode", entries.firstOrNull()?.id ?: "MYN-USER-REPORT")
+                                                        put("message", "Kullanıcı Ayarlar → Hata kayıtları bölümünden destek raporu gönderdi.")
+                                                        put("details", reportDetails.ifBlank { "Cihazda kayıtlı hata bulunmuyor; kullanıcı destek raporu gönderdi." })
+                                                    }
                                                     MynAssistantAccountBackend.sendDiagnosticReport(user, report) { success, message ->
                                                         diagnosticReportSending = false
                                                         diagnosticReportStatus = if (success) {
