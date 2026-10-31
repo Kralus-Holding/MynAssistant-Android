@@ -67,8 +67,14 @@ internal object MynAssistantPermissionCatalog {
         } else {
             isGranted(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
-        val photosPartialAccess = Build.VERSION.SDK_INT >= 34 &&
-            isGranted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        val photosPartialAccess = when {
+            Build.VERSION.SDK_INT >= 34 ->
+                isGranted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            Build.VERSION.SDK_INT >= 33 ->
+                isGranted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                    isGranted(Manifest.permission.READ_MEDIA_VIDEO)
+            else -> false
+        }
 
         val audioPermission = if (Build.VERSION.SDK_INT >= 33) {
             Manifest.permission.READ_MEDIA_AUDIO
