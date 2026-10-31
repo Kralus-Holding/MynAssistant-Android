@@ -2111,6 +2111,15 @@ private fun AssistantScreen(
     var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var manuallySelectedAndroidDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
+    var diagnosticAutoEmailEnabled by remember {
+        mutableStateOf(
+            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean("diagnostics_auto_email_enabled", false)
+        )
+    }
+    var diagnosticReportSending by remember { mutableStateOf(false) }
+    var diagnosticReportStatus by remember { mutableStateOf<String?>(null) }
+    var showDiagnosticReportConfirmation by remember { mutableStateOf(false) }
     var showDiagnosticReportConfirmation by remember { mutableStateOf(false) }
     var diagnosticReportSending by remember { mutableStateOf(false) }
     var diagnosticReportStatus by remember { mutableStateOf<String?>(null) }
@@ -2207,6 +2216,46 @@ private fun AssistantScreen(
             technicalDetails
         )
         diagnosticsRevision += 1
+
+        // Automatic reports are sent only after an explicit opt-in and only when
+        // a Firebase user is signed in. A five-minute device cooldown prevents
+        // a fast error loop from flooding the support mailbox.
+        val diagnosticPreferences = commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        val now = System.currentTimeMillis()
+        val lastAutomaticReport = diagnosticPreferences.getLong("diagnostics_auto_email_last_sent_ms", 0L)
+        if (diagnosticAutoEmailEnabled && currentUser != null &&
+            now - lastAutomaticReport >= 5 * 60 * 1000L &&
+            !diagnosticReportSending
+        ) {
+            diagnosticReportSending = true
+            diagnosticPreferences.edit()
+                .putLong("diagnostics_auto_email_last_sent_ms", now)
+                .apply()
+            val recentEntries = MynAssistantDiagnostics.read(commandContext).take(80)
+            val automaticDetails = recentEntries.asReversed().joinToString("\n\n") { entry ->
+                buildString {
+                    append(entry.id).append(" | ").append(entry.category)
+                    if (entry.command.isNotBlank()) append("\nKomut: ").append(entry.command)
+                    if (entry.details.isNotBlank()) append("\nAyrıntı: ").append(entry.details)
+                }
+            }.take(60_000)
+            val automaticReport = JSONObject()
+                .put("source", "android")
+                .put("appVersion", BuildConfig.VERSION_NAME)
+                .put("errorCode", issueId)
+                .put("message", "Kullanıcı otomatik hata raporlamasını etkinleştirdi; yeni bir hata oluştu.")
+                .put("details", automaticDetails)
+            MynAssistantAccountBackend.sendDiagnosticReport(currentUser, automaticReport) { success, message ->
+                diagnosticReportSending = false
+                diagnosticReportStatus = if (success) {
+                    "Otomatik hata raporu destek ekibine gönderildi."
+                } else {
+                    "Otomatik hata raporu gönderilemedi: $message"
+                }
+            }
+        }
+
         userMessage + "\nSorun kodu: " + issueId
     }
     val refreshWakeWordUi: () -> Unit = {
@@ -4191,10 +4240,38 @@ private fun AssistantScreen(
                                 MynAssistantDiagnostics.read(commandContext)
                             }
                             Text(
-                                "Hata kayıtları bu telefonda kalır. Aşağıdaki düğmeye dokunup gönderimi onaylarsan son 80 tanılama kaydı, uygulama sürümü ve giriş yaptığın MynAssistant hesabı destek adresine e-posta ile gönderilir. Kişisel dosyaların veya ekran görüntülerin gönderilmez.",
+                                "Hata kayıtları bu telefonda saklanır. Otomatik gönderimi açarsan yeni hatalarda son tanılama kayıtları, uygulama sürümü ve giriş yaptığın MynAssistant hesabı destek e-postasına gönderilir. Kişisel dosyalar ve ekran görüntüleri gönderilmez.",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Hataları otomatik e-postayla bildir", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        if (signedIn) "Yalnızca giriş yaptığında gönderir; 5 dakikalık gönderim sınırı vardır."
+                                        else "Otomatik bildirim için önce MynAssistant hesabına giriş yap.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                    )
+                                }
+                                Switch(
+                                    checked = diagnosticAutoEmailEnabled,
+                                    enabled = signedIn && !diagnosticReportSending,
+                                    onCheckedChange = { enabled ->
+                                        diagnosticAutoEmailEnabled = enabled
+                                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                                            .edit().putBoolean("diagnostics_auto_email_enabled", enabled).apply()
+                                        diagnosticReportStatus = if (enabled) {
+                                            "Otomatik hata e-postası etkinleştirildi."
+                                        } else {
+                                            "Otomatik hata e-postası kapatıldı."
+                                        }
+                                    }
+                                )
+                            }
                             OutlinedButton(
                                 onClick = { showDiagnosticReportConfirmation = true },
                                 enabled = !diagnosticReportSending && signedIn,
