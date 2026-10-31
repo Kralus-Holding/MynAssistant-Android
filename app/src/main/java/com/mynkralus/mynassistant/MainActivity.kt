@@ -5155,7 +5155,8 @@ private fun AssistantScreen(
                                             "volume_up" -> sendLocalPcText("ses 10 arttir")
                                             "volume_down" -> sendLocalPcText("ses 10 azalt")
                                             "home" -> sendLocalPcText("masaustunu goster")
-                                            "power" -> feedback = "Bilgisayarı uzaktan açma özelliği henüz desteklenmiyor."
+                                            "lock_pc" -> sendLocalPcText("bilgisayari kilitle")
+                                            "close_app" -> sendLocalPcText("uygulamayi kapat")
                                             "mouse_move", "mouse_click", "mouse_right_click" ->
                                                 feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
                                             else -> feedback = "Klavye ve fare girişleri bu yerel bağlantı türünde henüz desteklenmiyor."
@@ -6541,11 +6542,10 @@ private fun TvRemotePanel(
     modifier: Modifier = Modifier
 ) {
     val buttons = listOf(
-        Triple("Aç / Kapat", Icons.Default.PowerSettingsNew, "power"),
+        Triple("Kilitle", Icons.Default.Lock, "lock_pc"),
+        Triple("Uygulamayı kapat", Icons.Default.Close, "close_app"),
         Triple("Sesi kapat", Icons.Default.VolumeOff, "mute"),
-        Triple("...", Icons.Default.MoreHoriz, "placeholder"),
         Triple("Sesi artır", Icons.Default.VolumeUp, "volume_up"),
-        // The Home control uses a real home icon and sends the desktop Home command.
         Triple("Ana sayfa", Icons.Default.Home, "home"),
         Triple("Sesi kıs", Icons.Default.VolumeDown, "volume_down")
     )
