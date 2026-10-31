@@ -83,6 +83,12 @@ internal object MynAssistantPermissionCatalog {
         }
 
         val overlayGranted = Settings.canDrawOverlays(context)
+        val internetGranted = isGranted(Manifest.permission.INTERNET)
+        val foregroundServiceGranted =
+            isGranted(Manifest.permission.FOREGROUND_SERVICE) &&
+                (Build.VERSION.SDK_INT < 34 ||
+                    isGranted(Manifest.permission.FOREGROUND_SERVICE_MICROPHONE))
+        val audioSettingsGranted = isGranted(Manifest.permission.MODIFY_AUDIO_SETTINGS)
         val accessibilityComponent = ComponentName(
             context,
             MynAssistantAccessibilityService::class.java
@@ -193,6 +199,33 @@ internal object MynAssistantPermissionCatalog {
                 statusText = if (accessibilityGranted) "Etkin" else "Etkin değil",
                 action = MynPermissionAction.ACCESSIBILITY_SETTINGS,
                 actionText = "Ayarları aç"
+            ),
+            MynPermissionItem(
+                id = "audio_settings",
+                title = "Müzik ve ses ayarları",
+                description = "Ses düzeyi ve ses yönlendirme gibi sistem ses ayarlarını yönetmek için kullanılan normal Android izni.",
+                state = if (audioSettingsGranted) MynPermissionState.GRANTED else MynPermissionState.DENIED,
+                statusText = if (audioSettingsGranted) "İzin verildi" else "Kullanılamıyor",
+                action = MynPermissionAction.APPLICATION_INFO,
+                actionText = "Uygulama bilgilerini aç"
+            ),
+            MynPermissionItem(
+                id = "background_service",
+                title = "Arka plan mikrofon servisi",
+                description = "Hey Meyene açıkken Android'in mikrofon ön plan servisini ve kalıcı servis bildirimini çalıştırmak için gereken kurulum izni.",
+                state = if (foregroundServiceGranted) MynPermissionState.GRANTED else MynPermissionState.DENIED,
+                statusText = if (foregroundServiceGranted) "Sistem izni hazır" else "Sistem izni eksik",
+                action = MynPermissionAction.APPLICATION_INFO,
+                actionText = "Uygulama bilgilerini aç"
+            ),
+            MynPermissionItem(
+                id = "internet",
+                title = "İnternet erişimi",
+                description = "MynAssistant hesabı, sunucu eşitlemesi ve telefon-PC bağlantısı için kullanılan kurulum izni.",
+                state = if (internetGranted) MynPermissionState.GRANTED else MynPermissionState.DENIED,
+                statusText = if (internetGranted) "İzin verildi" else "İzin verilmedi",
+                action = MynPermissionAction.APPLICATION_INFO,
+                actionText = "Uygulama bilgilerini aç"
             ),
             MynPermissionItem(
                 id = "restricted_settings",
