@@ -59,7 +59,11 @@ internal object MynAssistantPermissionCatalog {
                 Manifest.permission.READ_MEDIA_IMAGES,
                 Manifest.permission.READ_MEDIA_VIDEO
             )
-            else -> listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            Build.VERSION.SDK_INT >= 29 -> listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            else -> listOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
         }
         val photosFullAccess = if (Build.VERSION.SDK_INT >= 33) {
             isGranted(Manifest.permission.READ_MEDIA_IMAGES) &&
