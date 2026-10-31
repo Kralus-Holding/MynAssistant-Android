@@ -2110,6 +2110,7 @@ private fun AssistantScreen(
     // Explicit per-device choices must not silently fall back to a different target.
     var manuallySelectedPcDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var manuallySelectedAndroidDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    val commandContext = LocalContext.current
     var diagnosticsRevision by remember { mutableIntStateOf(0) }
     var diagnosticAutoEmailEnabled by remember {
         mutableStateOf(
@@ -2120,12 +2121,8 @@ private fun AssistantScreen(
     var diagnosticReportSending by remember { mutableStateOf(false) }
     var diagnosticReportStatus by remember { mutableStateOf<String?>(null) }
     var showDiagnosticReportConfirmation by remember { mutableStateOf(false) }
-    var showDiagnosticReportConfirmation by remember { mutableStateOf(false) }
-    var diagnosticReportSending by remember { mutableStateOf(false) }
-    var diagnosticReportStatus by remember { mutableStateOf<String?>(null) }
     var pendingContactChoice by remember { mutableStateOf<PendingContactChoice?>(null) }
     var pendingContactConfirmation by remember { mutableStateOf<PendingContactConfirmation?>(null) }
-    val commandContext = LocalContext.current
     var androidCommandReceiverInFlightId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var androidCommandReceiverClaimRetryCount by remember(firebaseUserId) { mutableIntStateOf(0) }
     var androidCommandReceiverActive by remember(firebaseUserId) {
