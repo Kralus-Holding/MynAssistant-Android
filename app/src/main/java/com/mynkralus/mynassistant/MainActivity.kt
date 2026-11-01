@@ -2738,7 +2738,6 @@ private fun AssistantScreen(
                         }
                     }
                 }
-                    }
                 activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
                 commandSubmissionStartedAt = 0L
