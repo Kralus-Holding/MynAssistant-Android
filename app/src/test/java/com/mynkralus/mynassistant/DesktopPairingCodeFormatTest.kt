@@ -1,5 +1,6 @@
 package com.mynkralus.mynassistant
 
+import androidx.compose.ui.text.AnnotatedString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
@@ -10,6 +11,18 @@ class DesktopPairingCodeFormatTest {
     fun formatsCodeWithAutomaticSeparatorAfterFiveCharacters() {
         assertEquals("AZ89E-GXUR9", DesktopPairingCodeFormat.format("AZ89EGXUR9"))
         assertEquals("AZ89E-GXUR9", DesktopPairingCodeFormat.format("az89e-gxur9"))
+    }
+
+    @Test
+    fun visualTransformationShowsDashWithoutChangingRawTextOrCaretPositions() {
+        val transformed = DesktopPairingCodeVisualTransformation()
+            .filter(AnnotatedString("AZ89EGXUR9"))
+
+        assertEquals("AZ89E-GXUR9", transformed.text.text)
+        assertEquals(6, transformed.offsetMapping.originalToTransformed(5))
+        assertEquals(5, transformed.offsetMapping.transformedToOriginal(6))
+        assertEquals(7, transformed.offsetMapping.originalToTransformed(6))
+        assertEquals(6, transformed.offsetMapping.transformedToOriginal(7))
     }
 
     @Test
