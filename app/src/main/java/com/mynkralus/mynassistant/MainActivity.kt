@@ -3654,7 +3654,11 @@ private fun AssistantScreen(
                                 devicesError?.let { error ->
                                     Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                                 }
-                                if (!devicesLoading && pcDevices.isEmpty() && devicesError == null) {
+                                val visibleDevices = devices.distinctBy { it.id }
+                                val visiblePcDevices = visibleDevices.filter { it.isPcTarget }
+                                val visiblePhoneDevices = visibleDevices.filterNot { it.isPcTarget }
+
+                                if (!devicesLoading && visiblePcDevices.isEmpty() && devicesError == null) {
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
