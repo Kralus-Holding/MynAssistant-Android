@@ -2425,41 +2425,46 @@ private fun AssistantScreen(
             .enableAutoZoom()
             .build()
 
-        GmsBarcodeScanning.getClient(pairingScannerContext, options)
-            .startScan()
-            .addOnSuccessListener { barcode ->
-                desktopPairingScanBusy = false
-                val parsed = DesktopPairingCodeFormat.parseQr(barcode.rawValue.orEmpty())
-                if (parsed == null) {
-                    desktopPairingCode = ""
-                    desktopPairingQrSignature = null
-                    desktopPairingQrExpiresAtUnix = null
-                    desktopPairingStatus = "QR kodu geçersiz veya süresi dolmuş. Windows uygulamasından yeni QR kodu oluştur."
-                } else {
-                    desktopPairingCode = parsed.formattedCode
-                    desktopPairingQrSignature = parsed.signature
-                    desktopPairingQrExpiresAtUnix = parsed.expiresAtUnix
-                    desktopPairingStatus = if (parsed.signature != null) {
-                        "Windows QR kodu okundu. Sunucu imzası bilgisayar bağlanırken doğrulanacak."
+        try {
+            GmsBarcodeScanning.getClient(pairingScannerContext, options)
+                .startScan()
+                .addOnSuccessListener { barcode ->
+                    desktopPairingScanBusy = false
+                    val parsed = DesktopPairingCodeFormat.parseQr(barcode.rawValue.orEmpty())
+                    if (parsed == null) {
+                        desktopPairingCode = ""
+                        desktopPairingQrSignature = null
+                        desktopPairingQrExpiresAtUnix = null
+                        desktopPairingStatus = "QR kodu geçersiz veya süresi dolmuş. Windows uygulamasından yeni QR kodu oluştur."
                     } else {
-                        "Tek kullanımlık kod okundu. Bilgisayarı bağlayarak kodu sunucuda doğrula."
+                        desktopPairingCode = parsed.formattedCode
+                        desktopPairingQrSignature = parsed.signature
+                        desktopPairingQrExpiresAtUnix = parsed.expiresAtUnix
+                        desktopPairingStatus = if (parsed.signature != null) {
+                            "Windows QR kodu okundu. Sunucu imzası bilgisayar bağlanırken doğrulanacak."
+                        } else {
+                            "Tek kullanımlık kod okundu. Bilgisayarı bağlayarak kodu sunucuda doğrula."
+                        }
                     }
                 }
-            }
-            .addOnCanceledListener {
-                desktopPairingScanBusy = false
-                desktopPairingStatus = "QR taraması iptal edildi."
-            }
-            .addOnFailureListener { error ->
-                desktopPairingScanBusy = false
-                desktopPairingStatus = when {
-                    error.message?.contains("module", ignoreCase = true) == true ||
-                        error.message?.contains("download", ignoreCase = true) == true ->
-                        "Google QR tarayıcısı henüz hazır değil. Google Play hizmetlerini güncelleyip tekrar dene."
-                    else ->
-                        "QR tarayıcısı açılamadı. Google Play hizmetlerini kontrol edip tekrar dene."
+                .addOnCanceledListener {
+                    desktopPairingScanBusy = false
+                    desktopPairingStatus = "QR taraması iptal edildi."
                 }
-            }
+                .addOnFailureListener { error ->
+                    desktopPairingScanBusy = false
+                    desktopPairingStatus = when {
+                        error.message?.contains("module", ignoreCase = true) == true ||
+                            error.message?.contains("download", ignoreCase = true) == true ->
+                            "Google QR tarayıcısı henüz hazır değil. Google Play hizmetlerini güncelleyip tekrar dene."
+                        else ->
+                            "QR tarayıcısı açılamadı. Google Play hizmetlerini kontrol edip tekrar dene."
+                    }
+                }
+        } catch (_: Exception) {
+            desktopPairingScanBusy = false
+            desktopPairingStatus = "QR tarayıcısı başlatılamadı. Google Play hizmetlerini güncelleyip tekrar dene."
+        }
     }
 
     fun approveDesktopPairing() {
