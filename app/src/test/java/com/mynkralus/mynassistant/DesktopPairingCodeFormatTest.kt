@@ -17,7 +17,7 @@ class DesktopPairingCodeFormatTest {
         val expiry = 1_800_000_300L
         val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
         val result = DesktopPairingCodeFormat.parseQr(
-            "MYNASSISTANT-PAIR:AZ89EGXUR9:$expiry:$signature",
+            "MYNASSISTANT-PAIR:AZ89E-GXUR9:$expiry:$signature",
             nowEpochSeconds = 1_800_000_000L
         )
 
