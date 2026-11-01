@@ -5223,7 +5223,7 @@ private fun AssistantScreen(
                         DrawerItem("Cihazlarım") { navigateToPage(Page.DEVICES); drawer = false }
                         DrawerItem("Ayarlar") { navigateToPage(Page.SETTINGS); drawer = false }
                         DrawerItem("PC Kumandası") { navigateToPage(Page.REMOTE); drawer = false }
-                        DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
+                        DrawerItem("PcFiles") { navigateToPage(Page.FILES); drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
                         Text("MynAssistant • Android 0.6.3", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
