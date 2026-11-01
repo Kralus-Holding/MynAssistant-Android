@@ -4209,58 +4209,43 @@ Page.DIAGNOSTICS -> {
                             }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
+                        
                         Page.SETTINGS -> {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
-                                Switch(checked = dark, onCheckedChange = { toggleTheme() })
-                            }
-                            Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 13.sp)
-                            Text(
-                                "Rehber izni verildiğinde, bu telefona senkronize edilmiş Google, SIM ve diğer kişi hesaplarındaki kayıtlar aranır.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                            )
-                            Text(if (signedIn) "Oturum bu cihazda hatırlanıyor." else "Şu anda giriş yapılmamış.")
+                            Text("Görünüm", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(
-                                modifier = Modifier.fillMaxWidth(),
+                                Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
+                                        Switch(checked = dark, onCheckedChange = { toggleTheme() })
+                                    }
+                                    Text("Tema tercihi uygulama yeniden açıldığında korunur.", fontSize = 12.sp)
+                                    Text(if (signedIn) "Oturum açık: ${email.ifBlank { "Hesap" }}" else "Şu anda giriş yapılmamış.", fontSize = 12.sp)
+                                }
+                            }
+
+                            Text("Windows eşleştirme", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
+                                Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(24.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Column(
-                                    Modifier.fillMaxWidth().padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Computer,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(28.dp)
-                                        )
+                                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                                         Column(Modifier.weight(1f)) {
                                             Text("Windows bilgisayarını eşleştir", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                            Text(
-                                                "Windows uygulamasında oluşturulan tek kullanımlık kodu gir. Kod 5 dakika içinde sona erer.",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
-                                            )
+                                            Text("Windows uygulamasındaki tek kullanımlık kodu gir veya QR kodunu tara.", fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                                         }
                                     }
                                     OutlinedTextField(
                                         value = desktopPairingCode,
                                         onValueChange = { entered ->
-                                            // BasicTextField/Compose may report the transformed value
-                                            // (including the visual hyphen). Normalize only the input
-                                            // characters; never reformat the state on every keystroke.
                                             val normalized = DesktopPairingCodeFormat.normalize(entered)
-                                            if (normalized != desktopPairingCode) {
-                                                desktopPairingCode = normalized
-                                            }
-                                            // Manual typing/pasting means the user is no longer approving
-                                            // the signed QR captured by the scanner.
+                                            if (normalized != desktopPairingCode) desktopPairingCode = normalized
                                             desktopPairingQrSignature = null
                                             desktopPairingQrExpiresAtUnix = null
                                         },
@@ -4270,13 +4255,8 @@ Page.DIAGNOSTICS -> {
                                         visualTransformation = DesktopPairingCodeVisualTransformation(),
                                         singleLine = true,
                                         enabled = signedIn && !desktopPairingBusy,
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Ascii,
-                                            imeAction = ImeAction.Done
-                                        ),
-                                        supportingText = {
-                                            Text("Kod 5. karakterden sonra otomatik tirelenir. QR taraması imzayı da sunucuya iletir.")
-                                        }
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Done),
+                                        supportingText = { Text("10 karakterlik kod. Tire otomatik gösterilir.") }
                                     )
                                     OutlinedButton(
                                         onClick = { scanDesktopPairingQr() },
@@ -4284,26 +4264,18 @@ Page.DIAGNOSTICS -> {
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         if (desktopPairingScanBusy) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp
-                                            )
+                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                             Spacer(Modifier.width(8.dp))
                                         }
                                         Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
                                     }
                                     Button(
                                         onClick = { approveDesktopPairing() },
-                                        enabled = signedIn && !desktopPairingBusy &&
-                                            DesktopPairingCodeFormat.normalize(desktopPairingCode).length == 10 &&
-                                                DesktopPairingCodeFormat.isValidCode(desktopPairingCode),
+                                        enabled = signedIn && !desktopPairingBusy && DesktopPairingCodeFormat.isValidCode(desktopPairingCode),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         if (desktopPairingBusy) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp
-                                            )
+                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                             Spacer(Modifier.width(8.dp))
                                         }
                                         Text(if (desktopPairingBusy) "Eşleştirme onaylanıyor..." else "Bilgisayarı bağla")
@@ -4311,960 +4283,156 @@ Page.DIAGNOSTICS -> {
                                     Text(
                                         desktopPairingStatus,
                                         fontSize = 12.sp,
-                                        color = when {
-                                            desktopPairingBusy -> MaterialTheme.colorScheme.secondary
-                                            desktopPairingStatus.contains("eşleştirildi", ignoreCase = true) ||
-                                                desktopPairingStatus.contains("onaylandı", ignoreCase = true) ->
-                                                Color(0xFF2E9D62)
-                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                                        }
+                                        color = if (desktopPairingBusy) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                                     )
                                 }
                             }
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(24.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                            ) {
-                                Column(
-                                    Modifier.fillMaxWidth().padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                    ) {
-                                        Box(
-                                            Modifier.size(58.dp).background(
-                                                MaterialTheme.colorScheme.primary.copy(alpha = .16f), CircleShape
-                                            ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Mic, contentDescription = null,
-                                                modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
-                                        }
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text("Hey Meyene", fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                                            Text("Çevrimdışı uyandırma", fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
-                                        }
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = if (wakeWordPhase == MynWakeWordPhase.LISTENING.persistedValue) Color(0xFF49B86E) else MaterialTheme.colorScheme.outline.copy(alpha = .5f)
-                                        ) { Box(Modifier.size(10.dp)) }
-                                    }
-                                    Text(
-                                        when (wakeWordPhase) {
-                                            MynWakeWordPhase.LISTENING.persistedValue ->
-                                                "“Hey Meyene” dediğinde ekran üstü komut paneli açılmalı."
-                                            MynWakeWordPhase.ERROR.persistedValue ->
-                                                "Dinleme başlatılamadı veya durdu. Hata ayrıntılarını aşağıdan kontrol edebilirsin."
-                                            MynWakeWordPhase.DOWNLOADING_MODEL.persistedValue,
-                                            MynWakeWordPhase.EXTRACTING_MODEL.persistedValue,
-                                            MynWakeWordPhase.VALIDATING_MODEL.persistedValue,
-                                            MynWakeWordPhase.LOADING_ENGINE.persistedValue,
-                                            MynWakeWordPhase.STARTING_MICROPHONE.persistedValue ->
-                                                "Ses sistemi hazırlanıyor. Gerçek dinleme durumu aşağıdaki aşamada gösterilir."
-                                            else ->
-                                                "Etkinleştirdikten sonra desteklenen koşullarda “Hey Meyene” diyerek diğer uygulamaların üzerinde yüzen paneli çağırabilirsin."
-                                        },
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .78f)
-                                    )
-                                    Text(
-                                        wakeWordStatus,
-                                        fontSize = 12.sp,
-                                        color = when {
-                                            wakeWordPhase == MynWakeWordPhase.ERROR.persistedValue -> MaterialTheme.colorScheme.error
-                                            wakeWordPhase == MynWakeWordPhase.LISTENING.persistedValue -> Color(0xFF65D68B)
-                                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
-                                        }
-                                    )
-                                    if (wakeWordErrorCode.isNotBlank() &&
-                                        wakeWordPhase == MynWakeWordPhase.ERROR.persistedValue
-                                    ) {
-                                        Text(
-                                            "Hata kodu: $wakeWordErrorCode · Son aşama: " +
-                                                wakeWordLastPhase.ifBlank { "bilinmiyor" } +
-                                                " · yeniden deneme: $wakeWordRetryCount" +
-                                                (wakeWordErrorAt.takeIf { it > 0L }?.let {
-                                                    " · " + android.text.format.DateFormat.format("dd.MM HH:mm", it)
-                                                } ?: ""),
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.error
-                                        )
-                                        if (wakeWordErrorDetails.isNotBlank()) {
-                                            Text(
-                                                wakeWordErrorDetails,
-                                                fontSize = 11.sp,
-                                                maxLines = 4,
-                                                overflow = TextOverflow.Ellipsis,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                                            )
-                                        }
-                                    }
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Text("Arka planda dinle", fontWeight = FontWeight.SemiBold)
-                                            Text(
-                                                "Açıkken kalıcı bildirim ve mikrofon gizlilik göstergesi görünür. İstediğinde buradan kapatabilirsin.",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                                            )
-                                        }
-                                        Switch(
-                                            checked = wakeWordEnabled,
-                                            onCheckedChange = { requestWakeWordActivation() }
-                                        )
-                                    }
-                                    Text(
-                                        "İlk kurulumda Türkçe komut modeli ve ayrı düşük güç uyandırma modeli indirilir. Kurulduktan sonra uyandırma ve komut tanıma cihaz üzerinde çevrimdışı çalışır. Dinleme etkin olduğu sürece mikrofon gizlilik göstergesi ve kalıcı bildirim açık kalır.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
-                                    )
-                                    Text(
-                                        "Önemli: Dinlemeyi MynAssistant açıkken Ayarlar'dan başlat. Android 14 ve üzeri, uygulama arka plandayken mikrofonlu ön plan servisi başlatılmasını genellikle engeller. Zorla durdurma veya telefonun pil yönetimi dinlemeyi kesebilir; böyle bir durumda uygulamayı açıp yeniden etkinleştir.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
-                                    )
-                                    Text(
-                                        "Son algılama: " +
-                                            (wakeWordLastDetectedAt.takeIf { it > 0L }?.let {
-                                                android.text.format.DateFormat.format("dd.MM.yyyy HH:mm", it).toString()
-                                            } ?: "Henüz algılanmadı") +
-                                            " · toplam $wakeWordDetectionCount",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .74f)
-                                    )
-                                    Text(
-                                        "Uyandırma algılaması artık düşük hesaplama gücü kullanan bir anahtar-kelime motoruyla yapılır. Türkçe komut tanıma yalnızca uyandırma algılandıktan sonra başlar.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .64f)
-                                    )
-                                    OutlinedButton(
-                                        onClick = {
-                                            try {
-                                                commandContext.startActivity(
-                                                    Intent(
-                                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                        Uri.parse("package:" + commandContext.packageName)
-                                                    )
-                                                )
-                                            } catch (error: Exception) {
-                                                feedback = recordIssue(
-                                                    "MYN-PERM-4002", "Ekran üstü izin",
-                                                    "Ekran üstü izin ayarları açılamadı.", "",
-                                                    error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
-                                                )
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Settings, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            if (Settings.canDrawOverlays(commandContext))
-                                                "Ekran üstü iznini yönet"
-                                            else
-                                                "Ekran üstü iznini ver"
-                                        )
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            try {
-                                                commandContext.startActivity(
-                                                    Intent(
-                                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                                        Uri.parse("package:" + commandContext.packageName)
-                                                    )
-                                                )
-                                            } catch (error: Exception) {
-                                                feedback = recordIssue(
-                                                    "MYN-PERM-4003", "Pil ve arka plan",
-                                                    "Uygulama pil ayarları açılamadı.", "",
-                                                    error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
-                                                )
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Settings, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Pil ve arka plan ayarları")
-                                    }
-                                }
-                            }
-                            OutlinedButton(
-                                onClick = { navigateToPage(Page.DIAGNOSTICS) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.BugReport, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Hata kayıtları")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val missing = requiredRuntimePermissionList().filter { permission ->
-                                        androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) !=
-                                            android.content.pm.PackageManager.PERMISSION_GRANTED
-                                    }
-                                    if (missing.isEmpty()) {
-                                        feedback = "Tanımlı çalışma zamanı izinleri zaten açık."
-                                    } else {
-                                        permissionLauncher.launch(missing.toTypedArray())
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Settings, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Eksik izinleri iste")
-                            }
-                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
-                            HorizontalDivider()
-                            Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text(
-                                        "Bu izin açıkken, yalnızca sen WhatsApp arama veya mesaj komutu verdiğinde MynAssistant ilgili sohbeti açıp sesli arama ya da gönder düğmesine basmayı dener. Hizmet yalnızca WhatsApp ekranında çalışır; içeriği kaydetmez veya sunucuya göndermez.",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .76f)
-                                    )
-                                    OutlinedButton(
-                                        onClick = {
-                                            commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Settings, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Erişilebilirlik ayarlarını aç")
-                                    }
-                                }
-                            }
-                            HorizontalDivider()
-                            Text("Otomatik bilgisayar bağlantısı", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+
+                            Text("İzinler", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                             Card(
                                 Modifier.fillMaxWidth(),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Windows uygulaması", fontWeight = FontWeight.SemiBold)
-                                            Text(
-                                                when {
-                                                    !signedIn -> "Önce hesabına giriş yap."
-                                                    devicesLoading -> "Hesabına bağlı cihazlar aranıyor..."
-                                                    pcDevices.any { it.isOnlineAt(presenceNowMillis) } -> "En az bir cihaz çevrimiçi."
-                                                    else -> "Henüz çevrimiçi bilgisayar yok."
-                                                },
-                                                fontSize = 12.sp,
-                                                color = if (pcDevices.any { it.isOnlineAt(presenceNowMillis) }) Color(0xFF65D68B) else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
-                                            )
+                                    requiredRuntimePermissionList().forEach { permission ->
+                                        val granted = androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(permission.substringAfterLast("."), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                Text(if (granted) "İzin verildi" else "İzin gerekli", fontSize = 11.sp,
+                                                    color = if (granted) Color(0xFF2E9D62) else MaterialTheme.colorScheme.tertiary)
+                                            }
+                                            Text(if (granted) "Açık" else "Kapalı", fontSize = 11.sp)
                                         }
                                     }
-                                    Text(
-                                        "Windows yardımcı uygulamasında aynı hesapla giriş yaptığında bilgisayarın burada otomatik görünür. Telefona adres veya güvenlik kodu girmen gerekmez.",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .76f)
-                                    )
-                                    Text(
-                                        "Bilgisayarının görünmesi için Windows yardımcı uygulamasının kurulu ve açık olması gerekir.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
                                     OutlinedButton(
-                                        onClick = { navigateToPage(Page.DEVICES) },
+                                        onClick = {
+                                            val missing = requiredRuntimePermissionList().filter { permission ->
+                                                androidx.core.content.ContextCompat.checkSelfPermission(commandContext, permission) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                                            }
+                                            if (missing.isEmpty()) feedback = "Tanımlı çalışma zamanı izinleri zaten açık."
+                                            else permissionLauncher.launch(missing.toTypedArray())
+                                        },
                                         modifier = Modifier.fillMaxWidth()
-                                    ) {
+                                    ) { Text("Eksik izinleri iste") }
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                commandContext.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + commandContext.packageName)))
+                                            }.onFailure {
+                                                feedback = recordIssue("MYN-PERM-4003", "Kısıtlanmış ayarlar", "Uygulama bilgileri açılamadı.", "", it.javaClass.name)
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Kısıtlanmış ayarlar / Uygulama bilgileri") }
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching { commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                                                .onFailure { feedback = recordIssue("MYN-PERM-4004", "Erişilebilirlik", "Erişilebilirlik ayarları açılamadı.", "", it.javaClass.name) }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Erişilebilirlik ayarlarını aç") }
+                                }
+                            }
+
+                            Text("Hey Meyene", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
+                                Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Çevrimdışı uyandırma", fontWeight = FontWeight.SemiBold)
+                                            Text(wakeWordStatus, fontSize = 12.sp, color = if (wakeWordPhase == MynWakeWordPhase.ERROR.persistedValue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                                        }
+                                        Switch(checked = wakeWordEnabled, onCheckedChange = { requestWakeWordActivation() })
+                                    }
+                                    if (wakeWordErrorCode.isNotBlank() && wakeWordPhase == MynWakeWordPhase.ERROR.persistedValue) {
+                                        Text("Hata kodu: $wakeWordErrorCode", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                        if (wakeWordErrorDetails.isNotBlank()) Text(wakeWordErrorDetails, fontSize = 11.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                commandContext.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + commandContext.packageName)))
+                                            }.onFailure {
+                                                feedback = recordIssue("MYN-PERM-4002", "Ekran üstü izin", "Ekran üstü izin ayarları açılamadı.", "", it.javaClass.name)
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text(if (Settings.canDrawOverlays(commandContext)) "Ekran üstü iznini yönet" else "Ekran üstü iznini ver") }
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                commandContext.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + commandContext.packageName)))
+                                            }.onFailure {
+                                                feedback = recordIssue("MYN-PERM-4003", "Pil ve arka plan", "Uygulama bilgileri açılamadı.", "", it.javaClass.name)
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Pil ve arka plan ayarları") }
+                                }
+                            }
+
+                            Text("Cihazlar", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
+                                Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        when {
+                                            !signedIn -> "Önce hesabına giriş yap."
+                                            devicesLoading -> "Cihazlar aranıyor..."
+                                            pcDevices.any { it.isOnlineAt(presenceNowMillis) } -> "Windows bilgisayarı çevrimiçi."
+                                            else -> "Çevrimiçi Windows bilgisayarı yok."
+                                        },
+                                        fontSize = 12.sp
+                                    )
+                                    OutlinedButton(onClick = { navigateToPage(Page.DEVICES) }, modifier = Modifier.fillMaxWidth()) {
                                         Icon(Icons.Default.Devices, contentDescription = null)
                                         Spacer(Modifier.width(8.dp))
                                         Text("Cihazlarımı gör")
                                     }
                                 }
                             }
-                        }
-                        Page.REMOTE -> {
-                            val device = selectedDevice
-                            val remoteUiPreferences = remember {
-                                commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                            }
-                            val remoteUiPreferencePrefix =
-                                "remote_visibility_${firebaseUserId.orEmpty()}_${device?.id.orEmpty()}"
-                            var showScreenPreview by remember(remoteUiPreferencePrefix) {
-                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_screen", true))
-                            }
-                            var showTouchpadPanel by remember(remoteUiPreferencePrefix) {
-                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_touchpad", true))
-                            }
-                            var showKeyboardPanel by remember(remoteUiPreferencePrefix) {
-                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_keyboard", true))
-                            }
-                            fun saveRemoteVisibility(control: String, visible: Boolean) {
-                                remoteUiPreferences.edit()
-                                    .putBoolean("${remoteUiPreferencePrefix}_${control}", visible)
-                                    .apply()
-                            }
-                            var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
-                                mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
-                            }
-                            val screenBitmap = remember(device?.id, remoteScreenFrameBase64) {
-                                val encoded = remoteScreenFrameBase64
-                                if (encoded.isBlank()) null else try {
-                                    val bytes = Base64.decode(encoded, Base64.DEFAULT)
-                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                                } catch (_: Exception) {
-                                    null
-                                }
-                            }
-                            val localBridgeSelected = signedIn && localPcConnected &&
-                                (device == null || device.id == localPcDeviceId)
-                            val remoteOnline = localBridgeSelected ||
-                                (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconToggleButton(
-                                    checked = showScreenPreview,
-                                    onCheckedChange = {
-                                        showScreenPreview = it
-                                        saveRemoteVisibility("screen", it)
-                                    },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Tv,
-                                        contentDescription = if (showScreenPreview) "Ekran görünümünü gizle" else "Ekran görünümünü göster",
-                                        tint = if (showScreenPreview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
-                                    )
-                                }
-                                IconToggleButton(
-                                    checked = showTouchpadPanel,
-                                    onCheckedChange = {
-                                        showTouchpadPanel = it
-                                        saveRemoteVisibility("touchpad", it)
-                                    },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.TouchApp,
-                                        contentDescription = if (showTouchpadPanel) "Touchpad alanını gizle" else "Touchpad alanını göster",
-                                        tint = if (showTouchpadPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
-                                    )
-                                }
-                                IconToggleButton(
-                                    checked = showKeyboardPanel,
-                                    onCheckedChange = {
-                                        showKeyboardPanel = it
-                                        saveRemoteVisibility("keyboard", it)
-                                    },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Keyboard,
-                                        contentDescription = if (showKeyboardPanel) "Klavye satırını gizle" else "Klavye satırını göster",
-                                        tint = if (showKeyboardPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
-                                    )
-                                }
-                            }
-                            Row(
-                                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(Icons.Default.Computer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Column(Modifier.weight(1f)) {
-                                    Text(device?.name ?: "Windows bilgisayar", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                    Text(
-                                        when {
-                                            !signedIn -> "Giriş yapılmamış"
-                                            localBridgeSelected -> "Bağlı • Yerel bağlantı"
-                                            device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
-                                            device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
-                                            remoteOnline -> "Çevrimiçi • son heartbeat güncel"
-                                            else -> "Çevrimdışı • Bilgisayar bekleniyor"
-                                        },
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
-                                    )
-                                }
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (remoteOnline) {
-                                        if (dark) Color(0xFF49B86E) else Color(0xFF218653)
-                                    } else {
-                                        MaterialTheme.colorScheme.outline.copy(alpha = .55f)
-                                    }
-                                ) {
-                                    Box(Modifier.size(9.dp))
-                                }
-                            }
-                            if (device?.connectionMode == "firebase-agent" && remoteOnline) {
-                                Text(
-                                    "Çevrimiçi durumu son heartbeat'i gösterir; her komutun teslim sonucu ayrıca doğrulanır.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
-                                )
-                            }
-                            if (device?.connectionMode == "firebase-agent" && showScreenPreview) {
-                                Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                                if (screenBitmap != null) {
-                                    Image(
-                                        bitmap = screenBitmap,
-                                        contentDescription = "Windows masaüstü önizlemesi",
-                                        modifier = Modifier.fillMaxWidth()
-                                            .heightIn(max = 330.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .12f), RoundedCornerShape(16.dp)),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                    Text(
-                                        "Ekran önizlemesi bağlantı ve bilgisayar durumuna göre yenilenir; sabit gecikme garantisi yoktur.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
-                                    )
-                                } else {
-                                    Card(
-                                        Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                    ) {
-                                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
-                                            Text(
-                                                if (remoteOnline) "Windows ekranı bekleniyor..." else "Bilgisayar çevrimdışı",
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                "Önizleme yalnızca bu sayfa açıkken alınır. Bilgisayarında MynAssistant Windows uygulaması çalışıyor olmalı.",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
-                                            )
-                                            if (remoteOnline) LinearProgressIndicator(Modifier.fillMaxWidth())
-                                        }
-                                    }
-                                }
-                            }
-                            if (!remoteOnline) {
-                                OutlinedButton(
-                                    onClick = { navigateToPage(Page.DEVICES) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(if (device == null) "Cihaz listesine dön" else "Cihaz durumunu gör")
-                                }
-                            }
-                            TvRemotePanel(
-                                enabled = remoteOnline,
-                                mouseEnabled = remoteOnline && !localBridgeSelected,
-                                showTouchpad = showTouchpadPanel,
-                                showKeyboard = showKeyboardPanel,
-                                onCommand = { commandName, payload ->
-                                    if (!signedIn) {
-                                        feedback = "Devam etmek için önce giriş yap."
-                                    } else if (localBridgeSelected) {
-                                        when (commandName) {
-                                            "mute" -> sendLocalPcText("sesi kapa")
-                                            "volume_up" -> sendLocalPcText("ses 10 arttir")
-                                            "volume_down" -> sendLocalPcText("ses 10 azalt")
-                                            "home" -> sendLocalPcText("masaustunu goster")
-                                            "power" -> feedback = "Bilgisayarı uzaktan açma özelliği henüz desteklenmiyor."
-                                            "mouse_move", "mouse_click", "mouse_right_click" ->
-                                                feedback = "Fare kontrolü bu bağlantıda kullanılamıyor. Bilgisayar bağlantısını kontrol edip tekrar dene."
-                                            else -> feedback = "Klavye ve fare girişleri bu yerel bağlantı türünde henüz desteklenmiyor."
-                                        }
-                                    } else if (device == null) {
-                                        feedback = "Bilgisayar henüz çevrimiçi değil. Windows uygulaması açıldığında otomatik bağlanacak."
-                                    } else if (!remoteOnline) {
-                                        feedback = "Bilgisayar çevrimdışı. Bağlantı kurulduğunda komut gönderebilirsin."
-                                    } else {
-                                        sendTrackedRemoteCommand(device.id, commandName, payload)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
 
-                            if (device != null && editingDeviceNameId == device.id) {
-                                AlertDialog(
-                                    onDismissRequest = {
-                                        if (deviceNameSaveBusyId != device.id) {
-                                            editingDeviceNameId = null
-                                            deviceNameDrafts = deviceNameDrafts - device.id
-                                            deviceNameEditError = null
-                                        }
-                                    },
-                                    title = {
-                                        Text(if (device.isPcTarget) "Bilgisayar adını düzenle" else "Cihaz adını düzenle")
-                                    },
-                                    text = {
-                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            OutlinedTextField(
-                                                value = remoteEditedDeviceName,
-                                                onValueChange = {
-                                                    val limitedName = it.take(80)
-                                                    remoteEditedDeviceName = limitedName
-                                                    deviceNameDrafts = deviceNameDrafts + (device.id to limitedName)
-                                                    deviceNameEditError = null
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                label = {
-                                                    Text(if (device.isPcTarget) "Bilgisayar adı" else "Cihaz adı")
-                                                },
-                                                singleLine = true,
-                                                enabled = deviceNameSaveBusyId != device.id
-                                            )
-                                            deviceNameEditError?.let { error ->
-                                                Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                                            }
-                                        }
-                                    },
-                                    confirmButton = {
-                                        Button(
-                                            onClick = {
-                                                val cleanedName = remoteEditedDeviceName.trim()
-                                                if (cleanedName.isBlank()) {
-                                                    deviceNameEditError = if (device.isPcTarget) {
-                                                        "Bilgisayar adı boş olamaz."
-                                                    } else {
-                                                        "Cihaz adı boş olamaz."
-                                                    }
-                                                } else if (cleanedName == device.name) {
-                                                    editingDeviceNameId = null
-                                                    deviceNameDrafts = deviceNameDrafts - device.id
-                                                    deviceNameEditError = null
-                                                } else {
-                                                    deviceNameSaveBusyId = device.id
-                                                    FirebaseFirestore.getInstance()
-                                                        .collection("devices")
-                                                        .document(device.id)
-                                                        .update("name", cleanedName)
-                                                        .addOnSuccessListener {
-                                                            deviceNameDrafts = deviceNameDrafts - device.id
-                                                            editingDeviceNameId = null
-                                                            deviceNameEditError = null
-                                                            deviceNameSaveBusyId = null
-                                                            feedback = null
-                                                        }
-                                                        .addOnFailureListener {
-                                                            deviceNameSaveBusyId = null
-                                                            deviceNameEditError = "Ad kaydedilemedi. Bağlantıyı ve hesap izinlerini kontrol edip tekrar dene."
-                                                        }
-                                                }
-                                            },
-                                            enabled = deviceNameSaveBusyId != device.id
-                                        ) {
-                                            if (deviceNameSaveBusyId == device.id) {
-                                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                            } else {
-                                                Text("Kaydet")
-                                            }
-                                        }
-                                    },
-                                    dismissButton = {
-                                        TextButton(
-                                            onClick = {
-                                                editingDeviceNameId = null
-                                                deviceNameDrafts = deviceNameDrafts - device.id
-                                                deviceNameEditError = null
-                                            },
-                                            enabled = deviceNameSaveBusyId != device.id
-                                        ) {
-                                            Text("İptal")
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                        else -> Unit
-                    }
-                }
-            }
-                if (page == Page.HOME && !feedback.isNullOrBlank()) {
-                    Text(
-                        feedback.orEmpty(),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.secondary,
-                        fontSize = 12.sp,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (page == Page.HOME) {
-                    val keyboardController = LocalSoftwareKeyboardController.current
-                    Surface(
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = if (keyboardVisible) 0.dp else 8.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        tonalElevation = 2.dp
-                    ) {
-                        Column(
-                            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Row(
+                            Text("Diğer", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Card(
                                 Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Box {
-                                    Column(
-                                        modifier = Modifier.width(52.dp).clip(RoundedCornerShape(18.dp))
-                                            .clickable { targetMenuExpanded = true }
-                                            .padding(vertical = 3.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
-                                        Icon(
-                                            when (commandTarget) {
-                                                "PHONE" -> Icons.Default.Devices
-                                                "PC" -> Icons.Default.Computer
-                                                else -> Icons.Default.SmartToy
-                                            },
-                                            contentDescription = when (commandTarget) {
-                                                "PHONE" -> "Hedef: bu Android telefonu"
-                                                "PC" -> "Hedef: Windows bilgisayar"
-                                                else -> "Hedef: otomatik yönlendirme"
-                                            },
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        Text(
-                                            when (commandTarget) {
-                                                "PHONE" -> "Telefon"
-                                                "PC" -> "PC"
-                                                else -> "Oto"
-                                            },
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f),
-                                            maxLines = 1
-                                        )
-                                    }
-                                    DropdownMenu(
-                                        expanded = targetMenuExpanded,
-                                        onDismissRequest = { targetMenuExpanded = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Otomatik — komuta göre seç") },
-                                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
-                                            onClick = { commandTarget = "AUTO"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Bu telefon (Android)") },
-                                            leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
-                                            onClick = { commandTarget = "PHONE"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Bilgisayarım (Windows)") },
-                                            leadingIcon = { Icon(Icons.Default.Computer, contentDescription = null) },
-                                            onClick = { commandTarget = "PC"; targetMenuExpanded = false; feedback = null }
-                                        )
-                                    }
-                                }
-                                BasicTextField(
-                                    value = command,
-                                    onValueChange = { command = it; feedback = null },
-                                    modifier = Modifier.weight(1f).height(58.dp),
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    ),
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    maxLines = 4,
-                                    keyboardOptions = KeyboardOptions.Default,
-                                    decorationBox = { innerTextField ->
-                                        Box(
-                                            Modifier.fillMaxSize().padding(horizontal = 6.dp),
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            if (command.isBlank()) {
-                                                Text(
-                                                    "Komut yaz…",
-                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f),
-                                                    fontSize = 16.sp
-                                                )
-                                            }
-                                            innerTextField()
-                                        }
-                                    }
-                                )
-                                IconButton(
-                                    onClick = {
-                                        val canRecord = androidx.core.content.ContextCompat.checkSelfPermission(
-                                            commandContext, android.Manifest.permission.RECORD_AUDIO
-                                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        if (canRecord) {
-                                            launchSpeechInput()
-                                        } else {
-                                            startSpeechAfterPermission = true
-                                            permissionLauncher.launch(arrayOf(android.Manifest.permission.RECORD_AUDIO))
-                                        }
-                                    },
-                                    modifier = Modifier.size(42.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Mic,
-                                        contentDescription = "Sesli komut",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
-                                        if (command.isNotBlank()) {
-                                            keyboardController?.hide()
-                                            runAssistantCommand(command)
-                                        }
-                                    },
-                                    enabled = command.isNotBlank(),
-                                    modifier = Modifier.size(42.dp).clip(CircleShape).background(
-                                        if (command.isNotBlank()) Accent else MaterialTheme.colorScheme.outline.copy(alpha = .25f)
-                                    )
-                                ) {
-                                    Icon(
-                                        Icons.Default.Send,
-                                        contentDescription = "Komutu gönder",
-                                        tint = if (command.isNotBlank()) Color(0xFF10121A) else MaterialTheme.colorScheme.onSurface.copy(alpha = .4f),
-                                        modifier = Modifier.size(21.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            val contactChoiceForDialog = pendingContactChoice
-            if (contactChoiceForDialog != null) {
-                AlertDialog(
-                    onDismissRequest = { pendingContactChoice = null },
-                    title = { Text("Hangi kişiyi kastediyorsun?") },
-                    text = {
-                        Column(
-                            Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                "“" + contactChoiceForDialog.aliasLabel + "” için rehberde birden fazla eşleşme buldum. Doğru kişiye dokun.",
-                                fontSize = 14.sp
-                            )
-                            contactChoiceForDialog.candidates.forEach { candidate ->
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth().clickable {
-                                        chooseContactCandidate(contactChoiceForDialog, candidate)
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant
-                                ) {
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(13.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(Icons.Default.AccountCircle, contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Text(candidate.displayName, fontWeight = FontWeight.SemiBold)
-                                            Text(candidate.phoneNumber, fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f))
-                                        }
-                                        Icon(Icons.Default.ChevronRight, contentDescription = "Bu kişiyi seç")
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("WhatsApp otomatik işlemleri", fontWeight = FontWeight.SemiBold)
+                                    Text("Erişilebilirlik hizmeti yalnızca sen WhatsApp arama veya mesaj komutu verdiğinde işlem yapmayı dener.", fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                                    OutlinedButton(onClick = { runCatching { commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Erişilebilirlik ayarları")
                                     }
                                 }
                             }
+                            OutlinedButton(onClick = { navigateToPage(Page.DIAGNOSTICS) }, modifier = Modifier.fillMaxWidth()) {
+                                Icon(Icons.Default.BugReport, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Hata kayıtları")
+                            }
+                            feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { pendingContactChoice = null }) { Text("İptal") }
                     }
-                )
-            }
-            val contactConfirmationForDialog = pendingContactConfirmation
-            if (contactConfirmationForDialog != null) {
-                AlertDialog(
-                    onDismissRequest = { pendingContactConfirmation = null },
-                    title = { Text("Bu kişiyi hatırlayayım mı?") },
-                    text = {
-                        Text(
-                            "Bundan sonra “" + contactConfirmationForDialog.aliasLabel + "” dediğinde “" +
-                                contactConfirmationForDialog.contact.displayName + "” kişisini kullanayım mı?"
-                        )
-                    },
-                    confirmButton = {
-                        Button(onClick = {
-                            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                                .putString(contactConfirmationForDialog.aliasKey,
-                                    contactConfirmationForDialog.contact.displayName)
-                                .putString(contactConfirmationForDialog.aliasKey + "_number",
-                                    contactConfirmationForDialog.contact.phoneNumber)
-                                .apply()
-                            pendingContactConfirmation = null
-                            executeResolvedContactAction(
-                                contactConfirmationForDialog.command,
-                                contactConfirmationForDialog.contact
-                            )
-                        }) { Text("Evet, hatırla") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            val oneTime = contactConfirmationForDialog
-                            pendingContactConfirmation = null
-                            executeResolvedContactAction(oneTime.command, oneTime.contact)
-                        }) { Text("Sadece bu sefer") }
-                    }
-                )
-            }
-            if (showExitConfirmation) {
-                AlertDialog(
-                    onDismissRequest = { showExitConfirmation = false },
-                    title = { Text("MynAssistant açık kalsın mı?") },
-                    text = { Text("Geri tuşuna tekrar basarsan uygulamadan çıkabilirsin. Açık sayfalar arasında geri dönmek için geri tuşunu kullan.") },
-                    confirmButton = {
-                        TextButton(onClick = { showExitConfirmation = false }) { Text("Uygulamada kal") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            showExitConfirmation = false
-                            (commandContext as? ComponentActivity)?.finish()
-                        }) { Text("Çıkış yap") }
-                    }
-                )
-            }
-            if (showAccessibilitySetupDialog) {
-                AlertDialog(
-                    onDismissRequest = {
-                        commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                            .putBoolean("whatsapp_accessibility_setup_seen", true).apply()
-                        showAccessibilitySetupDialog = false
-                    },
-                    title = { Text("WhatsApp otomasyonunu etkinleştir") },
-                    text = {
-                        Text(
-                            "WhatsApp'ta babanı aramak veya mesaj göndermek için MynAssistant'a bir kez Erişilebilirlik izni vermelisin. Android bu özel izni ayrı ayardan onaylatır."
-                        )
-                    },
-                    confirmButton = {
-                        Button(onClick = {
-                            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                                .putBoolean("whatsapp_accessibility_setup_seen", true).apply()
-                            showAccessibilitySetupDialog = false
-                            commandContext.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }) { Text("İzin ayarlarını aç") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {
-                            commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                                .putBoolean("whatsapp_accessibility_setup_seen", true).apply()
-                            showAccessibilitySetupDialog = false
-                        }) { Text("Daha sonra") }
-                    }
-                )
-            }
-            if (drawer) {
-                Row(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .48f))) {
-                    Column(
-                        Modifier.fillMaxHeight().fillMaxWidth(.84f).background(MaterialTheme.colorScheme.surface)
-                            .statusBarsPadding().verticalScroll(rememberScrollState())
-                            .padding(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 18.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    Surface(
+                        Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(18.dp)
                     ) {
-                        Column {
-                            Row(
-                                Modifier.fillMaxWidth().clickable { accountListExpanded = !accountListExpanded }.padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                if (signedIn) {
-                                    if (photoUrl.isNotBlank()) {
-                                        AsyncImage(
-                                            model = photoUrl,
-                                            imageLoader = photoImageLoader,
-                                            contentDescription = "Google profil fotoğrafı",
-                                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
-                                        )
-                                    } else {
-                                        Icon(
-                                            Icons.Default.AccountCircle,
-                                            contentDescription = "Hesap fotoğrafı",
-                                            modifier = Modifier.size(48.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                } else {
-                                    MynLogo(48.dp)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text(if (signedIn) name.ifBlank { email.substringBefore("@") } else "MynAssistant", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 2,
-                                        color = MaterialTheme.colorScheme.onSurface)
-                                    Text(if (signedIn) email.ifBlank { phone } else "Giriş yap veya kayıt ol", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), maxLines = 1)
-                                }
-                                Text(if (accountListExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.primary)
-                            }
-                            androidx.compose.animation.AnimatedVisibility(visible = accountListExpanded) {
-                                Column(
-                                    Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 8.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = .98f))
-                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .10f), RoundedCornerShape(16.dp))
-                                        .padding(vertical = 6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    val otherGoogleAccounts = savedGoogleAccounts.filterNot { saved ->
-                                        signedIn && saved.email.equals(email, ignoreCase = true)
-                                    }
-                                    if (otherGoogleAccounts.isEmpty()) {
-                                        Text(
-                                            if (signedIn) "Başka kayıtlı hesap yok." else "Henüz kaydedilmiş Google hesabı yok.",
-                                            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f)
-                                        )
-                                    } else {
-                                        otherGoogleAccounts.forEach { saved ->
-                                            Row(
-                                                Modifier.fillMaxWidth().clickable {
-                                                    accountListExpanded = false
-                                                    if (!(saved.email.equals(email, ignoreCase = true) && signedIn)) {
-                                                        selectSavedGoogleAccount(saved.email)
-                                                    }
-                                                }.padding(horizontal = 10.dp, vertical = 9.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                if (saved.photoUrl.isNotBlank()) {
-                                                    AsyncImage(model = saved.photoUrl, imageLoader = photoImageLoader,
-                                                        contentDescription = "Kaydedilmiş Google hesabı",
-                                                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)))
-                                                } else {
-                                                    Icon(Icons.Default.AccountCircle, contentDescription = null,
-                                                        modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
-                                                }
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(saved.name.ifBlank { saved.email.substringBefore("@") }, fontSize = 14.sp,
-                                                        fontWeight = FontWeight.Medium, maxLines = 1)
-                                                    Text(saved.email, fontSize = 12.sp,
-                                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f), maxLines = 1)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                                    TextButton(onClick = { accountListExpanded = false; navigateToPage(Page.AUTH) },
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                                        Icon(Icons.Default.PersonAdd, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Hesap ekle")
-                                    }
-                                }
-                            }
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("MynAssistant ayarları", fontWeight = FontWeight.SemiBold)
+                            Text("Uygulama izinleri, bilgisayar eşleştirme ve bağlantı durumu.", fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
                         }
-                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                        DrawerItem("Ana sayfa") { navigateToPage(Page.HOME) }
+                    }
+                    DrawerItem("Ana sayfa") { navigateToPage(Page.HOME) }
                         DrawerItem(if (signedIn) "Hesabım" else "Giriş yap / Kayıt ol") {
                             navigateToPage(if (signedIn) Page.LOGIN else Page.AUTH)
                             drawer = false
