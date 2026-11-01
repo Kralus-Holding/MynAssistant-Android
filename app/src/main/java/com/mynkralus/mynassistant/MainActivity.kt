@@ -3973,7 +3973,7 @@ Page.DIAGNOSTICS -> {
                         }
                         Page.FILES -> {
                             Text(
-                                "Yalnızca şu anda aktif ve bağlı bilgisayarlar burada görünür.",
+                                "Hesabına bağlı Windows bilgisayarları ve erişilebilir sürücüler burada listelenir.",
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
@@ -3981,10 +3981,10 @@ Page.DIAGNOSTICS -> {
                                 Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                            } else if (connectedDevices.isEmpty()) {
-                                Text("Şu anda aktif ve bağlı bilgisayar yok.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                            } else if (pcDevices.isEmpty()) {
+                                Text("Bu hesaba bağlı Windows bilgisayarı bulunamadı.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
-                                connectedDevices.forEach { device ->
+                                pcDevices.distinctBy { it.id }.forEach { device ->
                                     val deviceOnlineNow = device.isOnlineAt(presenceNowMillis)
                                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -4001,7 +4001,7 @@ Page.DIAGNOSTICS -> {
                                                 if (!deviceOnlineNow) {
                                                     feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
                                                 } else if (device.connectionMode == "firebase-agent") {
-                                                    feedback = "Dosya listesi bilgisayardan isteniyor..."
+                                                    feedback = "Sürücüler Windows bilgisayarından isteniyor..."
                                                     requestPcFileList(device.id, "")
                                                 } else if (device.id == localPcDeviceId && localPcConnected) {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
