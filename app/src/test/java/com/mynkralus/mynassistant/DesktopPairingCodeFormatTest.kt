@@ -15,7 +15,7 @@ class DesktopPairingCodeFormatTest {
     @Test
     fun parsesSignedWindowsQrAndKeepsSignatureAndExpiry() {
         val expiry = 1_800_000_300L
-        val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno"
+        val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
         val result = DesktopPairingCodeFormat.parseQr(
             "MYNASSISTANT-PAIR:AZ89EGXUR9:$expiry:$signature",
             nowEpochSeconds = 1_800_000_000L
@@ -40,7 +40,7 @@ class DesktopPairingCodeFormatTest {
 
     @Test
     fun rejectsExpiredOrMalformedSignedQr() {
-        val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmno"
+        val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
         assertNull(
             DesktopPairingCodeFormat.parseQr(
                 "MYNASSISTANT-PAIR:AZ89EGXUR9:1799999999:$signature",
