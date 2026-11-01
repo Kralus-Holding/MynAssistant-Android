@@ -38,7 +38,9 @@ internal object DesktopPairingCodeFormat {
             if (code.length != CODE_LENGTH || !isValidCode(parts[1])) return null
 
             val expiry = parts[2].toLongOrNull() ?: return null
-            if (expiry <= nowEpochSeconds || expiry > nowEpochSeconds + 6 * 60) return null
+            // Do not reject a valid signed QR because the phone clock is slightly behind.
+            // The Server performs the authoritative HMAC and expiry validation.
+            if (expiry <= nowEpochSeconds) return null
 
             val signature = parts[3]
             if (signature.length != 43 ||
