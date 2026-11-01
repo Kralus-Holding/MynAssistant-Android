@@ -1730,30 +1730,17 @@ class MainActivity : ComponentActivity() {
                         if (user == null) {
                             report("Devam etmek için önce giriş yap.", null)
                         } else {
-                            val commandData = hashMapOf<String, Any>(
-                                "ownerId" to user.uid,
-                                "deviceId" to deviceId,
-                                "command" to commandName,
-                                "status" to "pending",
-                                "createdAt" to FieldValue.serverTimestamp(),
-                                // Firestore can queue this write while offline. Keep the original
-                                // deadline so a delayed sync cannot execute a stale PC action later.
-                                "expiresAt" to com.google.firebase.Timestamp(
-                                    java.util.Date(System.currentTimeMillis() + REMOTE_COMMAND_VALIDITY_MILLIS)
+                            MynAssistantPcRelayClient.enqueueCommand(
+                                user = user,
+                                deviceId = deviceId,
+                                command = commandName,
+                                payload = payload
+                            ) { message, commandId, error ->
+                                report(
+                                    message ?: error ?: "Komut MynAssistant Server'a gönderilemedi.",
+                                    commandId
                                 )
-                            )
-                            commandData.putAll(payload)
-                            FirebaseFirestore.getInstance().collection("commands")
-                                .add(commandData)
-                                .addOnSuccessListener { document ->
-                                    report(
-                                        "Komut bilgisayara iletildi; işlem sonucu bekleniyor.",
-                                        document.id
-                                    )
-                                }
-                                .addOnFailureListener {
-                                    report("Komut gönderilemedi. İnternet bağlantını kontrol edip tekrar dene.", null)
-                                }
+                            }
                         }
                     },
                     photoImageLoader = profileImageLoader,
@@ -2635,110 +2622,122 @@ private fun AssistantScreen(
             }
             feedback = message
             if (commandId != null) {
-                val registration = FirebaseFirestore.getInstance()
-                    .collection("commands")
-                    .document(commandId)
-                    .addSnapshotListener { snapshot, error ->
-                        if (error != null) {
-                            pcFilesLoading = false
-                            feedback = recordIssue(
-                                "MYN-PC-6001", "Bilgisayar komutu",
-                                "Bilgisayardan gelen işlem durumunu okuyamadım. Bağlantını kontrol edip tekrar dene.",
-                                targetPayload["text"]?.toString().orEmpty(),
-                                error.javaClass.name + ": " + (error.message ?: "ayrıntı yok")
-                            )
-                            activeCommandListener = null
-                            activeCommandName = null
-                            val handler = trackedCommandResultHandler
-                            trackedCommandResultHandler = null
-                            handler?.invoke(targetCommandName, "error", "")
-                        } else if (snapshot == null || !snapshot.exists()) {
-                            pcFilesLoading = false
-                            feedback = recordIssue(
-                                "MYN-PC-6002", "Bilgisayar komutu",
-                                "Bilgisayar komutunun sonucunu bulamadım. Bilgisayar bağlantısını kontrol et.",
-                                targetPayload["text"]?.toString().orEmpty(),
-                                "COMMAND_DOCUMENT_MISSING; id=" + commandId
-                            )
-                            activeCommandListener = null
-                            activeCommandName = null
-                            val handler = trackedCommandResultHandler
-                            trackedCommandResultHandler = null
-                            handler?.invoke(targetCommandName, "missing", "")
-                        } else {
-                            val status = snapshot.getString("status").orEmpty()
-                            val result = snapshot.getString("result").orEmpty()
-                            when (status) {
-                                "pending" -> feedback = remoteCommandStatusMessage(status)
-                                "running" -> feedback = remoteCommandStatusMessage(status)
-                                "completed" -> {
-                                    if (targetCommandName == "list_files") {
-                                        try {
-                                            val listing = parsePcFileListing(result)
-                                            pcFileListing = listing
-                                            pcFilesDeviceId = targetDeviceId
-                                            feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
-                                        } catch (parseError: Exception) {
-                                            pcFileListing = null
-                                            feedback = recordIssue(
-                                                "MYN-PC-6008", "Bilgisayar dosyaları",
-                                                "Bilgisayardan gelen dosya listesi okunamadı. Windows yardımcı uygulamasını güncelleyip yeniden dene.",
-                                                "",
-                                                "FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
-                                            )
-                                        }
-                                    } else if (targetCommandName == "download_file") {
-                                        // The payload contains file bytes. Never show or log it as ordinary command text.
-                                        feedback = "Dosya verisi alındı; boyut ve SHA-256 doğrulanıyor..."
-                                    } else {
-                                        feedback = result.ifBlank { "Komut tamamlandı." }
+                val user = FirebaseAuth.getInstance().currentUser
+                if (user == null) {
+                    commandSubmissionInProgress = false
+                    commandSubmissionStartedAt = 0L
+                    pcFilesLoading = false
+                    feedback = "Oturum kapandı. Komut durumu sunucudan alınamadı."
+                    activeCommandName = null
+                    return@sendTrackedCommand
+                }
+                val registration = MynAssistantPcRelayClient.observeCommand(user, commandId) { snapshot, relayError ->
+                    if (relayError != null) {
+                        pcFilesLoading = false
+                        feedback = recordIssue(
+                            "MYN-PC-6001", "Bilgisayar komutu",
+                            "MynAssistant Server üzerinden komut sonucunu alamadım. Bağlantını kontrol edip tekrar dene.",
+                            targetPayload["text"]?.toString().orEmpty(),
+                            relayError
+                        )
+                        activeCommandListener?.remove()
+                        activeCommandListener = null
+                        activeCommandName = null
+                        val handler = trackedCommandResultHandler
+                        trackedCommandResultHandler = null
+                        handler?.invoke(targetCommandName, "error", "")
+                    } else if (snapshot == null) {
+                        pcFilesLoading = false
+                        feedback = recordIssue(
+                            "MYN-PC-6002", "Bilgisayar komutu",
+                            "MynAssistant Server boş komut yanıtı döndürdü. Cihaz bağlantısını kontrol et.",
+                            targetPayload["text"]?.toString().orEmpty(),
+                            "SERVER_COMMAND_RESPONSE_EMPTY; id=" + commandId
+                        )
+                        activeCommandListener?.remove()
+                        activeCommandListener = null
+                        activeCommandName = null
+                        val handler = trackedCommandResultHandler
+                        trackedCommandResultHandler = null
+                        handler?.invoke(targetCommandName, "missing", "")
+                    } else {
+                        val status = snapshot.optString("status").orEmpty()
+                        val result = snapshot.optString("result").orEmpty()
+                        when (status) {
+                            "pending" -> feedback = remoteCommandStatusMessage(status)
+                            "running" -> feedback = remoteCommandStatusMessage(status)
+                            "completed" -> {
+                                if (targetCommandName == "list_files") {
+                                    try {
+                                        val listing = parsePcFileListing(result)
+                                        pcFileListing = listing
+                                        pcFilesDeviceId = targetDeviceId
+                                        feedback = "Dosya listesi alındı: " + listing.entries.size + " öğe."
+                                    } catch (parseError: Exception) {
+                                        pcFileListing = null
+                                        feedback = recordIssue(
+                                            "MYN-PC-6008", "Bilgisayar dosyaları",
+                                            "Bilgisayardan gelen dosya listesi okunamadı. Windows yardımcı uygulamasını güncelleyip yeniden dene.",
+                                            "",
+                                            "FILE_LIST_RESPONSE_INVALID; type=" + parseError.javaClass.simpleName
+                                        )
                                     }
-                                    pcFilesLoading = false
-                                    activeCommandListener = null
-                                    activeCommandName = null
-                                    val handler = trackedCommandResultHandler
-                                    trackedCommandResultHandler = null
-                                    handler?.invoke(targetCommandName, "completed", result)
+                                } else if (targetCommandName == "download_file") {
+                                    feedback = "Dosya verisi alındı; boyut ve SHA-256 doğrulanıyor..."
+                                } else {
+                                    feedback = result.ifBlank { "Komut tamamlandı." }
                                 }
-                                "failed" -> {
-                                    pcFilesLoading = false
-                                    feedback = recordIssue(
-                                        "MYN-PC-6003", "Bilgisayar komutu",
-                                        result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
-                                        targetPayload["text"]?.toString().orEmpty(),
-                                        "REMOTE_COMMAND_FAILED; command=" + targetCommandName
-                                    )
-                                    activeCommandListener = null
-                                    activeCommandName = null
-                                    val handler = trackedCommandResultHandler
-                                    trackedCommandResultHandler = null
-                                    handler?.invoke(targetCommandName, "failed", result)
-                                }
-                                "cancelled" -> {
-                                    pcFilesLoading = false
-                                    feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
-                                    activeCommandListener = null
-                                    activeCommandName = null
-                                    val handler = trackedCommandResultHandler
-                                    trackedCommandResultHandler = null
-                                    handler?.invoke(targetCommandName, "cancelled", "")
-                                }
-                                else -> {
-                                    pcFilesLoading = false
-                                    feedback = recordIssue(
-                                        "MYN-PC-6005", "Bilgisayar komutu",
-                                        "Bilgisayar beklenmeyen bir işlem durumu bildirdi.",
-                                        targetPayload["text"]?.toString().orEmpty(),
-                                        "UNKNOWN_COMMAND_STATUS=" + status
-                                    )
-                                    activeCommandListener = null
-                                    activeCommandName = null
-                                    val handler = trackedCommandResultHandler
-                                    trackedCommandResultHandler = null
-                                    handler?.invoke(targetCommandName, "unknown", status)
-                                }
+                                pcFilesLoading = false
+                                activeCommandListener?.remove()
+                                activeCommandListener = null
+                                activeCommandName = null
+                                val handler = trackedCommandResultHandler
+                                trackedCommandResultHandler = null
+                                handler?.invoke(targetCommandName, "completed", result)
+                            }
+                            "failed" -> {
+                                pcFilesLoading = false
+                                feedback = recordIssue(
+                                    "MYN-PC-6003", "Bilgisayar komutu",
+                                    result.ifBlank { "Bilgisayar komutu tamamlayamadı. Sorun kodunu paylaşabilirsin." },
+                                    targetPayload["text"]?.toString().orEmpty(),
+                                    "REMOTE_COMMAND_FAILED; command=" + targetCommandName
+                                )
+                                activeCommandListener?.remove()
+                                activeCommandListener = null
+                                activeCommandName = null
+                                val handler = trackedCommandResultHandler
+                                trackedCommandResultHandler = null
+                                handler?.invoke(targetCommandName, "failed", result)
+                            }
+                            "cancelled" -> {
+                                pcFilesLoading = false
+                                feedback = "Komut bilgisayar tarafından çalıştırılmadan önce iptal edildi."
+                                activeCommandListener?.remove()
+                                activeCommandListener = null
+                                activeCommandName = null
+                                val handler = trackedCommandResultHandler
+                                trackedCommandResultHandler = null
+                                handler?.invoke(targetCommandName, "cancelled", "")
+                            }
+                            else -> {
+                                pcFilesLoading = false
+                                feedback = recordIssue(
+                                    "MYN-PC-6005", "Bilgisayar komutu",
+                                    "MynAssistant Server beklenmeyen bir işlem durumu bildirdi.",
+                                    targetPayload["text"]?.toString().orEmpty(),
+                                    "UNKNOWN_COMMAND_STATUS=" + status
+                                )
+                                activeCommandListener?.remove()
+                                activeCommandListener = null
+                                activeCommandName = null
+                                val handler = trackedCommandResultHandler
+                                trackedCommandResultHandler = null
+                                handler?.invoke(targetCommandName, "unknown", status)
                             }
                         }
+                    }
+                }
                     }
                 activeCommandStartedAt = System.currentTimeMillis()
                 activeCommandListener = registration
@@ -3067,54 +3066,42 @@ private fun AssistantScreen(
     }
 
     DisposableEffect(firebaseUserId) {
+        val user = FirebaseAuth.getInstance().currentUser
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
-        if (!firebaseUserId.isNullOrBlank()) {
+        if (!firebaseUserId.isNullOrBlank() && user != null) {
             devicesLoading = true
-            registration = FirebaseFirestore.getInstance()
-                .collection("devices")
-                .whereEqualTo("ownerId", firebaseUserId)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        devicesError = "Cihaz listesi şu anda yüklenemedi. İnternet bağlantını kontrol edip tekrar dene."
-                        devicesLoading = false
-                    } else {
-                        devices = snapshot?.documents.orEmpty().mapNotNull { document ->
-                            if (document.getString("ownerId") != firebaseUserId) return@mapNotNull null
-                            PcDevice(
-                                id = document.id,
-                                name = document.getString("name")
-                                    ?: document.getString("deviceName")
-                                    ?: "Windows bilgisayar",
-                                platform = document.getString("platform")
-                                    ?: document.getString("type")
-                                    ?: document.getString("os")
-                                    ?: "Unknown",
-                                status = document.getString("status")
-                                    ?: document.getString("connectionStatus")
-                                    ?: "offline",
-                                connectionMode = document.getString("connectionMode").orEmpty(),
-                                screenJpegBase64 = document.getString("screenJpegBase64").orEmpty(),
-                                lastSeenAtMillis = document.getTimestamp("lastSeenAt")?.toDate()?.time
-                            )
-                        }
-                        devicesError = null
-                        devicesLoading = false
-
-                        // Prefer an authenticated cloud Agent over a stale legacy LAN-bridge record.
-                        val selectionTimestamp = System.currentTimeMillis()
-                        val candidates = devices.filter { it.isPcTarget }.map { device ->
-                            PcDeviceRouteCandidate(
-                                id = device.id,
-                                connectionMode = device.connectionMode,
-                                isOnline = device.isOnlineAt(selectionTimestamp)
-                            )
-                        }
-                        selectedDeviceId = DevicePresencePolicy.preferredPcDeviceId(
-                            candidates,
-                            selectedDeviceIdLatest.value
+            registration = MynAssistantPcRelayClient.observeWindowsDevices(user) { relayDevices, error ->
+                if (error != null) {
+                    devicesError = error
+                    devicesLoading = false
+                } else if (relayDevices != null) {
+                    devices = relayDevices.map { device ->
+                        PcDevice(
+                            id = device.id,
+                            name = device.name,
+                            platform = device.platform,
+                            status = device.status,
+                            connectionMode = device.connectionMode,
+                            screenJpegBase64 = "",
+                            lastSeenAtMillis = device.lastSeenAtMillis
                         )
                     }
+                    devicesError = null
+                    devicesLoading = false
+                    val selectionTimestamp = System.currentTimeMillis()
+                    val candidates = devices.filter { it.isPcTarget }.map { device ->
+                        PcDeviceRouteCandidate(
+                            id = device.id,
+                            connectionMode = device.connectionMode,
+                            isOnline = device.isOnlineAt(selectionTimestamp)
+                        )
+                    }
+                    selectedDeviceId = DevicePresencePolicy.preferredPcDeviceId(
+                        candidates,
+                        selectedDeviceIdLatest.value
+                    )
                 }
+            }
         } else {
             devices = emptyList()
             devicesLoading = false
