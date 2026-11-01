@@ -17,8 +17,7 @@ class DesktopPairingCodeFormatTest {
         val expiry = 1_800_000_300L
         val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
         val result = DesktopPairingCodeFormat.parseQr(
-            "MYNASSISTANT-PAIR:AZ89E-GXUR9:$expiry:$signature",
-            nowEpochSeconds = 1_800_000_000L
+            "MYNASSISTANT-PAIR:AZ89E-GXUR9:$expiry:$signature"
         )
 
         assertNotNull(result)
@@ -50,18 +49,22 @@ class DesktopPairingCodeFormatTest {
     }
 
     @Test
-    fun rejectsExpiredOrMalformedSignedQr() {
+    fun retainsExpiryForServerValidationInsteadOfTrustingPhoneClock() {
+        val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
+        val result = DesktopPairingCodeFormat.parseQr(
+            "MYNASSISTANT-PAIR:AZ89E-GXUR9:1799999999:$signature"
+        )
+        assertNotNull(result)
+        assertEquals(1_799_999_999L, result!!.expiresAtUnix)
+        assertEquals("AZ89EGXUR9", result.code)
+    }
+
+    @Test
+    fun rejectsMalformedSignedQrAndPlainText() {
         val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
         assertNull(
             DesktopPairingCodeFormat.parseQr(
-                "MYNASSISTANT-PAIR:AZ89EGXUR9:1799999999:$signature",
-                nowEpochSeconds = 1_800_000_000L
-            )
-        )
-        assertNull(
-            DesktopPairingCodeFormat.parseQr(
-                "MYNASSISTANT-PAIR:AZ89EGXUR9:1800000300:bad",
-                nowEpochSeconds = 1_800_000_000L
+                "MYNASSISTANT-PAIR:AZ89EGXUR9:1800000300:bad"
             )
         )
         assertNull(DesktopPairingCodeFormat.parseQr("not-a-pairing-code"))
