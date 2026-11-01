@@ -18,6 +18,9 @@ import android.provider.Settings
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.code.scanner.GmsBarcodeScanning
+import com.google.android.gms.code.scanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
@@ -2403,15 +2406,64 @@ private fun AssistantScreen(
     var pcFilesLoading by remember(firebaseUserId) { mutableStateOf(false) }
     var remoteScreenFrameBase64 by remember(firebaseUserId) { mutableStateOf("") }
     var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
+    var desktopPairingQrSignature by remember(firebaseUserId) { mutableStateOf<String?>(null) }
+    var desktopPairingQrExpiresAtUnix by remember(firebaseUserId) { mutableStateOf<Long?>(null) }
+    var desktopPairingScanBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingStatus by remember(firebaseUserId) {
         mutableStateOf("Windows uygulamasından yeni bir eşleştirme kodu al.")
     }
 
+    fun scanDesktopPairingQr() {
+        if (!signedIn || desktopPairingBusy || desktopPairingScanBusy) return
+
+        desktopPairingScanBusy = true
+        desktopPairingStatus = "QR tarayıcı açılıyor..."
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+
+        GmsBarcodeScanning.getClient(context, options)
+            .startScan()
+            .addOnSuccessListener { barcode ->
+                desktopPairingScanBusy = false
+                val parsed = DesktopPairingCodeFormat.parseQr(barcode.rawValue.orEmpty())
+                if (parsed == null) {
+                    desktopPairingCode = ""
+                    desktopPairingQrSignature = null
+                    desktopPairingQrExpiresAtUnix = null
+                    desktopPairingStatus = "QR kodu geçersiz veya süresi dolmuş. Windows uygulamasından yeni QR kodu oluştur."
+                } else {
+                    desktopPairingCode = parsed.formattedCode
+                    desktopPairingQrSignature = parsed.signature
+                    desktopPairingQrExpiresAtUnix = parsed.expiresAtUnix
+                    desktopPairingStatus = if (parsed.signature != null) {
+                        "Windows QR kodu okundu. Sunucu imzası bilgisayar bağlanırken doğrulanacak."
+                    } else {
+                        "Tek kullanımlık kod okundu. Bilgisayarı bağlayarak kodu sunucuda doğrula."
+                    }
+                }
+            }
+            .addOnCanceledListener {
+                desktopPairingScanBusy = false
+                desktopPairingStatus = "QR taraması iptal edildi."
+            }
+            .addOnFailureListener { error ->
+                desktopPairingScanBusy = false
+                desktopPairingStatus = when {
+                    error.message?.contains("module", ignoreCase = true) == true ||
+                        error.message?.contains("download", ignoreCase = true) == true ->
+                        "Google QR tarayıcısı henüz hazır değil. Google Play hizmetlerini güncelleyip tekrar dene."
+                    else ->
+                        "QR tarayıcısı açılamadı. Google Play hizmetlerini kontrol edip tekrar dene."
+                }
+            }
+    }
+
     fun approveDesktopPairing() {
-        val normalizedCode = desktopPairingCode.filter { it.isLetterOrDigit() }
-            .uppercase(Locale.ROOT)
-        if (normalizedCode.length != 10) {
+        val normalizedCode = DesktopPairingCodeFormat.normalize(desktopPairingCode)
+        if (normalizedCode.length != 10 || !DesktopPairingCodeFormat.isValidCode(normalizedCode)) {
             desktopPairingStatus = "Windows uygulamasında gösterilen 10 karakterli kodu gir."
             return
         }
@@ -2419,6 +2471,15 @@ private fun AssistantScreen(
         val user = FirebaseAuth.getInstance().currentUser
         if (user == null) {
             desktopPairingStatus = "Devam etmek için önce MynAssistant hesabına giriş yap."
+            return
+        }
+
+        val qrSignature = desktopPairingQrSignature
+        val qrExpiry = desktopPairingQrExpiresAtUnix
+        if (qrSignature != null && (qrExpiry == null || qrExpiry <= System.currentTimeMillis() / 1000)) {
+            desktopPairingQrSignature = null
+            desktopPairingQrExpiresAtUnix = null
+            desktopPairingStatus = "QR kodunun süresi dolmuş. Windows uygulamasından yeni kod oluştur."
             return
         }
 
@@ -2452,8 +2513,14 @@ private fun AssistantScreen(
                             setRequestProperty("Authorization", "Bearer $idToken")
                         }
 
-                        val requestBody = JSONObject()
+                        val approvalPayload = JSONObject()
                             .put("code", normalizedCode)
+                        if (qrSignature != null && qrExpiry != null) {
+                            approvalPayload
+                                .put("qrSignature", qrSignature)
+                                .put("qrExpiresAtUnix", qrExpiry)
+                        }
+                        val requestBody = approvalPayload
                             .toString()
                             .toByteArray(Charsets.UTF_8)
                         connection.outputStream.use { it.write(requestBody) }
@@ -2503,6 +2570,8 @@ private fun AssistantScreen(
                         desktopPairingStatus = message
                         if (approved) {
                             desktopPairingCode = ""
+                            desktopPairingQrSignature = null
+                            desktopPairingQrExpiresAtUnix = null
                             feedback = message
                         }
                     }
@@ -4131,14 +4200,15 @@ private fun AssistantScreen(
                                     OutlinedTextField(
                                         value = desktopPairingCode,
                                         onValueChange = { entered ->
-                                            desktopPairingCode = entered
-                                                .filter { it.isLetterOrDigit() }
-                                                .uppercase(Locale.ROOT)
-                                                .take(10)
+                                            desktopPairingCode = DesktopPairingCodeFormat.format(entered)
+                                            // Manual typing/pasting means the user is no longer approving
+                                            // the signed QR captured by the scanner.
+                                            desktopPairingQrSignature = null
+                                            desktopPairingQrExpiresAtUnix = null
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         label = { Text("Windows eşleştirme kodu") },
-                                        placeholder = { Text("ABCDE23456") },
+                                        placeholder = { Text("ABCDE-23456") },
                                         singleLine = true,
                                         enabled = signedIn && !desktopPairingBusy,
                                         keyboardOptions = KeyboardOptions(
@@ -4146,13 +4216,28 @@ private fun AssistantScreen(
                                             imeAction = ImeAction.Done
                                         ),
                                         supportingText = {
-                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
+                                            Text("Kod 5. karakterden sonra otomatik tirelenir. QR taraması imzayı da sunucuya iletir.")
                                         }
                                     )
+                                    OutlinedButton(
+                                        onClick = { scanDesktopPairingQr() },
+                                        enabled = signedIn && !desktopPairingBusy && !desktopPairingScanBusy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingScanBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
+                                    }
                                     Button(
                                         onClick = { approveDesktopPairing() },
                                         enabled = signedIn && !desktopPairingBusy &&
-                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
+                                            DesktopPairingCodeFormat.normalize(desktopPairingCode).length == 10 &&
+                                                DesktopPairingCodeFormat.isValidCode(desktopPairingCode),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         if (desktopPairingBusy) {
