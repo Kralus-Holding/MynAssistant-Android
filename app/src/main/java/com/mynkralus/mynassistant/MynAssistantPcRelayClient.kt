@@ -31,13 +31,13 @@ internal object MynAssistantPcRelayClient {
     private const val COMMAND_TIMEOUT_MS = 65_000L
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun listWindowsDevices(
+    fun listDevices(
         user: FirebaseUser,
         callback: (List<MynPcRelayDevice>?, String?) -> Unit
     ) {
         Thread({
             try {
-                val devices = fetchWindowsDevices(user)
+                val devices = fetchDevices(user)
                 mainHandler.post { callback(devices, null) }
             } catch (error: Exception) {
                 mainHandler.post { callback(null, safeMessage(error)) }
@@ -45,7 +45,7 @@ internal object MynAssistantPcRelayClient {
         }, "MynPcRelay-Devices").apply { isDaemon = true }.start()
     }
 
-    fun observeWindowsDevices(
+    fun observeDevices(
         user: FirebaseUser,
         intervalMillis: Long = 15_000L,
         callback: (List<MynPcRelayDevice>?, String?) -> Unit
@@ -55,7 +55,7 @@ internal object MynAssistantPcRelayClient {
             var firstFailureAt = 0L
             while (!cancelled.get()) {
                 try {
-                    val devices = fetchWindowsDevices(user)
+                    val devices = fetchDevices(user)
                     firstFailureAt = 0L
                     mainHandler.post {
                         if (!cancelled.get()) callback(devices, null)
@@ -82,8 +82,8 @@ internal object MynAssistantPcRelayClient {
         return ListenerRegistration { cancelled.set(true) }
     }
 
-    private fun fetchWindowsDevices(user: FirebaseUser): List<MynPcRelayDevice> {
-        val response = request(user, "GET", "/api/v1/pc/devices")
+    private fun fetchDevices(user: FirebaseUser): List<MynPcRelayDevice> {
+        val response = request(user, "GET", "/api/v1/devices")
         val items = response.optJSONArray("items") ?: JSONArray()
         return buildList {
             for (index in 0 until items.length()) {
