@@ -3922,6 +3922,24 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
+                                if (visiblePhoneDevices.isNotEmpty()) {
+                                    HorizontalDivider()
+                                    Text("Telefonlar ve diğer cihazlar", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    visiblePhoneDevices.forEach { device ->
+                                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold)
+                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                                }
+                                                Text(if (device.isOnlineAt(presenceNowMillis)) "Çevrimiçi" else "Çevrimdışı", fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 Page.DIAGNOSTICS -> {
                             val entries = remember(diagnosticsRevision, page) {
                                 MynAssistantDiagnostics.read(commandContext)
