@@ -2629,7 +2629,7 @@ private fun AssistantScreen(
                     pcFilesLoading = false
                     feedback = "Oturum kapandı. Komut durumu sunucudan alınamadı."
                     activeCommandName = null
-                    return@sendTrackedCommand
+                    return@sendRemoteCommand
                 }
                 val registration = MynAssistantPcRelayClient.observeCommand(user, commandId) { snapshot, relayError ->
                     if (relayError != null) {
