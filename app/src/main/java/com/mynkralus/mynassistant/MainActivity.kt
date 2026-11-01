@@ -4206,10 +4206,13 @@ private fun AssistantScreen(
                                     OutlinedTextField(
                                         value = desktopPairingCode,
                                         onValueChange = { entered ->
-                                            // Keep only the canonical 10-character code in state.
-                                            // The visual transformation draws the hyphen without
-                                            // moving the caret or interrupting consecutive typing.
-                                            desktopPairingCode = DesktopPairingCodeFormat.normalize(entered)
+                                            // BasicTextField/Compose may report the transformed value
+                                            // (including the visual hyphen). Normalize only the input
+                                            // characters; never reformat the state on every keystroke.
+                                            val normalized = DesktopPairingCodeFormat.normalize(entered)
+                                            if (normalized != desktopPairingCode) {
+                                                desktopPairingCode = normalized
+                                            }
                                             // Manual typing/pasting means the user is no longer approving
                                             // the signed QR captured by the scanner.
                                             desktopPairingQrSignature = null
