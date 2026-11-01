@@ -2401,6 +2401,7 @@ private fun AssistantScreen(
     var pcFileListing by remember(firebaseUserId) { mutableStateOf<PcFileListing?>(null) }
     var pcFilesDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var pcFilesLoading by remember(firebaseUserId) { mutableStateOf(false) }
+    var remoteScreenFrameBase64 by remember(firebaseUserId) { mutableStateOf("") }
     var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
     var desktopPairingBusy by remember(firebaseUserId) { mutableStateOf(false) }
     var desktopPairingStatus by remember(firebaseUserId) {
@@ -3123,27 +3124,28 @@ private fun AssistantScreen(
     )
     val selectedDevice = pcDevices.firstOrNull { it.id == selectedPcId }
 
-    // While the remote-control page is open, ask the Windows Agent to provide a short-lived desktop preview.
-    // The agent only sends frames while this lease is refreshed, so it does not upload screenshots in the background.
+    // Screen preview is leased through MynAssistant Server. The Android client never writes the
+    // Windows device document in Firestore; leaving this page cancels the lease and polling loop.
     LaunchedEffect(page, selectedDevice?.id, selectedDevice?.connectionMode, firebaseUserId, signedIn) {
         val target = selectedDevice
+        val user = FirebaseAuth.getInstance().currentUser
         if (page == Page.REMOTE && signedIn && !firebaseUserId.isNullOrBlank() &&
-            target != null && target.connectionMode == "firebase-agent") {
-            val deviceRef = FirebaseFirestore.getInstance().collection("devices").document(target.id)
-            try {
-                while (true) {
-                    deviceRef.update(
-                        "screenRequested", true,
-                        "screenRequestedAt", FieldValue.serverTimestamp()
-                    )
-                    delay(10_000)
+            user != null && target != null && target.connectionMode == "firebase-agent") {
+            val registration = MynAssistantPcRelayClient.observeScreenPreview(user, target.id) { frame, error ->
+                if (frame != null) remoteScreenFrameBase64 = frame
+                if (error != null) {
+                    remoteScreenFrameBase64 = ""
+                    feedback = error
                 }
-            } finally {
-                deviceRef.update(
-                    "screenRequested", false,
-                    "screenRequestedAt", FieldValue.serverTimestamp()
-                )
             }
+            try {
+                while (true) delay(1_000)
+            } finally {
+                registration.remove()
+                remoteScreenFrameBase64 = ""
+            }
+        } else {
+            remoteScreenFrameBase64 = ""
         }
     }
 
@@ -3716,19 +3718,42 @@ private fun AssistantScreen(
                                                                 deviceNameEditError = if (device.isPcTarget) "Bilgisayar adı boş olamaz." else "Cihaz adı boş olamaz."
                                                             } else if (cleanedName != device.name) {
                                                                 deviceNameSaveBusyId = device.id
-                                                                FirebaseFirestore.getInstance().collection("devices").document(device.id)
-                                                                    .update("name", cleanedName)
-                                                                    .addOnSuccessListener {
-                                                                        deviceNameDrafts = deviceNameDrafts - device.id
-                                                                        editingDeviceNameId = null
-                                                                        deviceNameEditError = null
+                                                                if (device.isPcTarget) {
+                                                                    val user = FirebaseAuth.getInstance().currentUser
+                                                                    if (user == null) {
                                                                         deviceNameSaveBusyId = null
-                                                                        feedback = null
+                                                                        deviceNameEditError = "Bu işlemi yapmak için yeniden giriş yap."
+                                                                    } else {
+                                                                        MynAssistantPcRelayClient.renameWindowsDevice(user, device.id, cleanedName) { savedName, error ->
+                                                                            deviceNameSaveBusyId = null
+                                                                            if (error != null || savedName == null) {
+                                                                                deviceNameEditError = error ?: "Bilgisayar adı Server'a kaydedilemedi."
+                                                                            } else {
+                                                                                devices = devices.map { existing ->
+                                                                                    if (existing.id == device.id) existing.copy(name = savedName) else existing
+                                                                                }
+                                                                                deviceNameDrafts = deviceNameDrafts - device.id
+                                                                                editingDeviceNameId = null
+                                                                                deviceNameEditError = null
+                                                                                feedback = null
+                                                                            }
+                                                                        }
                                                                     }
-                                                                    .addOnFailureListener {
-                                                                        deviceNameSaveBusyId = null
-                                                                        deviceNameEditError = "Ad kaydedilemedi. Bağlantıyı ve hesap izinlerini kontrol edip tekrar dene."
-                                                                    }
+                                                                } else {
+                                                                    FirebaseFirestore.getInstance().collection("devices").document(device.id)
+                                                                        .update("name", cleanedName)
+                                                                        .addOnSuccessListener {
+                                                                            deviceNameDrafts = deviceNameDrafts - device.id
+                                                                            editingDeviceNameId = null
+                                                                            deviceNameEditError = null
+                                                                            deviceNameSaveBusyId = null
+                                                                            feedback = null
+                                                                        }
+                                                                        .addOnFailureListener {
+                                                                            deviceNameSaveBusyId = null
+                                                                            deviceNameEditError = "Ad kaydedilemedi. Bağlantıyı ve hesap izinlerini kontrol edip tekrar dene."
+                                                                        }
+                                                                }
                                                             } else {
                                                                 editingDeviceNameId = null
                                                                 deviceNameDrafts = deviceNameDrafts - device.id
@@ -4445,8 +4470,8 @@ private fun AssistantScreen(
                             var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
                                 mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
                             }
-                            val screenBitmap = remember(device?.id, device?.screenJpegBase64) {
-                                val encoded = device?.screenJpegBase64.orEmpty()
+                            val screenBitmap = remember(device?.id, remoteScreenFrameBase64) {
+                                val encoded = remoteScreenFrameBase64
                                 if (encoded.isBlank()) null else try {
                                     val bytes = Base64.decode(encoded, Base64.DEFAULT)
                                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
