@@ -3145,7 +3145,7 @@ private fun AssistantScreen(
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
         if (!firebaseUserId.isNullOrBlank() && user != null) {
             devicesLoading = true
-            registration = MynAssistantPcRelayClient.observeWindowsDevices(user) { relayDevices, error ->
+            registration = MynAssistantPcRelayClient.observeDevices(user) { relayDevices, error ->
                 if (error != null) {
                     devicesError = error
                     devicesLoading = false
