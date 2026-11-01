@@ -37,34 +37,75 @@ internal object MynAssistantPcRelayClient {
     ) {
         Thread({
             try {
-                val response = request(user, "GET", "/api/v1/pc/devices")
-                val items = response.optJSONArray("items") ?: JSONArray()
-                val devices = buildList {
-                    for (index in 0 until items.length()) {
-                        val item = items.optJSONObject(index) ?: continue
-                        val id = item.optString("id")
-                        if (id.isBlank()) continue
-                        val timestamp = item.optString("lastSeenAt")
-                        val lastSeen = runCatching {
-                            java.time.Instant.parse(timestamp).toEpochMilli()
-                        }.getOrNull()
-                        add(
-                            MynPcRelayDevice(
-                                id = id,
-                                name = item.optString("name").ifBlank { "Windows bilgisayar" },
-                                platform = item.optString("platform").ifBlank { "Windows" },
-                                status = item.optString("status").ifBlank { "offline" },
-                                connectionMode = item.optString("connectionMode").ifBlank { "firebase-agent" },
-                                lastSeenAtMillis = lastSeen
-                            )
-                        )
-                    }
-                }
+                val devices = fetchWindowsDevices(user)
                 mainHandler.post { callback(devices, null) }
             } catch (error: Exception) {
                 mainHandler.post { callback(null, safeMessage(error)) }
             }
         }, "MynPcRelay-Devices").apply { isDaemon = true }.start()
+    }
+
+    fun observeWindowsDevices(
+        user: FirebaseUser,
+        intervalMillis: Long = 15_000L,
+        callback: (List<MynPcRelayDevice>?, String?) -> Unit
+    ): ListenerRegistration {
+        val cancelled = AtomicBoolean(false)
+        Thread({
+            var firstFailureAt = 0L
+            while (!cancelled.get()) {
+                try {
+                    val devices = fetchWindowsDevices(user)
+                    firstFailureAt = 0L
+                    mainHandler.post {
+                        if (!cancelled.get()) callback(devices, null)
+                    }
+                } catch (error: Exception) {
+                    val now = System.currentTimeMillis()
+                    if (firstFailureAt == 0L) firstFailureAt = now
+                    if (now - firstFailureAt >= 45_000L) {
+                        val message = safeMessage(error)
+                        mainHandler.post {
+                            if (!cancelled.get()) callback(null, message)
+                        }
+                        firstFailureAt = now
+                    }
+                }
+                try {
+                    Thread.sleep(intervalMillis.coerceIn(5_000L, 60_000L))
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@Thread
+                }
+            }
+        }, "MynPcRelay-DeviceObserver").apply { isDaemon = true }.start()
+        return ListenerRegistration { cancelled.set(true) }
+    }
+
+    private fun fetchWindowsDevices(user: FirebaseUser): List<MynPcRelayDevice> {
+        val response = request(user, "GET", "/api/v1/pc/devices")
+        val items = response.optJSONArray("items") ?: JSONArray()
+        return buildList {
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                val id = item.optString("id")
+                if (id.isBlank()) continue
+                val timestamp = item.optString("lastSeenAt")
+                val lastSeen = runCatching {
+                    java.time.Instant.parse(timestamp).toEpochMilli()
+                }.getOrNull()
+                add(
+                    MynPcRelayDevice(
+                        id = id,
+                        name = item.optString("name").ifBlank { "Windows bilgisayar" },
+                        platform = item.optString("platform").ifBlank { "Windows" },
+                        status = item.optString("status").ifBlank { "offline" },
+                        connectionMode = item.optString("connectionMode").ifBlank { "firebase-agent" },
+                        lastSeenAtMillis = lastSeen
+                    )
+                )
+            }
+        }
     }
 
     fun enqueueCommand(
