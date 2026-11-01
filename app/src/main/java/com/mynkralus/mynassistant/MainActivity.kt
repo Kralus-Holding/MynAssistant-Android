@@ -18,8 +18,8 @@ import android.provider.Settings
 import java.util.Locale
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.code.scanner.GmsBarcodeScanning
-import com.google.android.gms.code.scanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
@@ -2405,6 +2405,7 @@ private fun AssistantScreen(
     var pcFilesDeviceId by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var pcFilesLoading by remember(firebaseUserId) { mutableStateOf(false) }
     var remoteScreenFrameBase64 by remember(firebaseUserId) { mutableStateOf("") }
+    val pairingScannerContext = LocalContext.current
     var desktopPairingCode by remember(firebaseUserId) { mutableStateOf("") }
     var desktopPairingQrSignature by remember(firebaseUserId) { mutableStateOf<String?>(null) }
     var desktopPairingQrExpiresAtUnix by remember(firebaseUserId) { mutableStateOf<Long?>(null) }
@@ -2424,7 +2425,7 @@ private fun AssistantScreen(
             .enableAutoZoom()
             .build()
 
-        GmsBarcodeScanning.getClient(context, options)
+        GmsBarcodeScanning.getClient(pairingScannerContext, options)
             .startScan()
             .addOnSuccessListener { barcode ->
                 desktopPairingScanBusy = false
