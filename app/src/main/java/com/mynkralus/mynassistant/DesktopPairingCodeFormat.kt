@@ -26,7 +26,7 @@ internal object DesktopPairingCodeFormat {
         return if (code.length > 5) "${code.take(5)}-${code.drop(5)}" else code
     }
 
-    fun parseQr(rawValue: String, nowEpochSeconds: Long = System.currentTimeMillis() / 1000): DesktopPairingQrPayload? {
+    fun parseQr(rawValue: String): DesktopPairingQrPayload? {
         val raw = rawValue.trim()
         if (raw.isEmpty()) return null
 
@@ -38,9 +38,9 @@ internal object DesktopPairingCodeFormat {
             if (code.length != CODE_LENGTH || !isValidCode(parts[1])) return null
 
             val expiry = parts[2].toLongOrNull() ?: return null
-            // Do not reject a valid signed QR because the phone clock is slightly behind.
-            // The Server performs the authoritative HMAC and expiry validation.
-            if (expiry <= nowEpochSeconds) return null
+            // The phone clock is not authoritative. Keep the signed expiry and let
+            // the Server validate expiry and HMAC together when the code is approved.
+            if (expiry <= 0L) return null
 
             val signature = parts[3]
             if (signature.length != 43 ||
