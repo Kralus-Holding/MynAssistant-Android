@@ -3669,7 +3669,23 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
-                                devices.forEach { device ->
+                                val visibleDevices = devices.distinctBy { it.id }
+                                val visiblePcDevices = visibleDevices.filter { it.isPcTarget }
+                                val visiblePhoneDevices = visibleDevices.filterNot { it.isPcTarget }
+
+                                Text(
+                                    "Bilgisayarlar",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (visiblePcDevices.isEmpty()) {
+                                    Text(
+                                        "Bu hesaba bağlı Windows bilgisayar kaydı bulunamadı.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                    )
+                                }
+                                visiblePcDevices.forEach { device ->
                                     val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
                                     val isEditingName = editingDeviceNameId == device.id
                                     var editedDeviceName by remember(device.id, device.name) {
@@ -3870,9 +3886,39 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
-                            }
-                        }
-                        Page.DIAGNOSTICS -> {
+
+                                if (visiblePhoneDevices.isNotEmpty()) {
+                                    HorizontalDivider()
+                                    Text(
+                                        "Telefonlar ve diğer cihazlar",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    visiblePhoneDevices.forEach { device ->
+                                        Card(
+                                            Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(14.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                                }
+                                                Text(
+                                                    if (device.isOnlineAt(presenceNowMillis)) "Çevrimiçi" else "Çevrimdışı",
+                                                    fontSize = 11.sp,
+                                                    color = if (device.isOnlineAt(presenceNowMillis)) Color(0xFF218653) else MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+Page.DIAGNOSTICS -> {
                             val entries = remember(diagnosticsRevision, page) {
                                 MynAssistantDiagnostics.read(commandContext)
                             }
