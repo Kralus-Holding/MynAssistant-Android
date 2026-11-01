@@ -194,6 +194,136 @@ internal object MynAssistantPcRelayClient {
         return ListenerRegistration { cancelled.set(true) }
     }
 
+    fun renameWindowsDevice(
+        user: FirebaseUser,
+        deviceId: String,
+        name: String,
+        callback: (String?, String?) -> Unit
+    ) {
+        Thread({
+            try {
+                val cleanedName = name.trim()
+                if (cleanedName.isEmpty() || cleanedName.length > 80)
+                    throw IllegalArgumentException("Bilgisayar adı 1–80 karakter olmalı.")
+                request(
+                    user,
+                    "PATCH",
+                    "/api/v1/pc/devices/${encodePath(deviceId)}",
+                    JSONObject().put("name", cleanedName)
+                )
+                mainHandler.post { callback(cleanedName, null) }
+            } catch (error: Exception) {
+                mainHandler.post { callback(null, safeMessage(error)) }
+            }
+        }, "MynPcRelay-Rename").apply { isDaemon = true }.start()
+    }
+
+    fun observeScreenPreview(
+        user: FirebaseUser,
+        deviceId: String,
+        callback: (String?, String?) -> Unit
+    ): ListenerRegistration {
+        val cancelled = AtomicBoolean(false)
+        Thread({
+            var lastLeaseRefresh = 0L
+            var failures = 0
+            try {
+                while (!cancelled.get()) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastLeaseRefresh >= 10_000L) {
+                        request(
+                            user,
+                            "POST",
+                            "/api/v1/pc/devices/${encodePath(deviceId)}/screen-request",
+                            JSONObject().put("active", true)
+                        )
+                        lastLeaseRefresh = now
+                    }
+
+                    val frame = requestBytes(
+                        user,
+                        "GET",
+                        "/api/v1/pc/devices/${encodePath(deviceId)}/screen"
+                    )
+                    failures = 0
+                    if (frame != null) {
+                        val encoded = android.util.Base64.encodeToString(
+                            frame,
+                            android.util.Base64.NO_WRAP
+                        )
+                        mainHandler.post {
+                            if (!cancelled.get()) callback(encoded, null)
+                        }
+                    }
+                    Thread.sleep(1_500L)
+                }
+            } catch (error: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (error: Exception) {
+                failures++
+                val message = safeMessage(error)
+                mainHandler.post {
+                    if (!cancelled.get()) callback(null, message)
+                }
+            } finally {
+                runCatching {
+                    request(
+                        user,
+                        "POST",
+                        "/api/v1/pc/devices/${encodePath(deviceId)}/screen-request",
+                        JSONObject().put("active", false)
+                    )
+                }
+            }
+        }, "MynPcRelay-ScreenPreview").apply { isDaemon = true }.start()
+
+        return ListenerRegistration { cancelled.set(true) }
+    }
+
+    private fun requestBytes(user: FirebaseUser, method: String, path: String): ByteArray? {
+        val token = getFreshIdToken(user)
+        val connection = (URL(BASE_URL + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            useCaches = false
+            setRequestProperty("Accept", "image/jpeg")
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        try {
+            val status = connection.responseCode
+            if (status == 204) return null
+            if (status == 401) throw IOException("Oturum doğrulanamadı. Yeniden giriş yap.")
+            if (status == 404) throw IOException("Windows bilgisayarı bulunamadı.")
+            if (status == 409) throw IOException("Windows ekran önizleme isteği kabul edilmedi.")
+            if (status == 429) throw IOException("Sunucu istek sınırına ulaştı. Biraz bekle.")
+            if (status !in 200..299) throw IOException("Ekran görüntüsü sunucudan alınamadı (HTTP $status).")
+            if (!connection.contentType.orEmpty().startsWith("image/jpeg", ignoreCase = true))
+                throw IOException("Sunucu ekran görüntüsü yerine beklenmeyen içerik döndürdü.")
+            if (connection.contentLengthLong > 700_000L)
+                throw IOException("Ekran görüntüsü boyut sınırını aşıyor.")
+            val bytes = connection.inputStream.use { stream ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                var total = 0
+                while (true) {
+                    val read = stream.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > 700_000) throw IOException("Ekran görüntüsü boyut sınırını aşıyor.")
+                    output.write(buffer, 0, read)
+                }
+                output.toByteArray()
+            }
+            if (bytes.size < 3 || bytes[0] != 0xFF.toByte() ||
+                bytes[1] != 0xD8.toByte() || bytes[2] != 0xFF.toByte())
+                throw IOException("Sunucudan geçerli JPEG ekran görüntüsü alınamadı.")
+            return bytes
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun request(
         user: FirebaseUser,
         method: String,
