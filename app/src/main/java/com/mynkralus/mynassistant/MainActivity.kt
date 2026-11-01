@@ -3654,7 +3654,11 @@ private fun AssistantScreen(
                                 devicesError?.let { error ->
                                     Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                                 }
-                                if (!devicesLoading && pcDevices.isEmpty() && devicesError == null) {
+                                val visibleDevices = devices.distinctBy { it.id }
+                                val visiblePcDevices = visibleDevices.filter { it.isPcTarget }
+                                val visiblePhoneDevices = visibleDevices.filterNot { it.isPcTarget }
+
+                                if (!devicesLoading && visiblePcDevices.isEmpty() && devicesError == null) {
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -3669,7 +3673,23 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
-                                devices.forEach { device ->
+                                val visibleDevices = devices.distinctBy { it.id }
+                                val visiblePcDevices = visibleDevices.filter { it.isPcTarget }
+                                val visiblePhoneDevices = visibleDevices.filterNot { it.isPcTarget }
+
+                                Text(
+                                    "Bilgisayarlar",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (visiblePcDevices.isEmpty()) {
+                                    Text(
+                                        "Bu hesaba bağlı Windows bilgisayar kaydı bulunamadı.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                    )
+                                }
+                                visiblePcDevices.forEach { device ->
                                     val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
                                     val isEditingName = editingDeviceNameId == device.id
                                     var editedDeviceName by remember(device.id, device.name) {
@@ -3870,9 +3890,57 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
+
+                                if (visiblePhoneDevices.isNotEmpty()) {
+                                    HorizontalDivider()
+                                    Text(
+                                        "Telefonlar ve diğer cihazlar",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    visiblePhoneDevices.forEach { device ->
+                                        Card(
+                                            Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(14.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                                }
+                                                Text(
+                                                    if (device.isOnlineAt(presenceNowMillis)) "Çevrimiçi" else "Çevrimdışı",
+                                                    fontSize = 11.sp,
+                                                    color = if (device.isOnlineAt(presenceNowMillis)) Color(0xFF218653) else MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (visiblePhoneDevices.isNotEmpty()) {
+                                    HorizontalDivider()
+                                    Text("Telefonlar ve diğer cihazlar", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    visiblePhoneDevices.forEach { device ->
+                                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                Column(Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold)
+                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
+                                                }
+                                                Text(if (device.isOnlineAt(presenceNowMillis)) "Çevrimiçi" else "Çevrimdışı", fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        Page.DIAGNOSTICS -> {
+Page.DIAGNOSTICS -> {
                             val entries = remember(diagnosticsRevision, page) {
                                 MynAssistantDiagnostics.read(commandContext)
                             }
@@ -3927,7 +3995,7 @@ private fun AssistantScreen(
                         }
                         Page.FILES -> {
                             Text(
-                                "Yalnızca şu anda aktif ve bağlı bilgisayarlar burada görünür.",
+                                "Hesabına bağlı Windows bilgisayarları ve erişilebilir sürücüler burada listelenir.",
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
@@ -3935,10 +4003,10 @@ private fun AssistantScreen(
                                 Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                            } else if (connectedDevices.isEmpty()) {
-                                Text("Şu anda aktif ve bağlı bilgisayar yok.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
+                            } else if (pcDevices.isEmpty()) {
+                                Text("Bu hesaba bağlı Windows bilgisayarı bulunamadı.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
-                                connectedDevices.forEach { device ->
+                                pcDevices.distinctBy { it.id }.forEach { device ->
                                     val deviceOnlineNow = device.isOnlineAt(presenceNowMillis)
                                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3955,7 +4023,7 @@ private fun AssistantScreen(
                                                 if (!deviceOnlineNow) {
                                                     feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
                                                 } else if (device.connectionMode == "firebase-agent") {
-                                                    feedback = "Dosya listesi bilgisayardan isteniyor..."
+                                                    feedback = "Sürücüler Windows bilgisayarından isteniyor..."
                                                     requestPcFileList(device.id, "")
                                                 } else if (device.id == localPcDeviceId && localPcConnected) {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
@@ -4163,6 +4231,7 @@ private fun AssistantScreen(
                             }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
+                        
                         Page.SETTINGS -> {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
@@ -4206,19 +4275,14 @@ private fun AssistantScreen(
                                     OutlinedTextField(
                                         value = desktopPairingCode,
                                         onValueChange = { entered ->
-                                            // Keep only the canonical 10-character code in state.
-                                            // The visual transformation draws the hyphen without
-                                            // moving the caret or interrupting consecutive typing.
-                                            desktopPairingCode = DesktopPairingCodeFormat.normalize(entered)
-                                            // Manual typing/pasting means the user is no longer approving
-                                            // the signed QR captured by the scanner.
-                                            desktopPairingQrSignature = null
-                                            desktopPairingQrExpiresAtUnix = null
+                                            desktopPairingCode = entered
+                                                .filter { it.isLetterOrDigit() }
+                                                .uppercase(Locale.ROOT)
+                                                .take(10)
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         label = { Text("Windows eşleştirme kodu") },
-                                        placeholder = { Text("ABCDE-23456") },
-                                        visualTransformation = DesktopPairingCodeVisualTransformation(),
+                                        placeholder = { Text("ABCDE23456") },
                                         singleLine = true,
                                         enabled = signedIn && !desktopPairingBusy,
                                         keyboardOptions = KeyboardOptions(
@@ -4226,28 +4290,13 @@ private fun AssistantScreen(
                                             imeAction = ImeAction.Done
                                         ),
                                         supportingText = {
-                                            Text("Kod 5. karakterden sonra otomatik tirelenir. QR taraması imzayı da sunucuya iletir.")
+                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
                                         }
                                     )
-                                    OutlinedButton(
-                                        onClick = { scanDesktopPairingQr() },
-                                        enabled = signedIn && !desktopPairingBusy && !desktopPairingScanBusy,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        if (desktopPairingScanBusy) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                        }
-                                        Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
-                                    }
                                     Button(
                                         onClick = { approveDesktopPairing() },
                                         enabled = signedIn && !desktopPairingBusy &&
-                                            DesktopPairingCodeFormat.normalize(desktopPairingCode).length == 10 &&
-                                                DesktopPairingCodeFormat.isValidCode(desktopPairingCode),
+                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         if (desktopPairingBusy) {
@@ -4543,30 +4592,11 @@ private fun AssistantScreen(
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
-                            val remoteUiPreferences = remember {
-                                commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                            }
-                            val remoteUiPreferencePrefix =
-                                "remote_visibility_${firebaseUserId.orEmpty()}_${device?.id.orEmpty()}"
-                            var showScreenPreview by remember(remoteUiPreferencePrefix) {
-                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_screen", true))
-                            }
-                            var showTouchpadPanel by remember(remoteUiPreferencePrefix) {
-                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_touchpad", true))
-                            }
-                            var showKeyboardPanel by remember(remoteUiPreferencePrefix) {
-                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_keyboard", true))
-                            }
-                            fun saveRemoteVisibility(control: String, visible: Boolean) {
-                                remoteUiPreferences.edit()
-                                    .putBoolean("${remoteUiPreferencePrefix}_${control}", visible)
-                                    .apply()
-                            }
                             var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
                                 mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
                             }
-                            val screenBitmap = remember(device?.id, remoteScreenFrameBase64) {
-                                val encoded = remoteScreenFrameBase64
+                            val screenBitmap = remember(device?.id, device?.screenJpegBase64) {
+                                val encoded = device?.screenJpegBase64.orEmpty()
                                 if (encoded.isBlank()) null else try {
                                     val bytes = Base64.decode(encoded, Base64.DEFAULT)
                                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
@@ -4578,54 +4608,6 @@ private fun AssistantScreen(
                                 (device == null || device.id == localPcDeviceId)
                             val remoteOnline = localBridgeSelected ||
                                 (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconToggleButton(
-                                    checked = showScreenPreview,
-                                    onCheckedChange = {
-                                        showScreenPreview = it
-                                        saveRemoteVisibility("screen", it)
-                                    },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Tv,
-                                        contentDescription = if (showScreenPreview) "Ekran görünümünü gizle" else "Ekran görünümünü göster",
-                                        tint = if (showScreenPreview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
-                                    )
-                                }
-                                IconToggleButton(
-                                    checked = showTouchpadPanel,
-                                    onCheckedChange = {
-                                        showTouchpadPanel = it
-                                        saveRemoteVisibility("touchpad", it)
-                                    },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.TouchApp,
-                                        contentDescription = if (showTouchpadPanel) "Touchpad alanını gizle" else "Touchpad alanını göster",
-                                        tint = if (showTouchpadPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
-                                    )
-                                }
-                                IconToggleButton(
-                                    checked = showKeyboardPanel,
-                                    onCheckedChange = {
-                                        showKeyboardPanel = it
-                                        saveRemoteVisibility("keyboard", it)
-                                    },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Keyboard,
-                                        contentDescription = if (showKeyboardPanel) "Klavye satırını gizle" else "Klavye satırını göster",
-                                        tint = if (showKeyboardPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
-                                    )
-                                }
-                            }
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -4640,7 +4622,7 @@ private fun AssistantScreen(
                                             localBridgeSelected -> "Bağlı • Yerel bağlantı"
                                             device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
                                             device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
-                                            remoteOnline -> "Çevrimiçi • son heartbeat güncel"
+                                            remoteOnline -> "Bağlı • " + device.platform
                                             else -> "Çevrimdışı • Bilgisayar bekleniyor"
                                         },
                                         fontSize = 11.sp,
@@ -4658,14 +4640,7 @@ private fun AssistantScreen(
                                     Box(Modifier.size(9.dp))
                                 }
                             }
-                            if (device?.connectionMode == "firebase-agent" && remoteOnline) {
-                                Text(
-                                    "Çevrimiçi durumu son heartbeat'i gösterir; her komutun teslim sonucu ayrıca doğrulanır.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
-                                )
-                            }
-                            if (device?.connectionMode == "firebase-agent" && showScreenPreview) {
+                            if (device?.connectionMode == "firebase-agent") {
                                 Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                 if (screenBitmap != null) {
                                     Image(
@@ -4678,7 +4653,7 @@ private fun AssistantScreen(
                                         contentScale = ContentScale.Fit
                                     )
                                     Text(
-                                        "Ekran önizlemesi bağlantı ve bilgisayar durumuna göre yenilenir; sabit gecikme garantisi yoktur.",
+                                        "Ekran önizlemesi yaklaşık 1–2 saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )
@@ -4714,8 +4689,6 @@ private fun AssistantScreen(
                             TvRemotePanel(
                                 enabled = remoteOnline,
                                 mouseEnabled = remoteOnline && !localBridgeSelected,
-                                showTouchpad = showTouchpadPanel,
-                                showKeyboard = showKeyboardPanel,
                                 onCommand = { commandName, payload ->
                                     if (!signedIn) {
                                         feedback = "Devam etmek için önce giriş yap."
@@ -5223,7 +5196,7 @@ private fun AssistantScreen(
                         DrawerItem("Cihazlarım") { navigateToPage(Page.DEVICES); drawer = false }
                         DrawerItem("Ayarlar") { navigateToPage(Page.SETTINGS); drawer = false }
                         DrawerItem("PC Kumandası") { navigateToPage(Page.REMOTE); drawer = false }
-                        DrawerItem("PcFiles") { navigateToPage(Page.FILES) }
+                        DrawerItem("PcFiles") { navigateToPage(Page.FILES); drawer = false }
                         Spacer(Modifier.weight(1f))
                         if (signedIn) OutlinedButton(onClick = { logout(); navigateToPage(Page.HOME) }, Modifier.fillMaxWidth()) { Text("Çıkış yap") }
                         Text("MynAssistant • Android 0.6.3", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
