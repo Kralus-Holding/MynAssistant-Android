@@ -2437,7 +2437,7 @@ private fun AssistantScreen(
                         desktopPairingQrExpiresAtUnix = null
                         desktopPairingStatus = "QR kodu geçersiz veya süresi dolmuş. Windows uygulamasından yeni QR kodu oluştur."
                     } else {
-                        desktopPairingCode = parsed.formattedCode
+                        desktopPairingCode = parsed.code
                         desktopPairingQrSignature = parsed.signature
                         desktopPairingQrExpiresAtUnix = parsed.expiresAtUnix
                         desktopPairingStatus = if (parsed.signature != null) {
@@ -4206,7 +4206,10 @@ private fun AssistantScreen(
                                     OutlinedTextField(
                                         value = desktopPairingCode,
                                         onValueChange = { entered ->
-                                            desktopPairingCode = DesktopPairingCodeFormat.format(entered)
+                                            // Keep only the canonical 10-character code in state.
+                                            // The visual transformation draws the hyphen without
+                                            // moving the caret or interrupting consecutive typing.
+                                            desktopPairingCode = DesktopPairingCodeFormat.normalize(entered)
                                             // Manual typing/pasting means the user is no longer approving
                                             // the signed QR captured by the scanner.
                                             desktopPairingQrSignature = null
@@ -4215,6 +4218,7 @@ private fun AssistantScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         label = { Text("Windows eşleştirme kodu") },
                                         placeholder = { Text("ABCDE-23456") },
+                                        visualTransformation = DesktopPairingCodeVisualTransformation(),
                                         singleLine = true,
                                         enabled = signedIn && !desktopPairingBusy,
                                         keyboardOptions = KeyboardOptions(
