@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/android-pcfiles-list-files" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -74,8 +74,64 @@ jobs:
           grep -q 'android:name=".MynWakeWordService"' app/src/main/AndroidManifest.xml
           grep -q 'android:name=".MynAssistantAccessibilityService"' app/src/main/AndroidManifest.xml
           grep -q '"PC Kumandası" -> Icons.Default.SettingsRemote' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q '"Touchpad",' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'val behindTitle = x < 112.dp.toPx()' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'sendTrackedRemoteCommand(targetDeviceId, "list_files"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'private data class PcFileListing' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'private fun parsePcFileListing(payload: String)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'resolvePcFileListingPayload(result.payload, result.message)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          test -s app/src/test/java/com/mynkralus/mynassistant/PcFileListingPayloadTest.kt
+          grep -q 'LOCAL_FILE_LIST_RESPONSE_INVALID' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'device.isOnlineAt(presenceNowMillis)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Çevrimiçi • son heartbeat güncel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'her komutun teslim sonucu ayrıca doğrulanır' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          if grep -Fq 'yaklaşık 1–2 saniyede bir güncellenir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt; then
+            echo "Screen preview must not promise unmeasured 1–2 second latency."
+            exit 1
+          fi
+          grep -q '"Touchpad"' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'Color(0xFF414141)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -Fq 'Canvas(Modifier.fillMaxSize().then(touchpadGestureModifier))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt").read_text(encoding="utf-8")
+          start = source.index("private fun TvRemotePanel(")
+          remote = source[start:]
+          if "drawCircle(" in remote or "while (y < size.height)" in remote:
+              raise SystemExit("Touchpad must keep the plain grey surface without decorative dots.")
+          for expected in ('"Touchpad"', "Color(0xFF414141)", 'showTouchpad = showTouchpadPanel', 'showKeyboard = showKeyboardPanel'):
+              if expected not in remote and expected not in source:
+                  raise SystemExit(f"Expected remote-control behavior missing: {expected}")
+
+          # The exact pre-adaptive square PNG is intentional; fail if someone silently
+          # swaps in a circular/adaptive export.
+          import subprocess
+          expected_icon_blob = "97b1f85688c3233885b4c4929652565dd4f07ab3"
+          actual_icon_blob = subprocess.check_output(
+              ["git", "rev-parse", "HEAD:app/src/main/res/drawable-nodpi/mynassistant_launcher.png"],
+              text=True,
+          ).strip()
+          if actual_icon_blob != expected_icon_blob:
+              raise SystemExit(f"Launcher square icon changed unexpectedly: {actual_icon_blob}")
+
+          controls_start = source.index("val remoteUiPreferencePrefix")
+          controls_end = source.index("TvRemotePanel(", controls_start)
+          remote_controls = source[controls_start:controls_end]
+          if remote_controls.count("IconToggleButton(") < 3:
+              raise SystemExit("Remote control must retain three separate visibility buttons.")
+          for expected in (
+              "Icons.Default.Tv", "Icons.Default.TouchApp", "Icons.Default.Keyboard",
+              'saveRemoteVisibility("screen", it)',
+              'saveRemoteVisibility("touchpad", it)',
+              'saveRemoteVisibility("keyboard", it)',
+              'contentDescription = if (showScreenPreview)',
+              'contentDescription = if (showTouchpadPanel)',
+              'contentDescription = if (showKeyboardPanel)',
+          ):
+              if expected not in remote_controls:
+                  raise SystemExit(f"Independent remote visibility control is missing: {expected}")
+          PY
+          grep -q 'remote_visibility_' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'showTouchpad = showTouchpadPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'showKeyboard = showKeyboardPanel' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Icons.Default.Save' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Color(0xFFE0F5E8)' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'password.length < 8' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
@@ -114,41 +170,54 @@ jobs:
           fi
           grep -q 'E-posta adresini değiştir' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
-          grep -q 'MynAssistant • Android 0.6.1' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
+          grep -q 'MynAssistant • Android 0.6.3' app/src/main/java/com/mynkralus/mynassistant/MainActivity.kt
           grep -q 'profilePhotos/{userId}/{fileName}' storage.rules
-          grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml
-          grep -q '<adaptive-icon' app/src/main/res/mipmap-anydpi-v26/mynassistant_launcher.xml
-          grep -q 'android:width="50dp"' app/src/main/res/drawable/mynassistant_launcher_foreground.xml
+          grep -q 'android:icon="@drawable/mynassistant_launcher"' app/src/main/AndroidManifest.xml
+          if grep -q 'android:roundIcon="@mipmap/mynassistant_launcher"' app/src/main/AndroidManifest.xml; then
+            echo "Square launcher configuration must not be overridden by the adaptive round icon."
+            exit 1
+          fi
           VERSION_CODE=$(grep -m1 'versionCode =' app/build.gradle.kts | tr -cd '0-9')
           VERSION_NAME=$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f 2)
-          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 38 ] || [ "$VERSION_NAME" != "0.6.1" ]; then
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ] || [ "$VERSION_CODE" -lt 39 ] || [ "$VERSION_NAME" != "0.6.3" ]; then
             echo "Invalid or old Android version"
             exit 1
           fi
           echo "Verified app version: $VERSION_NAME (versionCode $VERSION_CODE)"
-          APK_SIZE=$(stat -c%s app/build/outputs/apk/debug/app-debug.apk)
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          APK_SIZE=$(stat -c%s "$APK_PATH")
           echo "Verified APK bytes: $APK_SIZE"
           if [ "$APK_SIZE" -lt 100000000 ]; then
             echo "APK is unexpectedly small; verify Vosk/Sherpa packaging"
             exit 1
           fi
+          if ! unzip -tq "$APK_PATH" >/dev/null; then
+            echo "::error::APK archive integrity check failed."
+            exit 1
+          fi
+          APK_SHA256=$(sha256sum "$APK_PATH" | awk '{print toupper($1)}')
+          if [ -z "$APK_SHA256" ]; then
+            echo "::error::APK SHA-256 could not be calculated."
+            exit 1
+          fi
+          echo "Verified APK SHA-256: $APK_SHA256"
 
       - name: Upload APK as an Actions artifact
         uses: actions/upload-artifact@v7
         with:
-          name: MynAssistant-Android-0.6.1-debug-${{ github.sha }}
+          name: MynAssistant-Android-0.6.3-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
 
       - name: Publish APK as a prerelease asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/android-pcfiles-list-files')
         uses: softprops/action-gh-release@v3
         with:
           tag_name: mynassistant-android-apk-${{ github.sha }}
           name: MynAssistant Android Preview (${{ github.sha }})
           body: |
-            Automated debug APK built from ${{ github.ref_name }}.
+            Automated preview debug APK built from ${{ github.ref_name }} at commit ${{ github.sha }}.
 
             The stable debug signing certificate is verified by CI.
             This is a prerelease build, not a Play Store release.
