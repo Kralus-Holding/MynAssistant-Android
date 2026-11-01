@@ -29,6 +29,17 @@ class DesktopPairingCodeFormatTest {
     }
 
     @Test
+    fun doesNotRejectSignedQrOnlyBecausePhoneClockIsBehind() {
+        val signature = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
+        val result = DesktopPairingCodeFormat.parseQr(
+            "MYNASSISTANT-PAIR:AZ89EGXUR9:1800000600:$signature",
+            nowEpochSeconds = 1_800_000_000L
+        )
+        assertNotNull(result)
+        assertEquals(1_800_000_600L, result!!.expiresAtUnix)
+    }
+
+    @Test
     fun acceptsLegacyPlainCodeQrWithoutAddingSignature() {
         val result = DesktopPairingCodeFormat.parseQr("AZ89E-GXUR9", nowEpochSeconds = 1_800_000_000L)
 
