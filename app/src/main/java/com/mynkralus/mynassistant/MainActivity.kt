@@ -3654,11 +3654,7 @@ private fun AssistantScreen(
                                 devicesError?.let { error ->
                                     Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                                 }
-                                val visibleDevices = devices.distinctBy { it.id }
-                                val visiblePcDevices = visibleDevices.filter { it.isPcTarget }
-                                val visiblePhoneDevices = visibleDevices.filterNot { it.isPcTarget }
-
-                                if (!devicesLoading && visiblePcDevices.isEmpty() && devicesError == null) {
+                                if (!devicesLoading && pcDevices.isEmpty() && devicesError == null) {
                                     Card(
                                         Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -3673,23 +3669,7 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
-                                val visibleDevices = devices.distinctBy { it.id }
-                                val visiblePcDevices = visibleDevices.filter { it.isPcTarget }
-                                val visiblePhoneDevices = visibleDevices.filterNot { it.isPcTarget }
-
-                                Text(
-                                    "Bilgisayarlar",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                if (visiblePcDevices.isEmpty()) {
-                                    Text(
-                                        "Bu hesaba bağlı Windows bilgisayar kaydı bulunamadı.",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                                    )
-                                }
-                                visiblePcDevices.forEach { device ->
+                                devices.distinctBy { it.id }.forEach { device ->
                                     val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
                                     val isEditingName = editingDeviceNameId == device.id
                                     var editedDeviceName by remember(device.id, device.name) {
@@ -3890,57 +3870,9 @@ private fun AssistantScreen(
                                         }
                                     }
                                 }
-
-                                if (visiblePhoneDevices.isNotEmpty()) {
-                                    HorizontalDivider()
-                                    Text(
-                                        "Telefonlar ve diğer cihazlar",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    visiblePhoneDevices.forEach { device ->
-                                        Card(
-                                            Modifier.fillMaxWidth(),
-                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                        ) {
-                                            Row(
-                                                Modifier.fillMaxWidth().padding(14.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(device.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
-                                                }
-                                                Text(
-                                                    if (device.isOnlineAt(presenceNowMillis)) "Çevrimiçi" else "Çevrimdışı",
-                                                    fontSize = 11.sp,
-                                                    color = if (device.isOnlineAt(presenceNowMillis)) Color(0xFF218653) else MaterialTheme.colorScheme.onSurface.copy(alpha = .68f)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                if (visiblePhoneDevices.isNotEmpty()) {
-                                    HorizontalDivider()
-                                    Text("Telefonlar ve diğer cihazlar", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                    visiblePhoneDevices.forEach { device ->
-                                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(device.name, fontWeight = FontWeight.SemiBold)
-                                                    Text(device.platform, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f))
-                                                }
-                                                Text(if (device.isOnlineAt(presenceNowMillis)) "Çevrimiçi" else "Çevrimdışı", fontSize = 11.sp)
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
-Page.DIAGNOSTICS -> {
+                        Page.DIAGNOSTICS -> {
                             val entries = remember(diagnosticsRevision, page) {
                                 MynAssistantDiagnostics.read(commandContext)
                             }
@@ -3995,7 +3927,7 @@ Page.DIAGNOSTICS -> {
                         }
                         Page.FILES -> {
                             Text(
-                                "Hesabına bağlı Windows bilgisayarları ve erişilebilir sürücüler burada listelenir.",
+                                "Hesabına bağlı Windows bilgisayarları burada görünür; çevrimdışı olanlar da listelenir.",
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f)
                             )
@@ -4003,7 +3935,7 @@ Page.DIAGNOSTICS -> {
                                 Button(onClick = { navigateToPage(Page.AUTH) }, modifier = Modifier.fillMaxWidth()) { Text("Giriş yap / Kayıt ol") }
                             } else if (devicesLoading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                            } else if (pcDevices.isEmpty()) {
+                            } else if (pcDevices.distinctBy { it.id }.isEmpty()) {
                                 Text("Bu hesaba bağlı Windows bilgisayarı bulunamadı.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
                                 pcDevices.distinctBy { it.id }.forEach { device ->
@@ -4023,7 +3955,7 @@ Page.DIAGNOSTICS -> {
                                                 if (!deviceOnlineNow) {
                                                     feedback = "Bu bilgisayar çevrimdışı. Windows uygulamasını açıp yeniden dene."
                                                 } else if (device.connectionMode == "firebase-agent") {
-                                                    feedback = "Sürücüler Windows bilgisayarından isteniyor..."
+                                                    feedback = "Dosya listesi bilgisayardan isteniyor..."
                                                     requestPcFileList(device.id, "")
                                                 } else if (device.id == localPcDeviceId && localPcConnected) {
                                                     feedback = "Dosya listesi bilgisayardan isteniyor..."
@@ -4075,7 +4007,7 @@ Page.DIAGNOSTICS -> {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
                             }
                             pcFileListing?.takeIf { pcFilesDeviceId != null }?.let { listing ->
-                                val fileTargetDevice = connectedDevices.firstOrNull { it.id == pcFilesDeviceId }
+                                val fileTargetDevice = pcDevices.firstOrNull { it.id == pcFilesDeviceId }
                                 Card(
                                     Modifier.fillMaxWidth(),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -4231,7 +4163,6 @@ Page.DIAGNOSTICS -> {
                             }
                             feedback?.let { Text(it, color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp) }
                         }
-                        
                         Page.SETTINGS -> {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (dark) "Koyu tema" else "Açık tema", Modifier.weight(1f))
@@ -4275,10 +4206,12 @@ Page.DIAGNOSTICS -> {
                                     OutlinedTextField(
                                         value = desktopPairingCode,
                                         onValueChange = { entered ->
-                                            desktopPairingCode = entered
-                                                .filter { it.isLetterOrDigit() }
-                                                .uppercase(Locale.ROOT)
-                                                .take(10)
+                                            // Keep canonical input without inserting a visual dash:
+                                            // this avoids caret jumps during consecutive typing/pasting.
+                                            desktopPairingCode = DesktopPairingCodeFormat.normalize(entered)
+                                            // Manual typing/pasting invalidates any previously scanned QR signature.
+                                            desktopPairingQrSignature = null
+                                            desktopPairingQrExpiresAtUnix = null
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         label = { Text("Windows eşleştirme kodu") },
@@ -4290,13 +4223,28 @@ Page.DIAGNOSTICS -> {
                                             imeAction = ImeAction.Done
                                         ),
                                         supportingText = {
-                                            Text("Yalnızca kod girilir; telefon hesabının oturum anahtarları paylaşılmaz.")
+                                            Text("Kodu tire olmadan yazabilirsin. QR taraması imzayı da sunucuya iletir.")
                                         }
                                     )
+                                    OutlinedButton(
+                                        onClick = { scanDesktopPairingQr() },
+                                        enabled = signedIn && !desktopPairingBusy && !desktopPairingScanBusy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (desktopPairingScanBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (desktopPairingScanBusy) "QR tarayıcı açılıyor..." else "QR kodunu tara")
+                                    }
                                     Button(
                                         onClick = { approveDesktopPairing() },
                                         enabled = signedIn && !desktopPairingBusy &&
-                                            desktopPairingCode.filter { it.isLetterOrDigit() }.length == 10,
+                                            DesktopPairingCodeFormat.normalize(desktopPairingCode).length == 10 &&
+                                                DesktopPairingCodeFormat.isValidCode(desktopPairingCode),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         if (desktopPairingBusy) {
@@ -4592,11 +4540,30 @@ Page.DIAGNOSTICS -> {
                         }
                         Page.REMOTE -> {
                             val device = selectedDevice
+                            val remoteUiPreferences = remember {
+                                commandContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            }
+                            val remoteUiPreferencePrefix =
+                                "remote_visibility_${firebaseUserId.orEmpty()}_${device?.id.orEmpty()}"
+                            var showScreenPreview by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_screen", true))
+                            }
+                            var showTouchpadPanel by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_touchpad", true))
+                            }
+                            var showKeyboardPanel by remember(remoteUiPreferencePrefix) {
+                                mutableStateOf(remoteUiPreferences.getBoolean("${remoteUiPreferencePrefix}_keyboard", true))
+                            }
+                            fun saveRemoteVisibility(control: String, visible: Boolean) {
+                                remoteUiPreferences.edit()
+                                    .putBoolean("${remoteUiPreferencePrefix}_${control}", visible)
+                                    .apply()
+                            }
                             var remoteEditedDeviceName by remember(device?.id, device?.name, editingDeviceNameId) {
                                 mutableStateOf(device?.let { deviceNameDrafts[it.id] ?: it.name }.orEmpty())
                             }
-                            val screenBitmap = remember(device?.id, device?.screenJpegBase64) {
-                                val encoded = device?.screenJpegBase64.orEmpty()
+                            val screenBitmap = remember(device?.id, remoteScreenFrameBase64) {
+                                val encoded = remoteScreenFrameBase64
                                 if (encoded.isBlank()) null else try {
                                     val bytes = Base64.decode(encoded, Base64.DEFAULT)
                                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
@@ -4608,6 +4575,54 @@ Page.DIAGNOSTICS -> {
                                 (device == null || device.id == localPcDeviceId)
                             val remoteOnline = localBridgeSelected ||
                                 (device?.isOnlineAt(presenceNowMillis) == true && signedIn && device.id != localPcDeviceId)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconToggleButton(
+                                    checked = showScreenPreview,
+                                    onCheckedChange = {
+                                        showScreenPreview = it
+                                        saveRemoteVisibility("screen", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Tv,
+                                        contentDescription = if (showScreenPreview) "Ekran görünümünü gizle" else "Ekran görünümünü göster",
+                                        tint = if (showScreenPreview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                                IconToggleButton(
+                                    checked = showTouchpadPanel,
+                                    onCheckedChange = {
+                                        showTouchpadPanel = it
+                                        saveRemoteVisibility("touchpad", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.TouchApp,
+                                        contentDescription = if (showTouchpadPanel) "Touchpad alanını gizle" else "Touchpad alanını göster",
+                                        tint = if (showTouchpadPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                                IconToggleButton(
+                                    checked = showKeyboardPanel,
+                                    onCheckedChange = {
+                                        showKeyboardPanel = it
+                                        saveRemoteVisibility("keyboard", it)
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Keyboard,
+                                        contentDescription = if (showKeyboardPanel) "Klavye satırını gizle" else "Klavye satırını göster",
+                                        tint = if (showKeyboardPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .55f)
+                                    )
+                                }
+                            }
                             Row(
                                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -4622,7 +4637,7 @@ Page.DIAGNOSTICS -> {
                                             localBridgeSelected -> "Bağlı • Yerel bağlantı"
                                             device == null -> "Bu hesaba bağlı bilgisayar bekleniyor"
                                             device.id == localPcDeviceId -> "Çevrimdışı • Bağlantıyı yeniden test et"
-                                            remoteOnline -> "Bağlı • " + device.platform
+                                            remoteOnline -> "Çevrimiçi • son heartbeat güncel"
                                             else -> "Çevrimdışı • Bilgisayar bekleniyor"
                                         },
                                         fontSize = 11.sp,
@@ -4640,7 +4655,14 @@ Page.DIAGNOSTICS -> {
                                     Box(Modifier.size(9.dp))
                                 }
                             }
-                            if (device?.connectionMode == "firebase-agent") {
+                            if (device?.connectionMode == "firebase-agent" && remoteOnline) {
+                                Text(
+                                    "Çevrimiçi durumu son heartbeat'i gösterir; her komutun teslim sonucu ayrıca doğrulanır.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
+                                )
+                            }
+                            if (device?.connectionMode == "firebase-agent" && showScreenPreview) {
                                 Text("Windows masaüstü", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                 if (screenBitmap != null) {
                                     Image(
@@ -4653,7 +4675,7 @@ Page.DIAGNOSTICS -> {
                                         contentScale = ContentScale.Fit
                                     )
                                     Text(
-                                        "Ekran önizlemesi yaklaşık 1–2 saniyede bir güncellenir. Kumanda ve fare komutları ayrıca gönderilir.",
+                                        "Ekran önizlemesi bağlantı ve bilgisayar durumuna göre yenilenir; sabit gecikme garantisi yoktur.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .65f)
                                     )
@@ -4689,6 +4711,8 @@ Page.DIAGNOSTICS -> {
                             TvRemotePanel(
                                 enabled = remoteOnline,
                                 mouseEnabled = remoteOnline && !localBridgeSelected,
+                                showTouchpad = showTouchpadPanel,
+                                showKeyboard = showKeyboardPanel,
                                 onCommand = { commandName, payload ->
                                     if (!signedIn) {
                                         feedback = "Devam etmek için önce giriş yap."
