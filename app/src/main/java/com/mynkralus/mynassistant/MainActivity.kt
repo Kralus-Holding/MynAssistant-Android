@@ -3939,7 +3939,7 @@ private fun AssistantScreen(
                                 Text("Bu hesaba bağlı Windows bilgisayarı bulunamadı.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
                             } else {
                                 pcDevices.distinctBy { it.id }.forEach { device ->
-                                    val deviceOnlineNow = device.isOnlineAt(presenceNowMillis)
+                                    val deviceOnlineNow = if (device.id == localPcDeviceId) localPcConnected else device.isOnlineAt(presenceNowMillis)
                                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
