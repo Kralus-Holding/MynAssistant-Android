@@ -20,6 +20,11 @@ import java.io.IOException
  * It releases AudioRecord and all KWS native resources before invoking onWakeWordDetected,
  * so the command ASR can acquire the microphone afterwards.
  */
+internal class WakeNativeLibraryLoadException(cause: LinkageError) : IOException(
+    "Yerel ses/uyandırma kütüphanesi yüklenemedi. APK'nın doğru sürümünü yeniden indirip kurun.",
+    cause
+)
+
 internal class MynSherpaWakeWordEngine(
     private val modelDirectory: File,
     private val onReady: () -> Unit,
@@ -150,6 +155,11 @@ internal class MynSherpaWakeWordEngine(
                     }
                 }
             }
+        } catch (error: LinkageError) {
+            // Native JNI libraries can be missing or incompatible. Convert this
+            // Error into the existing actionable service error path instead of
+            // silently killing the worker thread.
+            if (!stopRequested) failure = WakeNativeLibraryLoadException(error)
         } catch (error: Exception) {
             if (!stopRequested) failure = error
         } finally {

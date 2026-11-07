@@ -318,9 +318,14 @@ class MynWakeWordService : Service() {
             onFailure = { error ->
                 mainHandler.post {
                     if (closed || userRequestedStop || serviceFailed) return@post
+                    val nativeLibraryMissing = error is WakeNativeLibraryLoadException
                     fail(
-                        "MYN-WAKE-8031",
-                        "Düşük güç uyandırma motoru çalışırken durdu.",
+                        if (nativeLibraryMissing) "MYN-WAKE-8033" else "MYN-WAKE-8031",
+                        if (nativeLibraryMissing) {
+                            "Ses/uyandırma kütüphanesi yüklenemedi. Uygulamayı doğru APK ile yeniden kurup tekrar deneyin."
+                        } else {
+                            "Düşük güç uyandırma motoru çalışırken durdu."
+                        },
                         "${error.javaClass.name}: ${error.message}"
                     )
                     stopSelf()
